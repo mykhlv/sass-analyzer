@@ -23,18 +23,20 @@ pub const EXPR_START: TokenSet = TokenSet::new(&[
 // 6         * / %        left    11       12
 // 7 (pfx)   - + not      prefix  -        13
 
-fn prefix_bp(kind: SyntaxKind, text: &str) -> Option<u8> {
+fn prefix_bp(kind: SyntaxKind, text: &str, ctx: ParseContext) -> Option<u8> {
     match kind {
         MINUS | PLUS => Some(13),
-        IDENT if text == "not" => Some(13),
+        // `not` is only a prefix operator in SassScript; in CssValue it's a plain ident
+        IDENT if text == "not" && ctx == ParseContext::SassScript => Some(13),
         _ => None,
     }
 }
 
 fn infix_bp(kind: SyntaxKind, text: &str, ctx: ParseContext) -> Option<(u8, u8)> {
     match kind {
-        IDENT if text == "or" => Some((1, 2)),
-        IDENT if text == "and" => Some((3, 4)),
+        // `or`/`and` are infix operators only in SassScript; plain idents in CssValue
+        IDENT if text == "or" && ctx == ParseContext::SassScript => Some((1, 2)),
+        IDENT if text == "and" && ctx == ParseContext::SassScript => Some((3, 4)),
         EQ_EQ | BANG_EQ => Some((5, 6)),
         LT | GT | LT_EQ | GT_EQ => Some((7, 8)),
         PLUS | MINUS => Some((9, 10)),
@@ -122,7 +124,7 @@ fn lhs(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarker> {
     let kind = p.current();
     let text = p.current_text();
 
-    if let Some(r_bp) = prefix_bp(kind, text) {
+    if let Some(r_bp) = prefix_bp(kind, text, ctx) {
         let m = p.start();
         p.bump(); // operator
         expr_bp(p, r_bp, ctx);
@@ -175,18 +177,18 @@ fn quoted_string(p: &mut Parser<'_>) -> CompletedMarker {
     m.complete(p, STRING_LITERAL)
 }
 
-fn interpolated_string(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
+fn interpolated_string(p: &mut Parser<'_>, _ctx: ParseContext) -> CompletedMarker {
     let m = p.start();
     p.bump(); // STRING_START
-    // Parse expression inside #{...}
+    // Expressions inside #{...} are always SassScript (/ is division, etc.)
     if p.at_ts(EXPR_START) {
-        expr(p, ctx);
+        expr(p, ParseContext::SassScript);
     }
     // Consume STRING_MID* (text between }...#{) + inner expressions
     while p.at(STRING_MID) {
         p.bump(); // STRING_MID
         if p.at_ts(EXPR_START) {
-            expr(p, ctx);
+            expr(p, ParseContext::SassScript);
         }
     }
     p.expect(STRING_END);
@@ -228,9 +230,8 @@ fn ident_or_call(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarke
         return Some(m.complete(p, NULL_LITERAL));
     }
 
-    // `and`, `or`, `not` are handled as operators, not atoms
-    // `not` is prefix, `and`/`or` are infix — don't consume as atom
-    if text == "and" || text == "or" {
+    // In SassScript, `and`/`or` are infix operators — don't consume as atom
+    if ctx == ParseContext::SassScript && (text == "and" || text == "or") {
         return None;
     }
 
@@ -496,42 +497,45 @@ fn calc_product(p: &mut Parser<'_>) {
 
 /// Parse a single calc value: number, dimension, variable, nested calc, or parenthesized.
 fn calc_value(p: &mut Parser<'_>) {
-    let m = p.start();
-    match p.current() {
+    let Ok(mut g) = p.depth_guard() else {
+        return;
+    };
+    let m = g.start();
+    match g.current() {
         NUMBER => {
-            let _ = number_or_dimension(p);
+            let _ = number_or_dimension(&mut g);
         }
         DOLLAR => {
-            let _ = variable_ref(p);
+            let _ = variable_ref(&mut g);
         }
         IDENT => {
             // Nested function call inside calc (e.g., `calc(min(10px, 5vw) + 1rem)`)
-            if p.nth(1) == LPAREN && !p.nth_has_whitespace_before(1) {
-                let name = p.current_text();
+            if g.nth(1) == LPAREN && !g.nth_has_whitespace_before(1) {
+                let name = g.current_text();
                 if CALC_NAMES.iter().any(|n| name.eq_ignore_ascii_case(n)) {
-                    let _ = calculation(p);
-                    m.abandon(p);
+                    let _ = calculation(&mut g);
+                    m.abandon(&mut g);
                     return;
                 }
             }
             // Plain ident (e.g., env(safe-area-inset-top))
-            p.bump();
+            g.bump();
         }
         LPAREN => {
-            p.bump(); // (
-            calc_sum(p);
-            p.expect(RPAREN);
+            g.bump(); // (
+            calc_sum(&mut g);
+            g.expect(RPAREN);
         }
         MINUS | PLUS => {
             // Unary inside calc
-            p.bump();
-            calc_value(p);
+            g.bump();
+            calc_value(&mut g);
         }
         _ => {
-            p.error("expected value in calculation");
+            g.error("expected value in calculation");
         }
     }
-    let _ = m.complete(p, CALC_VALUE);
+    let _ = m.complete(&mut g, CALC_VALUE);
 }
 
 // ── Special functions ──────────────────────────────────────────────

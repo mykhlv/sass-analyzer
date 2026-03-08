@@ -2745,3 +2745,89 @@ fn round_trip_boolean_ops() {
     let tree = SyntaxNode::new_root(green);
     assert_eq!(tree.text().to_string(), source);
 }
+
+// ── Regression tests (code review fixes) ─────────────────────────
+
+#[test]
+fn calc_deeply_nested_parens() {
+    // Regression: calc_value had no depth_guard → stack overflow on deep nesting
+    let mut source = String::from("div { width: calc(");
+    for _ in 0..260 {
+        source.push('(');
+    }
+    source.push_str("1px");
+    for _ in 0..260 {
+        source.push(')');
+    }
+    source.push_str("); }");
+    let (green, errors) = sass_parser::parse(&source);
+    let tree = SyntaxNode::new_root(green);
+    // Should not stack-overflow — depth limit triggers an error instead
+    assert!(
+        !errors.is_empty(),
+        "deeply nested calc should produce nesting error"
+    );
+    assert_eq!(tree.text().to_string(), source, "lossless round-trip");
+}
+
+#[test]
+fn css_value_not_is_plain_ident() {
+    // Regression: `not` was always parsed as unary prefix, even in CssValue context
+    check(
+        "div { content: not; }",
+        expect![[r#"
+            SOURCE_FILE@0..21
+              RULE_SET@0..21
+                SELECTOR_LIST@0..3
+                  SELECTOR@0..3
+                    SIMPLE_SELECTOR@0..3
+                      IDENT@0..3 "div"
+                BLOCK@3..21
+                  WHITESPACE@3..4 " "
+                  LBRACE@4..5 "{"
+                  DECLARATION@5..19
+                    PROPERTY@5..13
+                      WHITESPACE@5..6 " "
+                      IDENT@6..13 "content"
+                    COLON@13..14 ":"
+                    VALUE@14..18
+                      VALUE@14..18
+                        WHITESPACE@14..15 " "
+                        IDENT@15..18 "not"
+                    SEMICOLON@18..19 ";"
+                  WHITESPACE@19..20 " "
+                  RBRACE@20..21 "}"
+        "#]],
+    );
+}
+
+#[test]
+fn css_value_and_or_are_plain_idents() {
+    // Regression: `and`/`or` returned None from ident_or_call even in CssValue context
+    check(
+        "div { content: and; }",
+        expect![[r#"
+            SOURCE_FILE@0..21
+              RULE_SET@0..21
+                SELECTOR_LIST@0..3
+                  SELECTOR@0..3
+                    SIMPLE_SELECTOR@0..3
+                      IDENT@0..3 "div"
+                BLOCK@3..21
+                  WHITESPACE@3..4 " "
+                  LBRACE@4..5 "{"
+                  DECLARATION@5..19
+                    PROPERTY@5..13
+                      WHITESPACE@5..6 " "
+                      IDENT@6..13 "content"
+                    COLON@13..14 ":"
+                    VALUE@14..18
+                      VALUE@14..18
+                        WHITESPACE@14..15 " "
+                        IDENT@15..18 "and"
+                    SEMICOLON@18..19 ";"
+                  WHITESPACE@19..20 " "
+                  RBRACE@20..21 "}"
+        "#]],
+    );
+}
