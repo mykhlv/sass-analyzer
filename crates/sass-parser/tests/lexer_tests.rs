@@ -974,6 +974,278 @@ fn url_interpolation_only() {
     );
 }
 
+// ── Comprehensive edge cases (1.17) ──────────────────────────────────
+
+#[test]
+fn nested_interpolation_with_expression() {
+    // Plan example: "a #{$b + "c #{$d}"}"
+    assert_eq!(
+        lex("\"a #{$b + \"c #{$d}\"}\""),
+        vec![
+            (STRING_START, "\"a "),
+            (HASH_LBRACE, "#{"),
+            (DOLLAR, "$"),
+            (IDENT, "b"),
+            (WHITESPACE, " "),
+            (PLUS, "+"),
+            (WHITESPACE, " "),
+            (STRING_START, "\"c "),
+            (HASH_LBRACE, "#{"),
+            (DOLLAR, "$"),
+            (IDENT, "d"),
+            (RBRACE, "}"),
+            (STRING_END, "\""),
+            (RBRACE, "}"),
+            (STRING_END, "\""),
+        ]
+    );
+}
+
+#[test]
+fn dot_unicode_ident() {
+    // .café — class selector with unicode identifier
+    assert_eq!(lex(".café"), vec![(DOT, "."), (IDENT, "café")]);
+}
+
+#[test]
+fn dollar_unicode_ident() {
+    // $über — variable with unicode identifier
+    assert_eq!(lex("$über"), vec![(DOLLAR, "$"), (IDENT, "über")]);
+}
+
+#[test]
+fn multibyte_byte_offsets() {
+    // Verify TextRange byte offsets are correct for multi-byte chars.
+    // "café" = 5 bytes (c=1, a=1, f=1, é=2), "x" starts at byte 6
+    let mut lexer = Lexer::new("café x");
+    let (k1, t1) = lexer.next_token();
+    assert_eq!(k1, IDENT);
+    assert_eq!(t1, "café");
+    assert_eq!(t1.len(), 5); // 'é' is 2 bytes in UTF-8
+
+    let (k2, t2) = lexer.next_token();
+    assert_eq!(k2, WHITESPACE);
+    assert_eq!(t2, " ");
+
+    let (k3, t3) = lexer.next_token();
+    assert_eq!(k3, IDENT);
+    assert_eq!(t3, "x");
+
+    // Verify total byte offsets
+    assert_eq!(t1.len() + t2.len() + t3.len(), "café x".len());
+}
+
+#[test]
+fn multibyte_in_string() {
+    // Multi-byte chars in strings should have correct byte offsets
+    let tokens = lex("\"héllo\"");
+    assert_eq!(tokens, vec![(QUOTED_STRING, "\"héllo\"")]);
+    // "héllo" = 1 (") + 1 (h) + 2 (é) + 3 (llo) + 1 (") = 8 bytes
+    assert_eq!(tokens[0].1.len(), 8);
+}
+
+#[test]
+fn multibyte_url_content() {
+    // Unicode in URL content
+    assert_eq!(
+        lex("url(pàth)"),
+        vec![
+            (IDENT, "url"),
+            (LPAREN, "("),
+            (URL_CONTENTS, "pàth"),
+            (RPAREN, ")"),
+        ]
+    );
+    // "pàth" = 1 (p) + 2 (à) + 2 (th) = 5 bytes
+    assert_eq!("pàth".len(), 5);
+}
+
+#[test]
+fn consecutive_comments() {
+    assert_eq!(
+        lex("/* a *//* b */"),
+        vec![
+            (MULTI_LINE_COMMENT, "/* a */"),
+            (MULTI_LINE_COMMENT, "/* b */"),
+        ]
+    );
+}
+
+#[test]
+fn at_keyword_ident() {
+    assert_eq!(lex("@import"), vec![(AT, "@"), (IDENT, "import")]);
+}
+
+#[test]
+fn at_mixin_with_args() {
+    assert_eq!(
+        lex("@mixin foo($x)"),
+        vec![
+            (AT, "@"),
+            (IDENT, "mixin"),
+            (WHITESPACE, " "),
+            (IDENT, "foo"),
+            (LPAREN, "("),
+            (DOLLAR, "$"),
+            (IDENT, "x"),
+            (RPAREN, ")"),
+        ]
+    );
+}
+
+#[test]
+fn placeholder_selector() {
+    assert_eq!(
+        lex("%placeholder"),
+        vec![(PERCENT, "%"), (IDENT, "placeholder")]
+    );
+}
+
+#[test]
+fn selector_combinator_sequence() {
+    assert_eq!(
+        lex("div > .class ~ #id + span"),
+        vec![
+            (IDENT, "div"),
+            (WHITESPACE, " "),
+            (GT, ">"),
+            (WHITESPACE, " "),
+            (DOT, "."),
+            (IDENT, "class"),
+            (WHITESPACE, " "),
+            (TILDE, "~"),
+            (WHITESPACE, " "),
+            (HASH, "#"),
+            (IDENT, "id"),
+            (WHITESPACE, " "),
+            (PLUS, "+"),
+            (WHITESPACE, " "),
+            (IDENT, "span"),
+        ]
+    );
+}
+
+#[test]
+fn attribute_selector() {
+    assert_eq!(
+        lex("[data-value^=\"foo\"]"),
+        vec![
+            (LBRACKET, "["),
+            (IDENT, "data-value"),
+            (CARET_EQ, "^="),
+            (QUOTED_STRING, "\"foo\""),
+            (RBRACKET, "]"),
+        ]
+    );
+}
+
+#[test]
+fn important_declaration() {
+    assert_eq!(
+        lex("color: red !important;"),
+        vec![
+            (IDENT, "color"),
+            (COLON, ":"),
+            (WHITESPACE, " "),
+            (IDENT, "red"),
+            (WHITESPACE, " "),
+            (BANG, "!"),
+            (IDENT, "important"),
+            (SEMICOLON, ";"),
+        ]
+    );
+}
+
+#[test]
+fn sass_variable_expression() {
+    assert_eq!(
+        lex("$total: $a + $b * 2;"),
+        vec![
+            (DOLLAR, "$"),
+            (IDENT, "total"),
+            (COLON, ":"),
+            (WHITESPACE, " "),
+            (DOLLAR, "$"),
+            (IDENT, "a"),
+            (WHITESPACE, " "),
+            (PLUS, "+"),
+            (WHITESPACE, " "),
+            (DOLLAR, "$"),
+            (IDENT, "b"),
+            (WHITESPACE, " "),
+            (STAR, "*"),
+            (WHITESPACE, " "),
+            (NUMBER, "2"),
+            (SEMICOLON, ";"),
+        ]
+    );
+}
+
+#[test]
+fn interpolation_in_selector() {
+    assert_eq!(
+        lex(".#{$class}"),
+        vec![
+            (DOT, "."),
+            (HASH_LBRACE, "#{"),
+            (DOLLAR, "$"),
+            (IDENT, "class"),
+            (RBRACE, "}"),
+        ]
+    );
+}
+
+#[test]
+fn parent_selector_suffix() {
+    assert_eq!(lex("&__element"), vec![(AMP, "&"), (IDENT, "__element"),]);
+}
+
+#[test]
+fn rest_args() {
+    assert_eq!(
+        lex("$args..."),
+        vec![(DOLLAR, "$"), (IDENT, "args"), (DOT_DOT_DOT, "..."),]
+    );
+}
+
+#[test]
+fn triple_nested_interpolation() {
+    // Three levels of nesting
+    assert_eq!(
+        lex("\"#{\"#{\"inner\"}\"}\""),
+        vec![
+            (STRING_START, "\""),
+            (HASH_LBRACE, "#{"),
+            (STRING_START, "\""),
+            (HASH_LBRACE, "#{"),
+            (QUOTED_STRING, "\"inner\""),
+            (RBRACE, "}"),
+            (STRING_END, "\""),
+            (RBRACE, "}"),
+            (STRING_END, "\""),
+        ]
+    );
+}
+
+#[test]
+fn all_whitespace_chars_combined() {
+    // space, tab, newline, carriage return, form feed — all as single token
+    assert_eq!(lex(" \t\n\r\x0C"), vec![(WHITESPACE, " \t\n\r\x0C")]);
+}
+
+#[test]
+fn empty_interpolation() {
+    assert_eq!(
+        lex("\"#{}\""),
+        vec![
+            (STRING_START, "\""),
+            (HASH_LBRACE, "#{"),
+            (RBRACE, "}"),
+            (STRING_END, "\""),
+        ]
+    );
+}
+
 // ── Round-trip ────────────────────────────────────────────────────────
 
 #[test]
@@ -1030,6 +1302,21 @@ fn round_trip_basic() {
         "url(data:image/png;base64,abc==)",
         "url(path\\)end)",
         "background: url(img.png);",
+        // Comprehensive edge cases
+        "\"a #{$b + \"c #{$d}\"}\"",
+        ".café",
+        "$über",
+        "café x",
+        "\"héllo\"",
+        "url(pàth)",
+        "@import",
+        "%placeholder",
+        ".#{$class}",
+        "&__element",
+        "$args...",
+        "\"#{\"#{\"inner\"}\"}\"",
+        " \t\n\r\x0C",
+        "\"#{}\"",
         // BOM
         "\u{FEFF}hello",
         // CRLF
