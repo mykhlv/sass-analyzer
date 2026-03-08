@@ -34,25 +34,46 @@ pub enum SyntaxKind {
     DOLLAR,         // $
     HASH,           // #
 
-    // ── Tokens: literals & identifiers ───────────────────────────────
+    // ── Tokens: multi-char operators ───────────────────────────────
+    HASH_LBRACE,    // #{
+    DOT_DOT_DOT,   // ...
+    EQ_EQ,          // ==
+    BANG_EQ,        // !=
+    LT_EQ,          // <=
+    GT_EQ,          // >=
+    COLON_COLON,    // ::
+
+    // ── Tokens: attribute selector operators ───────────────────────
+    TILDE_EQ,       // ~=
+    PIPE_EQ,        // |=
+    CARET_EQ,       // ^=
+    DOLLAR_EQ,      // $=
+    STAR_EQ,        // *=
+
+    // ── Tokens: literals & identifiers ─────────────────────────────
     IDENT,
     NUMBER,
     QUOTED_STRING,
+    STRING_START,   // opening quote + text before first #{
+    STRING_MID,     // text between }...#{
+    STRING_END,     // text after last } + closing quote
+    URL_CONTENTS,   // unquoted url() content segment
+    UNICODE_RANGE,  // U+0025-00FF
 
-    // ── Tokens: trivia ───────────────────────────────────────────────
+    // ── Tokens: trivia ─────────────────────────────────────────────
     WHITESPACE,
     SINGLE_LINE_COMMENT,
     MULTI_LINE_COMMENT,
 
-    // ── Tokens: special ──────────────────────────────────────────────
+    // ── Tokens: special ────────────────────────────────────────────
     ERROR,
     EOF,
 
-    // ── Sentinel: end of token range ─────────────────────────────────
+    // ── Sentinel: end of token range ───────────────────────────────
     #[doc(hidden)]
     __LAST_TOKEN,
 
-    // ── Nodes ────────────────────────────────────────────────────────
+    // ── Nodes ──────────────────────────────────────────────────────
     SOURCE_FILE,
     RULE_SET,
     SELECTOR_LIST,
@@ -104,21 +125,38 @@ impl From<u16> for SyntaxKind {
             22 => AT,
             23 => DOLLAR,
             24 => HASH,
-            25 => IDENT,
-            26 => NUMBER,
-            27 => QUOTED_STRING,
-            28 => WHITESPACE,
-            29 => SINGLE_LINE_COMMENT,
-            30 => MULTI_LINE_COMMENT,
-            31 => ERROR,
-            32 => EOF,
-            33 => __LAST_TOKEN,
-            34 => SOURCE_FILE,
-            35 => RULE_SET,
-            36 => SELECTOR_LIST,
-            37 => DECLARATION,
-            38 => BLOCK,
-            39 => PROPERTY,
+            25 => HASH_LBRACE,
+            26 => DOT_DOT_DOT,
+            27 => EQ_EQ,
+            28 => BANG_EQ,
+            29 => LT_EQ,
+            30 => GT_EQ,
+            31 => COLON_COLON,
+            32 => TILDE_EQ,
+            33 => PIPE_EQ,
+            34 => CARET_EQ,
+            35 => DOLLAR_EQ,
+            36 => STAR_EQ,
+            37 => IDENT,
+            38 => NUMBER,
+            39 => QUOTED_STRING,
+            40 => STRING_START,
+            41 => STRING_MID,
+            42 => STRING_END,
+            43 => URL_CONTENTS,
+            44 => UNICODE_RANGE,
+            45 => WHITESPACE,
+            46 => SINGLE_LINE_COMMENT,
+            47 => MULTI_LINE_COMMENT,
+            48 => ERROR,
+            49 => EOF,
+            50 => __LAST_TOKEN,
+            51 => SOURCE_FILE,
+            52 => RULE_SET,
+            53 => SELECTOR_LIST,
+            54 => DECLARATION,
+            55 => BLOCK,
+            56 => PROPERTY,
             _ => panic!("invalid SyntaxKind: {raw}"),
         }
     }

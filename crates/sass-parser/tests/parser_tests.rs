@@ -3,7 +3,7 @@ use sass_parser::input::Input;
 use sass_parser::parser::Parser;
 use sass_parser::syntax::SassLanguage;
 use sass_parser::syntax_kind::*;
-use text_size::{TextRange, TextSize};
+use sass_parser::text_range::{TextRange, TextSize};
 
 /// Build an `Input` from raw tokens for testing.
 /// Real lexer comes in Phase 1.

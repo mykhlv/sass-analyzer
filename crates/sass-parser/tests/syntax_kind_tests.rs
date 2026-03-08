@@ -16,7 +16,16 @@ fn is_token_vs_is_node() {
     assert!(WHITESPACE.is_token());
     assert!(ERROR.is_token());
     assert!(EOF.is_token());
+    assert!(HASH_LBRACE.is_token());
+    assert!(COLON_COLON.is_token());
+    assert!(TILDE_EQ.is_token());
+    assert!(STRING_START.is_token());
+    assert!(URL_CONTENTS.is_token());
+    assert!(UNICODE_RANGE.is_token());
     assert!(!SEMICOLON.is_node());
+
+    assert!(!__LAST_TOKEN.is_token());
+    assert!(!__LAST_TOKEN.is_node());
 
     assert!(SOURCE_FILE.is_node());
     assert!(RULE_SET.is_node());
