@@ -28,8 +28,16 @@ pub fn source_file(p: &mut Parser<'_>) {
         } else if p.at(SEMICOLON) {
             p.bump();
         } else {
-            // Skip unknown tokens (e.g. `@import`, `$var`) until next statement start
-            p.err_recover("expected rule", STMT_RECOVERY);
+            // Wrap garbage tokens in an ERROR node, always consuming at least one
+            // to guarantee progress (tokens like AT, DOLLAR, RBRACE are in
+            // STMT_RECOVERY but not handled above).
+            let m = p.start();
+            p.error("expected rule");
+            p.bump();
+            while !p.at_end() && !p.at_ts(selectors::SELECTOR_START) && !p.at(SEMICOLON) {
+                p.bump();
+            }
+            let _ = m.complete(p, SyntaxKind::ERROR);
         }
     }
     let _ = m.complete(p, SOURCE_FILE);
@@ -140,7 +148,11 @@ fn scan_for_declaration_end(p: &Parser<'_>, start: usize) -> bool {
 
 /// 2.5: Parse rule set — selector list + `{` block `}`.
 fn rule_set(p: &mut Parser<'_>) {
-    let Ok(mut g) = p.depth_guard() else { return };
+    let Ok(mut g) = p.depth_guard() else {
+        // Skip past this construct to prevent infinite loops at depth limit
+        skip_until_block_end(p);
+        return;
+    };
     let m = g.start();
     selectors::selector_list(&mut g);
     if g.at(LBRACE) {
@@ -151,21 +163,58 @@ fn rule_set(p: &mut Parser<'_>) {
     let _ = m.complete(&mut g, RULE_SET);
 }
 
-/// Parse a `{ ... }` block containing declarations and/or nested rules.
-pub(super) fn block(p: &mut Parser<'_>) {
-    let Ok(mut p) = p.depth_guard() else { return };
-    assert!(p.at(LBRACE));
+/// Skip tokens until `}` or EOF, consuming a balanced `{ ... }` block if present.
+/// Wraps all skipped tokens in an ERROR node.
+fn skip_until_block_end(p: &mut Parser<'_>) {
     let m = p.start();
-    p.bump(); // {
-    while !p.at(RBRACE) && !p.at_end() {
-        if p.at(SEMICOLON) {
-            p.bump();
-        } else if p.at_ts(selectors::SELECTOR_START) {
-            block_item(&mut p);
-        } else {
-            p.err_and_bump("expected declaration or nested rule");
+    let mut depth: u32 = 0;
+    let mut consumed = false;
+    while !p.at_end() {
+        match p.current() {
+            LBRACE => {
+                depth += 1;
+                p.bump();
+                consumed = true;
+            }
+            RBRACE => {
+                if depth == 0 {
+                    break;
+                }
+                depth -= 1;
+                p.bump();
+            }
+            _ => {
+                p.bump();
+                consumed = true;
+            }
         }
     }
-    p.expect(RBRACE);
-    let _ = m.complete(&mut p, BLOCK);
+    if consumed {
+        let _ = m.complete(p, SyntaxKind::ERROR);
+    } else {
+        m.abandon(p);
+    }
+}
+
+/// Parse a `{ ... }` block containing declarations and/or nested rules.
+pub(super) fn block(p: &mut Parser<'_>) {
+    let Ok(mut g) = p.depth_guard() else {
+        // Skip past the block to prevent infinite loops at depth limit
+        skip_until_block_end(p);
+        return;
+    };
+    assert!(g.at(LBRACE));
+    let m = g.start();
+    g.bump(); // {
+    while !g.at(RBRACE) && !g.at_end() {
+        if g.at(SEMICOLON) {
+            g.bump();
+        } else if g.at_ts(selectors::SELECTOR_START) {
+            block_item(&mut g);
+        } else {
+            g.err_and_bump("expected declaration or nested rule");
+        }
+    }
+    g.expect(RBRACE);
+    let _ = m.complete(&mut g, BLOCK);
 }
