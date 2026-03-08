@@ -2,7 +2,7 @@ use sass_parser::syntax_kind::*;
 
 #[test]
 fn syntax_kind_round_trips_through_u16() {
-    for raw in 0..=PROPERTY as u16 {
+    for raw in 0..=INTERPOLATION as u16 {
         let kind = SyntaxKind::from(raw);
         let back: u16 = kind.into();
         assert_eq!(raw, back, "round-trip failed for {kind:?}");

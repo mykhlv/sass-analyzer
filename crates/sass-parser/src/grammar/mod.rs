@@ -7,7 +7,7 @@ use crate::token_set::TokenSet;
 #[rustfmt::skip]
 pub const STMT_RECOVERY: TokenSet = TokenSet::new(&[
     IDENT, DOT, HASH, COLON, COLON_COLON, LBRACKET, AMP, PERCENT, STAR,
-    AT, DOLLAR, RBRACE,
+    AT, DOLLAR, RBRACE, SEMICOLON,
 ]);
 
 /// Tokens that terminate a block — used to stop error recovery inside blocks.
