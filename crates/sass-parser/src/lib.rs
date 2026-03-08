@@ -4,6 +4,7 @@ pub mod token_set;
 
 pub mod event;
 pub mod input;
+pub mod lexer;
 pub mod parser;
 pub mod syntax;
 
