@@ -1,0 +1,29 @@
+[package]
+name = "sass-parser-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+sass-parser = { path = ".." }
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "fuzz_lexer_crash"
+path = "fuzz_targets/fuzz_lexer_crash.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_lexer_roundtrip"
+path = "fuzz_targets/fuzz_lexer_roundtrip.rs"
+doc = false
