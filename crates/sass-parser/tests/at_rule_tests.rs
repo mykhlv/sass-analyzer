@@ -2001,3 +2001,221 @@ fn container_with_name() {
         "#]],
     );
 }
+
+// ── Error recovery: @for ─────────────────────────────────────────────────
+
+#[test]
+fn error_for_missing_from() {
+    check(
+        "@for $i 1 through 10 { }",
+        expect![[r#"
+            SOURCE_FILE@0..24
+              FOR_RULE@0..24
+                AT@0..1 "@"
+                IDENT@1..4 "for"
+                WHITESPACE@4..5 " "
+                DOLLAR@5..6 "$"
+                IDENT@6..7 "i"
+                NUMBER_LITERAL@7..9
+                  WHITESPACE@7..8 " "
+                  NUMBER@8..9 "1"
+                WHITESPACE@9..10 " "
+                IDENT@10..17 "through"
+                NUMBER_LITERAL@17..20
+                  WHITESPACE@17..18 " "
+                  NUMBER@18..20 "10"
+                BLOCK@20..24
+                  WHITESPACE@20..21 " "
+                  LBRACE@21..22 "{"
+                  WHITESPACE@22..23 " "
+                  RBRACE@23..24 "}"
+            errors:
+              8..9: expected `from`
+        "#]],
+    );
+}
+
+#[test]
+fn error_for_missing_through() {
+    check(
+        "@for $i from 1 10 { }",
+        expect![[r#"
+            SOURCE_FILE@0..21
+              FOR_RULE@0..21
+                AT@0..1 "@"
+                IDENT@1..4 "for"
+                WHITESPACE@4..5 " "
+                DOLLAR@5..6 "$"
+                IDENT@6..7 "i"
+                WHITESPACE@7..8 " "
+                IDENT@8..12 "from"
+                NUMBER_LITERAL@12..14
+                  WHITESPACE@12..13 " "
+                  NUMBER@13..14 "1"
+                NUMBER_LITERAL@14..17
+                  WHITESPACE@14..15 " "
+                  NUMBER@15..17 "10"
+                BLOCK@17..21
+                  WHITESPACE@17..18 " "
+                  LBRACE@18..19 "{"
+                  WHITESPACE@19..20 " "
+                  RBRACE@20..21 "}"
+            errors:
+              15..17: expected `through` or `to`
+        "#]],
+    );
+}
+
+// ── Error recovery: @each ────────────────────────────────────────────────
+
+#[test]
+fn error_each_missing_in() {
+    check(
+        "@each $x 1, 2, 3 { }",
+        expect![[r#"
+            SOURCE_FILE@0..20
+              EACH_RULE@0..20
+                AT@0..1 "@"
+                IDENT@1..5 "each"
+                WHITESPACE@5..6 " "
+                DOLLAR@6..7 "$"
+                IDENT@7..8 "x"
+                LIST_EXPR@8..16
+                  NUMBER_LITERAL@8..10
+                    WHITESPACE@8..9 " "
+                    NUMBER@9..10 "1"
+                  COMMA@10..11 ","
+                  NUMBER_LITERAL@11..13
+                    WHITESPACE@11..12 " "
+                    NUMBER@12..13 "2"
+                  COMMA@13..14 ","
+                  NUMBER_LITERAL@14..16
+                    WHITESPACE@14..15 " "
+                    NUMBER@15..16 "3"
+                BLOCK@16..20
+                  WHITESPACE@16..17 " "
+                  LBRACE@17..18 "{"
+                  WHITESPACE@18..19 " "
+                  RBRACE@19..20 "}"
+            errors:
+              9..10: expected `in`
+        "#]],
+    );
+}
+
+// ── Error recovery: @function ────────────────────────────────────────────
+
+#[test]
+fn error_function_missing_name() {
+    check(
+        "@function ($x) { @return $x; }",
+        expect![[r#"
+            SOURCE_FILE@0..30
+              FUNCTION_RULE@0..30
+                AT@0..1 "@"
+                IDENT@1..9 "function"
+                PARAM_LIST@9..14
+                  WHITESPACE@9..10 " "
+                  LPAREN@10..11 "("
+                  PARAM@11..13
+                    DOLLAR@11..12 "$"
+                    IDENT@12..13 "x"
+                  RPAREN@13..14 ")"
+                BLOCK@14..30
+                  WHITESPACE@14..15 " "
+                  LBRACE@15..16 "{"
+                  RETURN_RULE@16..28
+                    WHITESPACE@16..17 " "
+                    AT@17..18 "@"
+                    IDENT@18..24 "return"
+                    VARIABLE_REF@24..27
+                      WHITESPACE@24..25 " "
+                      DOLLAR@25..26 "$"
+                      IDENT@26..27 "x"
+                    SEMICOLON@27..28 ";"
+                  WHITESPACE@28..29 " "
+                  RBRACE@29..30 "}"
+            errors:
+              10..11: expected IDENT
+        "#]],
+    );
+}
+
+// ── Error recovery: @use ─────────────────────────────────────────────────
+
+#[test]
+fn error_use_missing_path() {
+    check(
+        "@use;",
+        expect![[r#"
+            SOURCE_FILE@0..5
+              USE_RULE@0..5
+                AT@0..1 "@"
+                IDENT@1..4 "use"
+                SEMICOLON@4..5 ";"
+            errors:
+              4..5: expected QUOTED_STRING
+        "#]],
+    );
+}
+
+// ── @include with whitespace before parens ───────────────────────────────
+
+#[test]
+fn include_with_whitespace_before_parens() {
+    check(
+        "@include size (100px);",
+        expect![[r#"
+            SOURCE_FILE@0..22
+              INCLUDE_RULE@0..22
+                AT@0..1 "@"
+                IDENT@1..8 "include"
+                WHITESPACE@8..9 " "
+                IDENT@9..13 "size"
+                ARG_LIST@13..21
+                  WHITESPACE@13..14 " "
+                  LPAREN@14..15 "("
+                  ARG@15..20
+                    DIMENSION@15..20
+                      NUMBER@15..18 "100"
+                      IDENT@18..20 "px"
+                  RPAREN@20..21 ")"
+                SEMICOLON@21..22 ";"
+        "#]],
+    );
+}
+
+// ── @content with whitespace before parens ───────────────────────────────
+
+#[test]
+fn content_with_whitespace_before_parens() {
+    check(
+        "@mixin m { @content ($x); }",
+        expect![[r#"
+            SOURCE_FILE@0..27
+              MIXIN_RULE@0..27
+                AT@0..1 "@"
+                IDENT@1..6 "mixin"
+                WHITESPACE@6..7 " "
+                IDENT@7..8 "m"
+                BLOCK@8..27
+                  WHITESPACE@8..9 " "
+                  LBRACE@9..10 "{"
+                  CONTENT_RULE@10..25
+                    WHITESPACE@10..11 " "
+                    AT@11..12 "@"
+                    IDENT@12..19 "content"
+                    ARG_LIST@19..24
+                      WHITESPACE@19..20 " "
+                      LPAREN@20..21 "("
+                      ARG@21..23
+                        VARIABLE_REF@21..23
+                          DOLLAR@21..22 "$"
+                          IDENT@22..23 "x"
+                      RPAREN@23..24 ")"
+                    SEMICOLON@24..25 ";"
+                  WHITESPACE@25..26 " "
+                  RBRACE@26..27 "}"
+        "#]],
+    );
+}

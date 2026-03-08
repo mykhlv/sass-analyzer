@@ -433,3 +433,115 @@ fn parse_normalize_css() {
         "normalize.css should have many rules, got {rule_count}"
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// Golden file: comprehensive SCSS with all parser features
+// ═══════════════════════════════════════════════════════════════════════
+
+#[test]
+fn golden_scss_round_trip() {
+    let source = include_str!("fixtures/golden.scss");
+    let (tree, errors) = parse(source);
+
+    assert_eq!(tree.kind(), SOURCE_FILE);
+    assert_eq!(
+        tree.text().to_string(),
+        source,
+        "lossless round-trip failed for golden.scss"
+    );
+    assert!(
+        errors.is_empty(),
+        "golden.scss should parse without errors, got: {errors:?}"
+    );
+}
+
+#[test]
+fn golden_scss_has_expected_nodes() {
+    let source = include_str!("fixtures/golden.scss");
+    let (tree, _errors) = parse(source);
+
+    fn count_kind(node: &SyntaxNode, kind: SyntaxKind) -> usize {
+        let mut n = if node.kind() == kind { 1 } else { 0 };
+        for child in node.children() {
+            n += count_kind(&child, kind);
+        }
+        n
+    }
+
+    // Variables
+    assert!(
+        count_kind(&tree, VARIABLE_DECL) >= 10,
+        "expected >= 10 variable declarations"
+    );
+    // Mixins
+    assert!(
+        count_kind(&tree, MIXIN_RULE) >= 4,
+        "expected >= 4 @mixin rules"
+    );
+    // Functions
+    assert!(
+        count_kind(&tree, FUNCTION_RULE) >= 3,
+        "expected >= 3 @function rules"
+    );
+    // Includes
+    assert!(
+        count_kind(&tree, INCLUDE_RULE) >= 3,
+        "expected >= 3 @include rules"
+    );
+    // @if
+    assert!(count_kind(&tree, IF_RULE) >= 2, "expected >= 2 @if rules");
+    // @each
+    assert!(
+        count_kind(&tree, EACH_RULE) >= 1,
+        "expected >= 1 @each rule"
+    );
+    // @for
+    assert!(count_kind(&tree, FOR_RULE) >= 1, "expected >= 1 @for rule");
+    // @while
+    assert!(
+        count_kind(&tree, WHILE_RULE) >= 1,
+        "expected >= 1 @while rule"
+    );
+    // Keyframes
+    assert!(
+        count_kind(&tree, KEYFRAMES_RULE) >= 2,
+        "expected >= 2 @keyframes rules"
+    );
+    // Media
+    assert!(
+        count_kind(&tree, MEDIA_RULE) >= 3,
+        "expected >= 3 @media rules"
+    );
+    // @extend
+    assert!(
+        count_kind(&tree, EXTEND_RULE) >= 2,
+        "expected >= 2 @extend rules"
+    );
+    // Interpolations
+    assert!(
+        count_kind(&tree, INTERPOLATION) >= 5,
+        "expected >= 5 interpolations"
+    );
+    // Custom property declarations
+    assert!(
+        count_kind(&tree, CUSTOM_PROPERTY_DECL) >= 5,
+        "expected >= 5 custom property declarations"
+    );
+    // Nested properties
+    assert!(
+        count_kind(&tree, NESTED_PROPERTY) >= 2,
+        "expected >= 2 nested properties"
+    );
+    // @use
+    assert!(count_kind(&tree, USE_RULE) >= 3, "expected >= 3 @use rules");
+    // @forward
+    assert!(
+        count_kind(&tree, FORWARD_RULE) >= 2,
+        "expected >= 2 @forward rules"
+    );
+    // Calculations
+    assert!(
+        count_kind(&tree, CALCULATION) >= 2,
+        "expected >= 2 calculation expressions"
+    );
+}

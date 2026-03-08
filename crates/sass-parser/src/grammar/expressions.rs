@@ -208,8 +208,10 @@ pub(crate) fn interpolated_string(p: &mut Parser<'_>, _ctx: ParseContext) -> Com
 fn color_literal(p: &mut Parser<'_>) -> CompletedMarker {
     let m = p.start();
     p.bump(); // HASH
-    // Hex color: `#` followed by IDENT or NUMBER without whitespace
-    if !p.has_whitespace_before() && (p.at(IDENT) || p.at(NUMBER)) {
+    // Hex color: `#` followed by NUMBER/IDENT tokens without whitespace.
+    // e.g. #333 → HASH NUMBER, #fff → HASH IDENT,
+    //      #3498db → HASH NUMBER IDENT, #00ff00 → HASH NUMBER IDENT
+    while !p.has_whitespace_before() && (p.at(IDENT) || p.at(NUMBER)) {
         p.bump();
     }
     m.complete(p, COLOR_LITERAL)

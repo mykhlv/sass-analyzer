@@ -51,10 +51,10 @@ impl Input {
     /// Each `(SyntaxKind, &str)` must appear in source order; the text slices
     /// are used only for length (byte offsets are computed cumulatively).
     pub fn from_tokens(tokens: &[(SyntaxKind, &str)]) -> Self {
-        let mut kinds = Vec::new();
-        let mut ranges = Vec::new();
+        let mut kinds = Vec::with_capacity(tokens.len());
+        let mut ranges = Vec::with_capacity(tokens.len());
         let mut all_trivia = Vec::new();
-        let mut trivia_starts = Vec::new();
+        let mut trivia_starts = Vec::with_capacity(tokens.len() + 1);
         let mut offset = 0u32;
 
         // Pending trivia count before the next significant token.

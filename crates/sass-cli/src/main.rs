@@ -3,7 +3,6 @@ use std::process;
 
 use clap::{Parser, Subcommand};
 use miette::{Diagnostic, NamedSource, Report, SourceSpan};
-use sass_parser::line_index::LineIndex;
 use sass_parser::syntax::{SyntaxNode, debug_tree};
 
 #[derive(Parser)]
@@ -181,12 +180,9 @@ fn print_diagnostics(
     source: &str,
     errors: &[(String, sass_parser::text_range::TextRange)],
 ) {
-    let line_index = LineIndex::new(source);
-
     for (msg, range) in errors {
         let start: usize = range.start().into();
         let len: usize = range.len().into();
-        let lc = line_index.line_col(range.start());
 
         let err = ParseError {
             src: NamedSource::new(filename, source.to_owned()),
@@ -195,7 +191,6 @@ fn print_diagnostics(
         };
 
         eprintln!("{:?}", Report::new(err));
-        eprintln!("  {filename}:{lc}: {msg}");
     }
 }
 

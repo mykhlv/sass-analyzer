@@ -27,8 +27,8 @@ pub fn include_rule(p: &mut Parser<'_>) {
     p.bump(); // include
     p.expect(IDENT); // mixin name
 
-    // Optional argument list
-    if p.at(LPAREN) && !p.has_whitespace_before() {
+    // Optional argument list (whitespace before `(` is allowed in @include)
+    if p.at(LPAREN) {
         super::expressions::arg_list(p, super::ParseContext::SassScript);
     }
 
@@ -54,7 +54,7 @@ pub fn content_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // content
-    if p.at(LPAREN) && !p.has_whitespace_before() {
+    if p.at(LPAREN) {
         super::expressions::arg_list(p, super::ParseContext::SassScript);
     }
     if !p.at(RBRACE) && !p.at_end() {

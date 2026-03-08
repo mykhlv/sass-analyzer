@@ -1,0 +1,452 @@
+// ═══════════════════════════════════════════════════════════════════════
+// Golden test file — exercises all major parser features.
+// ═══════════════════════════════════════════════════════════════════════
+
+// ── Variables ────────────────────────────────────────────────────────
+
+$primary: #3498db;
+$font-stack: 'Helvetica Neue';
+$base-size: 16px;
+$line-height: 1.5;
+$spacing: (sm: 4px, md: 8px, lg: 16px);
+$enable-shadows: true !default;
+$prefix: 'app' !default !global;
+
+// ── Functions ────────────────────────────────────────────────────────
+
+@function double($value) {
+  @return $value * 2;
+}
+
+@function half($value) {
+  @return $value / 2;
+}
+
+@function add-unit($value, $unit) {
+  @return $value + $unit;
+}
+
+// ── Mixins ───────────────────────────────────────────────────────────
+
+@mixin respond-to($breakpoint) {
+  @if $breakpoint == mobile {
+    @media (max-width: 767px) { @content; }
+  } @else if $breakpoint == tablet {
+    @media (min-width: 768px) and (max-width: 1023px) { @content; }
+  } @else {
+    @media (min-width: 1024px) { @content; }
+  }
+}
+
+@mixin flex-center($direction: row, $gap: 0) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: $direction;
+  @if $gap != 0 {
+    gap: $gap;
+  }
+}
+
+@mixin size($width, $height: $width) {
+  width: $width;
+  height: $height;
+}
+
+// ── Base styles ──────────────────────────────────────────────────────
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: $base-size;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  font-family: $font-stack;
+  font-size: 1rem;
+  line-height: $line-height;
+  color: #333;
+  background-color: #fff;
+}
+
+// ── Selectors ────────────────────────────────────────────────────────
+
+h1, h2, h3, h4, h5, h6 {
+  font-weight: bold;
+  line-height: 1.2;
+}
+
+a {
+  color: $primary;
+  text-decoration: none;
+
+  &:hover,
+  &:focus {
+    text-decoration: underline;
+  }
+
+  &:visited {
+    color: darken($primary, 15%);
+  }
+}
+
+ul > li {
+  list-style: none;
+}
+
+p + p {
+  margin-top: 1em;
+}
+
+h2 ~ p {
+  font-size: 0.9em;
+}
+
+input[type="text"],
+input[type="email"],
+input[type="password"] {
+  border: 1px solid #ccc;
+  padding: 8px 12px;
+  border-radius: 4px;
+}
+
+// ── Component with BEM ───────────────────────────────────────────────
+
+.card {
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: double($base-size);
+  background: #fff;
+
+  &__header {
+    font-size: $base-size * 1.25;
+    font-weight: bold;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 8px;
+    margin-bottom: 16px;
+  }
+
+  &__body {
+    padding: 16px;
+
+    p + p {
+      margin-top: 8px;
+    }
+
+    *:last-child {
+      margin-bottom: 0;
+    }
+  }
+
+  &__footer {
+    border-top: 1px solid #eee;
+    padding-top: 8px;
+    @include flex-center(row, 8px);
+    justify-content: flex-end;
+  }
+
+  &--featured {
+    border-color: $primary;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  }
+
+  &--compact {
+    padding: 8px;
+
+    .card__header {
+      margin-bottom: 8px;
+    }
+  }
+
+  @include respond-to(mobile) {
+    padding: 8px;
+    border-radius: 0;
+  }
+}
+
+// ── Iteration ────────────────────────────────────────────────────────
+
+@each $name, $size in $spacing {
+  .m-#{$name} {
+    margin: $size;
+  }
+  .p-#{$name} {
+    padding: $size;
+  }
+  .mx-#{$name} {
+    margin-left: $size;
+    margin-right: $size;
+  }
+}
+
+@for $i from 1 through 12 {
+  .col-#{$i} {
+    width: calc(100% / 12 * $i);
+    flex: 0 0 auto;
+  }
+}
+
+$counter: 5;
+@while $counter > 0 {
+  .level-#{$counter} {
+    z-index: $counter;
+  }
+  $counter: $counter - 1;
+}
+
+// ── @extend & placeholders ───────────────────────────────────────────
+
+%visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+%clearfix {
+  &::after {
+    content: '';
+    display: table;
+    clear: both;
+  }
+}
+
+.sr-only {
+  @extend %visually-hidden;
+}
+
+.container {
+  @extend %clearfix;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+// ── Keyframes ────────────────────────────────────────────────────────
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slide-in {
+  0% { transform: translateX(-100%); }
+  80% { transform: translateX(5%); }
+  100% { transform: translateX(0); }
+}
+
+// ── @supports ────────────────────────────────────────────────────────
+
+@supports (display: grid) {
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+
+    @supports (aspect-ratio: 1) {
+      .grid__item {
+        aspect-ratio: 16 / 9;
+      }
+    }
+  }
+}
+
+// ── @media ───────────────────────────────────────────────────────────
+
+@media screen and (min-width: 768px) {
+  .container {
+    padding: 0 24px;
+  }
+}
+
+@media print {
+  body {
+    color: #000;
+    background: none;
+  }
+  a {
+    color: inherit;
+    text-decoration: underline;
+  }
+}
+
+// ── Custom properties ────────────────────────────────────────────────
+
+:root {
+  --color-primary: #{$primary};
+  --color-text: #333;
+  --spacing-base: #{$base-size};
+  --font-stack: #{$font-stack};
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.theme-dark {
+  --color-text: #eee;
+  --color-bg: #1a1a2e;
+}
+
+// ── Nested properties ────────────────────────────────────────────────
+
+.text {
+  font: {
+    family: $font-stack;
+    size: $base-size;
+    weight: normal;
+  }
+  margin: {
+    top: 0;
+    bottom: 1em;
+  }
+}
+
+// ── url() and special functions ──────────────────────────────────────
+
+.hero {
+  background: url(images/hero.jpg) center / cover no-repeat;
+}
+
+.icon {
+  background-image: url("data:image/svg+xml,%3Csvg%3E%3C/svg%3E");
+}
+
+.dynamic-bg {
+  background: url(assets/#{$primary}/bg.png);
+}
+
+// ── calc() and math functions ────────────────────────────────────────
+
+.sidebar {
+  width: calc(100% - 320px);
+  min-height: calc(100vh - 64px - 2rem);
+  padding: min(16px, 2vw);
+  font-size: clamp(14px, 1vw + 0.5rem, 18px);
+}
+
+// ── @at-root ─────────────────────────────────────────────────────────
+
+.parent {
+  color: red;
+
+  @at-root .child {
+    color: blue;
+  }
+
+  @at-root (without: media) {
+    .unscoped {
+      display: block;
+    }
+  }
+}
+
+// ── @use / @forward / @import ────────────────────────────────────────
+
+@use "sass:math";
+@use "sass:color" as c;
+@use "theme" as * with ($primary: #3498db);
+
+@forward "buttons" as btn-* hide _private-mixin;
+@forward "utils" show flex-center, $breakpoints;
+
+@import "legacy/normalize";
+
+// ── @layer ───────────────────────────────────────────────────────────
+
+@layer base, components, utilities;
+
+@layer base {
+  body {
+    margin: 0;
+  }
+}
+
+// ── @container ───────────────────────────────────────────────────────
+
+@container (min-width: 400px) {
+  .card {
+    flex-direction: row;
+  }
+}
+
+// ── @scope ───────────────────────────────────────────────────────────
+
+@scope (.card) to (.card__body) {
+  a {
+    color: inherit;
+  }
+}
+
+// ── @property ────────────────────────────────────────────────────────
+
+@property --gradient-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+// ── @charset / @namespace / @page / @font-face ──────────────────────
+
+@charset "UTF-8";
+
+@namespace svg url(http://www.w3.org/2000/svg);
+
+@page :first {
+  margin: 2cm;
+}
+
+@font-face {
+  font-family: 'CustomFont';
+  src: url('fonts/custom.woff2') format('woff2'),
+       url('fonts/custom.woff') format('woff');
+  font-weight: 400;
+  font-display: swap;
+}
+
+// ── Diagnostic rules ─────────────────────────────────────────────────
+
+@mixin strict-require($param) {
+  @if not $param {
+    @error "Parameter is required!";
+  }
+  @if type-of($param) != string {
+    @warn "Expected string, got #{type-of($param)}";
+  }
+  @debug "strict-require called with: #{$param}";
+}
+
+// ── Complex expressions ──────────────────────────────────────────────
+
+$result: if($enable-shadows, inset, none);
+$list: (1px, 2px, 3px);
+$map: (a: 1, b: 2, c: (nested: true));
+$bracketed: [a, b, c];
+$calc-val: 100% - 2 * $base-size;
+$negated: -$base-size;
+$bool-expr: $enable-shadows and not ($base-size > 20px) or $line-height == 1.5;
+
+// ── Multiline comment ────────────────────────────────────────────────
+
+/* This is a multiline comment
+   that spans several lines
+   and should be preserved as-is. */
+
+// ── @include with whitespace before parens ───────────────────────────
+
+.test-ws {
+  @include size (100px, 200px);
+  @include flex-center;
+}
+
+// ── End of golden file ───────────────────────────────────────────────
