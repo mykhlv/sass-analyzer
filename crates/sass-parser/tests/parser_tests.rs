@@ -3,39 +3,9 @@ use sass_parser::input::Input;
 use sass_parser::parser::Parser;
 use sass_parser::syntax::SassLanguage;
 use sass_parser::syntax_kind::*;
-use sass_parser::text_range::{TextRange, TextSize};
 
-/// Build an `Input` from raw tokens for testing.
-/// Real lexer comes in Phase 1.
 fn make_input(tokens: &[(SyntaxKind, &str)]) -> Input {
-    let mut kinds = Vec::new();
-    let mut ranges = Vec::new();
-    let mut all_trivia = Vec::new();
-    let mut trivia_starts = Vec::new();
-    let mut pending_trivia = Vec::new();
-    let mut offset = 0u32;
-
-    for &(kind, text) in tokens {
-        let len = text.len() as u32;
-        let range = TextRange::new(TextSize::new(offset), TextSize::new(offset + len));
-        if kind.is_trivia() {
-            pending_trivia.push((kind, range));
-        } else {
-            trivia_starts.push(all_trivia.len() as u32);
-            all_trivia.extend_from_slice(&pending_trivia);
-            pending_trivia.clear();
-            kinds.push(kind);
-            ranges.push(range);
-        }
-        offset += len;
-    }
-
-    // Sentinel
-    trivia_starts.push(all_trivia.len() as u32);
-    // Trailing trivia
-    all_trivia.extend_from_slice(&pending_trivia);
-
-    Input::new(kinds, ranges, all_trivia, trivia_starts)
+    Input::from_tokens(tokens)
 }
 
 fn check(
@@ -280,4 +250,208 @@ fn marker_abandon_tombstone() {
               IDENT@1..2 "b"
         "#]],
     );
+}
+
+// ── Integration tests: lexer → Input → Parser → bridge → rowan (1.16) ──
+
+fn lex_parse_check(source: &str, expect: Expect) {
+    let tokens = sass_parser::lexer::tokenize(source);
+    let input = Input::from_tokens(&tokens);
+    let mut parser = Parser::new(input, source);
+
+    // Trivial parse: wrap all tokens in SOURCE_FILE
+    let m = parser.start();
+    while !parser.at_end() {
+        parser.bump();
+    }
+    let _ = m.complete(&mut parser, SOURCE_FILE);
+
+    let (events, errors, input, src) = parser.finish();
+    let (green, errs) = sass_parser::build_tree(events, &errors, &input, src);
+    let tree = rowan::SyntaxNode::<SassLanguage>::new_root(green);
+
+    assert_eq!(
+        tree.text().to_string(),
+        source,
+        "lossless round-trip failed"
+    );
+
+    let mut buf = String::new();
+    pretty_print(&tree, &mut buf, 0);
+    if !errs.is_empty() {
+        buf.push_str("errors:\n");
+        for (msg, range) in &errs {
+            buf.push_str(&format!("  {range:?}: {msg}\n"));
+        }
+    }
+    expect.assert_eq(&buf);
+}
+
+#[test]
+fn integration_empty() {
+    lex_parse_check(
+        "",
+        expect![[r#"
+            SOURCE_FILE@0..0
+        "#]],
+    );
+}
+
+#[test]
+fn integration_single_ident() {
+    lex_parse_check(
+        "hello",
+        expect![[r#"
+            SOURCE_FILE@0..5
+              IDENT@0..5 "hello"
+        "#]],
+    );
+}
+
+#[test]
+fn integration_variable_declaration() {
+    lex_parse_check(
+        "$color: red;",
+        expect![[r#"
+            SOURCE_FILE@0..12
+              DOLLAR@0..1 "$"
+              IDENT@1..6 "color"
+              COLON@6..7 ":"
+              WHITESPACE@7..8 " "
+              IDENT@8..11 "red"
+              SEMICOLON@11..12 ";"
+        "#]],
+    );
+}
+
+#[test]
+fn integration_trivia_preserved() {
+    lex_parse_check(
+        "  /* comment */ $color: red;  ",
+        expect![[r#"
+            SOURCE_FILE@0..30
+              WHITESPACE@0..2 "  "
+              MULTI_LINE_COMMENT@2..15 "/* comment */"
+              WHITESPACE@15..16 " "
+              DOLLAR@16..17 "$"
+              IDENT@17..22 "color"
+              COLON@22..23 ":"
+              WHITESPACE@23..24 " "
+              IDENT@24..27 "red"
+              SEMICOLON@27..28 ";"
+              WHITESPACE@28..30 "  "
+        "#]],
+    );
+}
+
+#[test]
+fn integration_string_interpolation() {
+    lex_parse_check(
+        "\"hello #{$name}\"",
+        expect![[r##"
+            SOURCE_FILE@0..16
+              STRING_START@0..7 "\"hello "
+              HASH_LBRACE@7..9 "#{"
+              DOLLAR@9..10 "$"
+              IDENT@10..14 "name"
+              RBRACE@14..15 "}"
+              STRING_END@15..16 "\""
+        "##]],
+    );
+}
+
+#[test]
+fn integration_url_unquoted() {
+    lex_parse_check(
+        "background: url(img.png);",
+        expect![[r#"
+            SOURCE_FILE@0..25
+              IDENT@0..10 "background"
+              COLON@10..11 ":"
+              WHITESPACE@11..12 " "
+              IDENT@12..15 "url"
+              LPAREN@15..16 "("
+              URL_CONTENTS@16..23 "img.png"
+              RPAREN@23..24 ")"
+              SEMICOLON@24..25 ";"
+        "#]],
+    );
+}
+
+#[test]
+fn integration_url_quoted() {
+    lex_parse_check(
+        "background: url(\"img.png\");",
+        expect![[r#"
+            SOURCE_FILE@0..27
+              IDENT@0..10 "background"
+              COLON@10..11 ":"
+              WHITESPACE@11..12 " "
+              IDENT@12..15 "url"
+              LPAREN@15..16 "("
+              QUOTED_STRING@16..25 "\"img.png\""
+              RPAREN@25..26 ")"
+              SEMICOLON@26..27 ";"
+        "#]],
+    );
+}
+
+#[test]
+fn integration_whitespace_only() {
+    lex_parse_check(
+        "   \n\t  ",
+        expect![[r#"
+            SOURCE_FILE@0..7
+              WHITESPACE@0..7 "   \n\t  "
+        "#]],
+    );
+}
+
+#[test]
+fn integration_single_line_comment() {
+    lex_parse_check(
+        "// comment\n$x: 1;",
+        expect![[r#"
+            SOURCE_FILE@0..17
+              SINGLE_LINE_COMMENT@0..10 "// comment"
+              WHITESPACE@10..11 "\n"
+              DOLLAR@11..12 "$"
+              IDENT@12..13 "x"
+              COLON@13..14 ":"
+              WHITESPACE@14..15 " "
+              NUMBER@15..16 "1"
+              SEMICOLON@16..17 ";"
+        "#]],
+    );
+}
+
+#[test]
+fn integration_bom_preserved() {
+    lex_parse_check(
+        "\u{FEFF}$x: 1;",
+        expect![[r#"
+            SOURCE_FILE@0..9
+              WHITESPACE@0..3 "\u{feff}"
+              DOLLAR@3..4 "$"
+              IDENT@4..5 "x"
+              COLON@5..6 ":"
+              WHITESPACE@6..7 " "
+              NUMBER@7..8 "1"
+              SEMICOLON@8..9 ";"
+        "#]],
+    );
+}
+
+#[test]
+fn integration_has_whitespace_before() {
+    let source = "$a :b";
+    let tokens = sass_parser::lexer::tokenize(source);
+    let input = Input::from_tokens(&tokens);
+
+    // Significant tokens: $, a, :, b (indices 0..3)
+    // Whitespace between "a" and ":"
+    assert!(!input.has_whitespace_before(0)); // $ — no trivia before
+    assert!(!input.has_whitespace_before(1)); // a — no trivia before
+    assert!(input.has_whitespace_before(2)); // : — whitespace before
+    assert!(!input.has_whitespace_before(3)); // b — no trivia before
 }

@@ -1,5 +1,5 @@
 use crate::syntax_kind::SyntaxKind;
-use crate::text_range::TextRange;
+use crate::text_range::{TextRange, TextSize};
 
 /// Pre-processed lexer output: significant tokens separated from trivia.
 ///
@@ -31,6 +31,51 @@ impl Input {
                 "sentinel must not exceed all_trivia length",
             );
         }
+        Self {
+            kinds,
+            ranges,
+            all_trivia,
+            trivia_starts,
+        }
+    }
+
+    /// Build `Input` from raw lexer tokens.
+    ///
+    /// Each `(SyntaxKind, &str)` must appear in source order; the text slices
+    /// are used only for length (byte offsets are computed cumulatively).
+    pub fn from_tokens(tokens: &[(SyntaxKind, &str)]) -> Self {
+        let mut kinds = Vec::new();
+        let mut ranges = Vec::new();
+        let mut all_trivia = Vec::new();
+        let mut trivia_starts = Vec::new();
+        let mut offset = 0u32;
+
+        // Pending trivia count before the next significant token.
+        let mut pending_trivia_start = 0u32;
+
+        for &(kind, text) in tokens {
+            #[allow(clippy::cast_possible_truncation)]
+            let len = text.len() as u32;
+            let range = TextRange::new(TextSize::from(offset), TextSize::from(offset + len));
+
+            if kind.is_trivia() {
+                all_trivia.push((kind, range));
+            } else {
+                #[allow(clippy::cast_possible_truncation)]
+                {
+                    trivia_starts.push(pending_trivia_start);
+                    pending_trivia_start = all_trivia.len() as u32;
+                }
+                kinds.push(kind);
+                ranges.push(range);
+            }
+
+            offset += len;
+        }
+
+        // Sentinel: marks start of trailing trivia in all_trivia.
+        trivia_starts.push(pending_trivia_start);
+
         Self {
             kinds,
             ranges,
