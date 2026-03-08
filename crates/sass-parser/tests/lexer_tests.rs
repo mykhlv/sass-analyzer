@@ -744,6 +744,236 @@ fn comment_with_crlf() {
     );
 }
 
+// ── url() context (1.12) ──────────────────────────────────────────────
+
+#[test]
+fn url_unquoted_simple() {
+    assert_eq!(
+        lex("url(http://example.com)"),
+        vec![
+            (IDENT, "url"),
+            (LPAREN, "("),
+            (URL_CONTENTS, "http://example.com"),
+            (RPAREN, ")"),
+        ]
+    );
+}
+
+#[test]
+fn url_quoted_double() {
+    // Quoted URL: no Url context, parser handles as normal function call
+    assert_eq!(
+        lex("url(\"http://example.com\")"),
+        vec![
+            (IDENT, "url"),
+            (LPAREN, "("),
+            (QUOTED_STRING, "\"http://example.com\""),
+            (RPAREN, ")"),
+        ]
+    );
+}
+
+#[test]
+fn url_quoted_single() {
+    assert_eq!(
+        lex("url('http://example.com')"),
+        vec![
+            (IDENT, "url"),
+            (LPAREN, "("),
+            (QUOTED_STRING, "'http://example.com'"),
+            (RPAREN, ")"),
+        ]
+    );
+}
+
+#[test]
+fn url_quoted_with_whitespace() {
+    // Whitespace before quoted string → still normal tokens, no Url context
+    assert_eq!(
+        lex("url( \"path\" )"),
+        vec![
+            (IDENT, "url"),
+            (LPAREN, "("),
+            (WHITESPACE, " "),
+            (QUOTED_STRING, "\"path\""),
+            (WHITESPACE, " "),
+            (RPAREN, ")"),
+        ]
+    );
+}
+
+#[test]
+fn url_empty() {
+    assert_eq!(
+        lex("url()"),
+        vec![(IDENT, "url"), (LPAREN, "("), (RPAREN, ")"),]
+    );
+}
+
+#[test]
+fn url_with_whitespace() {
+    assert_eq!(
+        lex("url( http://example.com )"),
+        vec![
+            (IDENT, "url"),
+            (LPAREN, "("),
+            (WHITESPACE, " "),
+            (URL_CONTENTS, "http://example.com"),
+            (WHITESPACE, " "),
+            (RPAREN, ")"),
+        ]
+    );
+}
+
+#[test]
+fn url_with_interpolation() {
+    assert_eq!(
+        lex("url(#{$base}/path)"),
+        vec![
+            (IDENT, "url"),
+            (LPAREN, "("),
+            (HASH_LBRACE, "#{"),
+            (DOLLAR, "$"),
+            (IDENT, "base"),
+            (RBRACE, "}"),
+            (URL_CONTENTS, "/path"),
+            (RPAREN, ")"),
+        ]
+    );
+}
+
+#[test]
+fn url_content_then_interpolation() {
+    assert_eq!(
+        lex("url(path/#{$base}/end)"),
+        vec![
+            (IDENT, "url"),
+            (LPAREN, "("),
+            (URL_CONTENTS, "path/"),
+            (HASH_LBRACE, "#{"),
+            (DOLLAR, "$"),
+            (IDENT, "base"),
+            (RBRACE, "}"),
+            (URL_CONTENTS, "/end"),
+            (RPAREN, ")"),
+        ]
+    );
+}
+
+#[test]
+fn url_case_insensitive() {
+    assert_eq!(
+        lex("URL(http://example.com)"),
+        vec![
+            (IDENT, "URL"),
+            (LPAREN, "("),
+            (URL_CONTENTS, "http://example.com"),
+            (RPAREN, ")"),
+        ]
+    );
+}
+
+#[test]
+fn url_mixed_case() {
+    assert_eq!(
+        lex("Url(http://example.com)"),
+        vec![
+            (IDENT, "Url"),
+            (LPAREN, "("),
+            (URL_CONTENTS, "http://example.com"),
+            (RPAREN, ")"),
+        ]
+    );
+}
+
+#[test]
+fn url_with_data_uri() {
+    assert_eq!(
+        lex("url(data:image/png;base64,abc==)"),
+        vec![
+            (IDENT, "url"),
+            (LPAREN, "("),
+            (URL_CONTENTS, "data:image/png;base64,abc=="),
+            (RPAREN, ")"),
+        ]
+    );
+}
+
+#[test]
+fn url_with_escaped_paren() {
+    // \) is an escape, not a closing paren
+    assert_eq!(
+        lex("url(path\\)end)"),
+        vec![
+            (IDENT, "url"),
+            (LPAREN, "("),
+            (URL_CONTENTS, "path\\)end"),
+            (RPAREN, ")"),
+        ]
+    );
+}
+
+#[test]
+fn url_unterminated() {
+    assert_eq!(
+        lex("url(hello"),
+        vec![(IDENT, "url"), (LPAREN, "("), (URL_CONTENTS, "hello"),]
+    );
+}
+
+#[test]
+fn url_not_a_function() {
+    // "url" followed by something other than ( is just an ident
+    assert_eq!(lex("url"), vec![(IDENT, "url")]);
+}
+
+#[test]
+fn url_prefix_ident() {
+    // "urlify" is just a regular ident, not a url() call
+    assert_eq!(
+        lex("urlify(x)"),
+        vec![
+            (IDENT, "urlify"),
+            (LPAREN, "("),
+            (IDENT, "x"),
+            (RPAREN, ")"),
+        ]
+    );
+}
+
+#[test]
+fn url_in_declaration() {
+    assert_eq!(
+        lex("background: url(img.png);"),
+        vec![
+            (IDENT, "background"),
+            (COLON, ":"),
+            (WHITESPACE, " "),
+            (IDENT, "url"),
+            (LPAREN, "("),
+            (URL_CONTENTS, "img.png"),
+            (RPAREN, ")"),
+            (SEMICOLON, ";"),
+        ]
+    );
+}
+
+#[test]
+fn url_interpolation_only() {
+    assert_eq!(
+        lex("url(#{$var})"),
+        vec![
+            (IDENT, "url"),
+            (LPAREN, "("),
+            (HASH_LBRACE, "#{"),
+            (DOLLAR, "$"),
+            (IDENT, "var"),
+            (RBRACE, "}"),
+            (RPAREN, ")"),
+        ]
+    );
+}
+
 // ── Round-trip ────────────────────────────────────────────────────────
 
 #[test]
@@ -789,6 +1019,17 @@ fn round_trip_basic() {
         "u+00ff",
         "U+0025-00FF",
         "U+00??",
+        // url()
+        "url(http://example.com)",
+        "url(\"http://example.com\")",
+        "url('path')",
+        "url( http://example.com )",
+        "url(#{$base}/path)",
+        "url(path/#{$base}/end)",
+        "url()",
+        "url(data:image/png;base64,abc==)",
+        "url(path\\)end)",
+        "background: url(img.png);",
         // BOM
         "\u{FEFF}hello",
         // CRLF

@@ -4,12 +4,14 @@ use crate::syntax_kind::SyntaxKind;
 enum LexContext {
     Interpolation { brace_depth: u32 },
     String { quote: u8 },
+    Url,
 }
 
 pub struct Lexer<'src> {
     input: &'src str,
     pos: usize,
     context_stack: Vec<LexContext>,
+    pending_url_context: bool,
 }
 
 impl<'src> Lexer<'src> {
@@ -18,6 +20,7 @@ impl<'src> Lexer<'src> {
             input,
             pos: 0,
             context_stack: Vec::new(),
+            pending_url_context: false,
         }
     }
 
@@ -28,6 +31,18 @@ impl<'src> Lexer<'src> {
 
         if let Some(&LexContext::String { quote }) = self.context_stack.last() {
             return self.lex_string_content(quote);
+        }
+
+        if matches!(self.context_stack.last(), Some(LexContext::Url)) {
+            return self.lex_url_content();
+        }
+
+        if self.pending_url_context {
+            self.pending_url_context = false;
+            let start = self.pos;
+            self.pos += 1; // consume (
+            self.context_stack.push(LexContext::Url);
+            return (SyntaxKind::LPAREN, &self.input[start..self.pos]);
         }
 
         // ── BOM at start of file ─────────────────────────────────
@@ -68,6 +83,9 @@ impl<'src> Lexer<'src> {
                 self.lex_ident();
                 if self.is_unicode_range_start(start) {
                     self.lex_unicode_range()
+                } else if self.is_url_start(start) {
+                    self.pending_url_context = true;
+                    SyntaxKind::IDENT
                 } else {
                     SyntaxKind::IDENT
                 }
@@ -270,6 +288,75 @@ impl<'src> Lexer<'src> {
                 }
             }
         }
+    }
+
+    fn lex_url_content(&mut self) -> (SyntaxKind, &'src str) {
+        // Interpolation start
+        if self.peek() == Some(b'#') && self.peek_at(1) == Some(b'{') {
+            let start = self.pos;
+            self.pos += 2;
+            self.context_stack
+                .push(LexContext::Interpolation { brace_depth: 1 });
+            return (SyntaxKind::HASH_LBRACE, &self.input[start..self.pos]);
+        }
+
+        // Whitespace inside url()
+        if matches!(self.peek(), Some(b' ' | b'\t' | b'\n' | b'\r' | b'\x0C')) {
+            let start = self.pos;
+            self.eat_while(|b| matches!(b, b' ' | b'\t' | b'\n' | b'\r' | b'\x0C'));
+            return (SyntaxKind::WHITESPACE, &self.input[start..self.pos]);
+        }
+
+        // Closing paren
+        if self.peek() == Some(b')') {
+            let start = self.pos;
+            self.pos += 1;
+            self.context_stack.pop();
+            return (SyntaxKind::RPAREN, &self.input[start..self.pos]);
+        }
+
+        // Scan URL content until ), whitespace, #{, or EOF
+        let start = self.pos;
+        loop {
+            match self.peek() {
+                None => {
+                    self.context_stack.pop();
+                    return (SyntaxKind::URL_CONTENTS, &self.input[start..self.pos]);
+                }
+                Some(b')' | b' ' | b'\t' | b'\n' | b'\r' | b'\x0C') => {
+                    return (SyntaxKind::URL_CONTENTS, &self.input[start..self.pos]);
+                }
+                Some(b'#') if self.peek_at(1) == Some(b'{') => {
+                    return (SyntaxKind::URL_CONTENTS, &self.input[start..self.pos]);
+                }
+                Some(b'\\') => {
+                    self.pos += 1;
+                    self.skip_escape_char();
+                }
+                Some(b) if b >= 0x80 => {
+                    self.pos += self.current_char().len_utf8();
+                }
+                Some(_) => {
+                    self.pos += 1;
+                }
+            }
+        }
+    }
+
+    fn is_url_start(&self, start: usize) -> bool {
+        self.pos - start == 3
+            && self.input[start..self.pos].eq_ignore_ascii_case("url")
+            && self.peek() == Some(b'(')
+            && self.should_enter_url_context()
+    }
+
+    fn should_enter_url_context(&self) -> bool {
+        let bytes = self.input.as_bytes();
+        let mut p = self.pos + 1; // skip past (
+        while p < bytes.len() && matches!(bytes[p], b' ' | b'\t' | b'\n' | b'\r' | b'\x0C') {
+            p += 1;
+        }
+        !matches!(bytes.get(p), Some(b'\'' | b'"'))
     }
 
     fn skip_escape_char(&mut self) {
