@@ -1,3 +1,4 @@
+use crate::lexer;
 use crate::syntax_kind::SyntaxKind;
 use crate::text_range::{TextRange, TextSize};
 
@@ -37,6 +38,12 @@ impl Input {
             all_trivia,
             trivia_starts,
         }
+    }
+
+    /// Lex source code and build `Input` in one step.
+    pub fn from_source(source: &str) -> Self {
+        let tokens = lexer::tokenize(source);
+        Self::from_tokens(&tokens)
     }
 
     /// Build `Input` from raw lexer tokens.
