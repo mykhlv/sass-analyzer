@@ -627,6 +627,123 @@ fn braces_inside_interpolation() {
     );
 }
 
+// ── Unicode range (1.13) ─────────────────────────────────────────────
+
+#[test]
+fn unicode_range_single_value() {
+    assert_eq!(lex("U+0041"), vec![(UNICODE_RANGE, "U+0041")]);
+}
+
+#[test]
+fn unicode_range_lowercase() {
+    assert_eq!(lex("u+00ff"), vec![(UNICODE_RANGE, "u+00ff")]);
+}
+
+#[test]
+fn unicode_range_with_hyphen() {
+    assert_eq!(lex("U+0025-00FF"), vec![(UNICODE_RANGE, "U+0025-00FF")]);
+}
+
+#[test]
+fn unicode_range_wildcard() {
+    assert_eq!(lex("U+00??"), vec![(UNICODE_RANGE, "U+00??")]);
+}
+
+#[test]
+fn unicode_range_all_wildcards() {
+    assert_eq!(lex("U+????"), vec![(UNICODE_RANGE, "U+????")]);
+}
+
+#[test]
+fn unicode_range_in_context() {
+    assert_eq!(
+        lex("U+0025-00FF,"),
+        vec![(UNICODE_RANGE, "U+0025-00FF"), (COMMA, ",")]
+    );
+}
+
+#[test]
+fn u_without_plus_is_ident() {
+    assert_eq!(lex("U"), vec![(IDENT, "U")]);
+}
+
+#[test]
+fn u_plus_non_hex_is_ident_plus() {
+    assert_eq!(lex("U+z"), vec![(IDENT, "U"), (PLUS, "+"), (IDENT, "z")]);
+}
+
+#[test]
+fn ufoo_is_ident() {
+    assert_eq!(lex("Ufoo"), vec![(IDENT, "Ufoo")]);
+}
+
+#[test]
+fn unicode_range_hyphen_no_hex() {
+    // U+0041- without hex after hyphen → range stops, -z is ident
+    assert_eq!(
+        lex("U+0041-z"),
+        vec![(UNICODE_RANGE, "U+0041"), (IDENT, "-z")]
+    );
+}
+
+// ── BOM and special bytes (1.14) ─────────────────────────────────────
+
+#[test]
+fn bom_at_start() {
+    assert_eq!(
+        lex("\u{FEFF}hello"),
+        vec![(WHITESPACE, "\u{FEFF}"), (IDENT, "hello")]
+    );
+}
+
+#[test]
+fn bom_alone() {
+    assert_eq!(lex("\u{FEFF}"), vec![(WHITESPACE, "\u{FEFF}")]);
+}
+
+#[test]
+fn bom_followed_by_whitespace() {
+    assert_eq!(
+        lex("\u{FEFF} x"),
+        vec![(WHITESPACE, "\u{FEFF}"), (WHITESPACE, " "), (IDENT, "x"),]
+    );
+}
+
+#[test]
+fn null_byte_is_error() {
+    assert_eq!(lex("\x00"), vec![(ERROR, "\x00")]);
+}
+
+// ── CRLF handling (1.15) ────────────────────────────────────────────
+
+#[test]
+fn crlf_is_whitespace() {
+    assert_eq!(
+        lex("a\r\nb"),
+        vec![(IDENT, "a"), (WHITESPACE, "\r\n"), (IDENT, "b")]
+    );
+}
+
+#[test]
+fn cr_alone_is_whitespace() {
+    assert_eq!(
+        lex("a\rb"),
+        vec![(IDENT, "a"), (WHITESPACE, "\r"), (IDENT, "b")]
+    );
+}
+
+#[test]
+fn comment_with_crlf() {
+    assert_eq!(
+        lex("// hi\r\nx"),
+        vec![
+            (SINGLE_LINE_COMMENT, "// hi\r"),
+            (WHITESPACE, "\n"),
+            (IDENT, "x"),
+        ]
+    );
+}
+
 // ── Round-trip ────────────────────────────────────────────────────────
 
 #[test]
@@ -667,6 +784,16 @@ fn round_trip_basic() {
         "\"#{$a}\\#{$b}\"",
         "\"#{ {a} }\"",
         "\"hello\\",
+        // Unicode range
+        "U+0041",
+        "u+00ff",
+        "U+0025-00FF",
+        "U+00??",
+        // BOM
+        "\u{FEFF}hello",
+        // CRLF
+        "a\r\nb",
+        "// comment\r\nx",
     ];
     for input in inputs {
         let tokens = lex(input);

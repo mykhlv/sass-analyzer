@@ -30,6 +30,12 @@ impl<'src> Lexer<'src> {
             return self.lex_string_content(quote);
         }
 
+        // ── BOM at start of file ─────────────────────────────────
+        if self.pos == 0 && self.input.as_bytes().starts_with(&[0xEF, 0xBB, 0xBF]) {
+            self.pos = 3;
+            return (SyntaxKind::WHITESPACE, &self.input[..3]);
+        }
+
         let start = self.pos;
         let b = self.bump();
 
@@ -58,7 +64,14 @@ impl<'src> Lexer<'src> {
             b'.' if matches!(self.peek(), Some(b'0'..=b'9')) => self.lex_number(),
 
             // ── Identifiers ────────────────────────────────────────
-            b'a'..=b'z' | b'A'..=b'Z' | b'_' => self.lex_ident(),
+            b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
+                self.lex_ident();
+                if self.is_unicode_range_start(start) {
+                    self.lex_unicode_range()
+                } else {
+                    SyntaxKind::IDENT
+                }
+            }
             b'-' if self.is_ident_start_after_hyphen() => self.lex_ident(),
 
             // ── Strings ──────────────────────────────────────────────
@@ -294,6 +307,24 @@ impl<'src> Lexer<'src> {
             }
         }
         SyntaxKind::IDENT
+    }
+
+    fn is_unicode_range_start(&self, start: usize) -> bool {
+        self.pos - start == 1
+            && matches!(self.input.as_bytes()[start], b'U' | b'u')
+            && self.peek() == Some(b'+')
+            && matches!(self.peek_at(1), Some(b) if b.is_ascii_hexdigit() || b == b'?')
+    }
+
+    fn lex_unicode_range(&mut self) -> SyntaxKind {
+        self.pos += 1; // consume +
+        self.eat_while(|b| b.is_ascii_hexdigit() || b == b'?');
+        if self.peek() == Some(b'-') && matches!(self.peek_at(1), Some(b) if b.is_ascii_hexdigit())
+        {
+            self.pos += 1; // consume -
+            self.eat_while(|b| b.is_ascii_hexdigit());
+        }
+        SyntaxKind::UNICODE_RANGE
     }
 
     fn is_ident_start_after_hyphen(&self) -> bool {
