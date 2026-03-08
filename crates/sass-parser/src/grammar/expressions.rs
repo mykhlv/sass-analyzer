@@ -9,7 +9,7 @@ use super::ParseContext;
 #[rustfmt::skip]
 pub const EXPR_START: TokenSet = TokenSet::new(&[
     NUMBER, QUOTED_STRING, STRING_START, HASH, HASH_LBRACE, IDENT, DOLLAR, LPAREN, LBRACKET,
-    MINUS, PLUS, PERCENT, BANG,
+    MINUS, PLUS, PERCENT, BANG, AMP,
 ]);
 
 // ── Pratt binding power table ──────────────────────────────────────
@@ -79,10 +79,17 @@ pub fn expr_list(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarke
 /// Parse a space-separated group of expressions in `SassScript` context.
 /// Stops at `;`, `}`, `!`, `,`, `)`, or EOF.
 /// Extra values become siblings (no wrapper node).
-fn sass_value(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarker> {
+pub(crate) fn sass_value(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarker> {
     let cm = expr(p, ctx)?;
-    while !at_value_end(p) && !p.at(COMMA) && !p.at(RPAREN) && p.at_ts(EXPR_START) {
-        expr(p, ctx);
+    while !at_value_end(p) && !p.at(COMMA) && !p.at(RPAREN) {
+        if p.at(SLASH) {
+            // CSS separator: `11px/1.5`, `font: 12px/1.4 sans-serif`
+            p.bump();
+        } else if p.at_ts(EXPR_START) {
+            expr(p, ctx);
+        } else {
+            break;
+        }
     }
     Some(cm)
 }
@@ -174,13 +181,19 @@ fn atom(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarker> {
         QUOTED_STRING => Some(quoted_string(p)),
         STRING_START => Some(interpolated_string(p, ctx)),
         HASH => Some(color_literal(p)),
-        HASH_LBRACE => Some(interpolation(p)),
+        HASH_LBRACE => Some(interpolation_atom(p)),
         DOLLAR => Some(variable_ref(p)),
         IDENT => ident_or_call(p, ctx),
         LPAREN => Some(paren_or_map(p, ctx)),
         LBRACKET => Some(bracketed_list(p, ctx)),
         PERCENT => Some(standalone_percent(p)),
         BANG => Some(bang_dispatch(p)),
+        AMP => {
+            // Parent selector in expression context: `if(&, "&", "")`
+            let m = p.start();
+            p.bump();
+            Some(m.complete(p, VALUE))
+        }
         _ => {
             p.error("expected expression");
             None
@@ -303,9 +316,22 @@ fn ident_or_call(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarke
         return Some(function_dispatch(p, ctx));
     }
 
-    // Plain identifier (CSS value keyword, color name, etc.)
+    // Plain identifier — possibly followed by interpolation: `--color-#{$name}`
     let m = p.start();
     p.bump();
+    // Consume adjacent interpolation + fragments: `--color-#{$name}-suffix`
+    if !p.at_end() && !p.has_whitespace_before() && p.at(HASH_LBRACE) {
+        let _ = interpolation(p);
+        while !p.at_end() && !p.has_whitespace_before() {
+            if p.at(MINUS) || p.at(IDENT) || p.at(NUMBER) {
+                p.bump();
+            } else if p.at(HASH_LBRACE) {
+                let _ = interpolation(p);
+            } else {
+                break;
+            }
+        }
+    }
     Some(m.complete(p, VALUE))
 }
 
@@ -354,11 +380,18 @@ fn paren_or_map(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
         return finish_map(p, m, first, ctx);
     }
 
+    // Space-separated values inside parens: `(28px 28px 0 0)`, `(small medium large)`
+    if !p.at(COMMA) && !p.at(RPAREN) && !p.at_end() {
+        while !p.at(COMMA) && !p.at(RPAREN) && !p.at_end() {
+            expr(p, ParseContext::SassScript);
+        }
+    }
+
     if p.at(COMMA) {
-        // Comma-separated list inside parens
+        // Comma-separated list inside parens (possibly of space-separated groups)
         while p.eat(COMMA) {
             if !p.at(RPAREN) && !p.at_end() {
-                expr(p, ParseContext::SassScript);
+                sass_value(p, ParseContext::SassScript);
             }
         }
         p.expect(RPAREN);
@@ -382,7 +415,7 @@ fn finish_map(
         p.start()
     };
     p.expect(COLON);
-    expr(p, ParseContext::SassScript);
+    sass_value(p, ParseContext::SassScript);
     let _ = entry_m.complete(p, MAP_ENTRY);
 
     // Parse remaining entries
@@ -393,7 +426,7 @@ fn finish_map(
         let em = p.start();
         expr(p, ParseContext::SassScript);
         p.expect(COLON);
-        expr(p, ParseContext::SassScript);
+        sass_value(p, ParseContext::SassScript);
         let _ = em.complete(p, MAP_ENTRY);
     }
 
@@ -434,8 +467,24 @@ const CALC_NAMES: &[&str] = &[
 fn has_sass_signals(p: &Parser<'_>) -> bool {
     let mut offset = 2; // skip function name + LPAREN
     let mut depth = 1u32;
+    let mut brace_depth = 0u32;
     loop {
         let kind = p.nth(offset);
+        // Track interpolation brace depth — skip signal checks inside #{...}
+        if kind == HASH_LBRACE || (kind == LBRACE && brace_depth > 0) {
+            brace_depth += 1;
+            offset += 1;
+            continue;
+        }
+        if kind == RBRACE && brace_depth > 0 {
+            brace_depth -= 1;
+            offset += 1;
+            continue;
+        }
+        if brace_depth > 0 {
+            offset += 1;
+            continue;
+        }
         match kind {
             LPAREN => depth += 1,
             RPAREN => {
@@ -447,8 +496,19 @@ fn has_sass_signals(p: &Parser<'_>) -> bool {
             EOF => break,
             // Comparison operators — never valid in CSS calc
             EQ_EQ | BANG_EQ | LT | GT | LT_EQ | GT_EQ => return true,
-            // Interpolation, brackets, strings — not valid CSS calc atoms
-            HASH_LBRACE | LBRACKET | STRING_START => return true,
+            // Brackets — not valid CSS calc atoms (interpolation IS valid in calc)
+            LBRACKET => return true,
+            // Strings — not valid CSS calc atoms
+            STRING_START | QUOTED_STRING => return true,
+            // Namespace member access: ns.func(), ns.$var — not valid in CSS calc
+            IDENT if p.nth(offset + 1) == DOT
+                && !p.nth_has_whitespace_before(offset + 1) =>
+            {
+                let after_dot = p.nth(offset + 2);
+                if after_dot == IDENT || after_dot == DOLLAR {
+                    return true;
+                }
+            }
             // `%` with whitespace before = modulo operator, not dimension unit
             PERCENT if p.nth_has_whitespace_before(offset) => return true,
             // `and`/`or`/`not` keywords as operators
@@ -479,10 +539,8 @@ fn function_dispatch(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
 
     // Calculation functions
     if CALC_NAMES.iter().any(|n| name.eq_ignore_ascii_case(n)) {
-        // min()/max() with SassScript-only features → Sass function call
-        if (name.eq_ignore_ascii_case("min") || name.eq_ignore_ascii_case("max"))
-            && has_sass_signals(p)
-        {
+        // Calc function with SassScript-only features → Sass function call
+        if has_sass_signals(p) {
             return function_call(p, ctx);
         }
         return calculation(p);
@@ -612,17 +670,25 @@ fn calc_value(p: &mut Parser<'_>) {
             let _ = variable_ref(&mut g);
         }
         IDENT => {
-            // Nested function call inside calc (e.g., `calc(min(10px, 5vw) + 1rem)`)
             if g.nth(1) == LPAREN && !g.nth_has_whitespace_before(1) {
                 let name = g.current_text();
                 if CALC_NAMES.iter().any(|n| name.eq_ignore_ascii_case(n)) {
+                    // Nested calculation: `calc(min(10px, 5vw) + 1rem)`
                     let _ = calculation(&mut g);
                     m.abandon(&mut g);
                     return;
                 }
+                // Non-calc function inside calc: `var(--x)`, `env(safe-area-inset-top)`
+                let _ = function_call(&mut g, ParseContext::CssValue);
+                m.abandon(&mut g);
+                return;
             }
-            // Plain ident (e.g., env(safe-area-inset-top))
+            // Plain ident
             g.bump();
+        }
+        HASH_LBRACE => {
+            // Interpolation inside calc: `calc(#{$width} + 1rem)`
+            let _ = interpolation(&mut g);
         }
         LPAREN => {
             g.bump(); // (
@@ -715,14 +781,36 @@ pub fn variable_declaration(p: &mut Parser<'_>) {
 // ── Interpolation (Phase 3 upgrade) ────────────────────────────────
 
 /// Parse `#{expr}` with fully-parsed inner expression.
-/// Replaces Phase 2's opaque `interpolation()`.
+/// Supports space/comma-separated lists: `#{transform $dur ease-in-out}`.
 pub fn interpolation(p: &mut Parser<'_>) -> CompletedMarker {
     assert!(p.at(HASH_LBRACE));
     let m = p.start();
     p.bump(); // #{
     if !p.at(RBRACE) && !p.at_end() {
-        expr(p, ParseContext::SassScript);
+        sass_value_list(p, ParseContext::SassScript);
     }
     p.expect(RBRACE);
     m.complete(p, INTERPOLATION)
+}
+
+/// Parse interpolation as an expression atom, consuming adjacent hyphenated fragments.
+/// `#{$key}-font` → single VALUE node (not `#{$key} - font` subtraction).
+fn interpolation_atom(p: &mut Parser<'_>) -> CompletedMarker {
+    let cm = interpolation(p);
+    // Consume adjacent fragments without whitespace: `-font`, `-#{...}`, `3`, etc.
+    if !p.at_end() && !p.has_whitespace_before() && (p.at(MINUS) || p.at(IDENT) || p.at(NUMBER)) {
+        let m = cm.precede(p);
+        while !p.at_end() && !p.has_whitespace_before() {
+            if p.at(MINUS) || p.at(IDENT) || p.at(NUMBER) {
+                p.bump();
+            } else if p.at(HASH_LBRACE) {
+                let _ = interpolation(p);
+            } else {
+                break;
+            }
+        }
+        m.complete(p, VALUE)
+    } else {
+        cm
+    }
 }

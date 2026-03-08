@@ -23,7 +23,7 @@ pub fn selector_list(p: &mut Parser<'_>) {
     selector(p);
     while p.at(COMMA) {
         p.bump(); // ,
-        if p.at_ts(SELECTOR_START) {
+        if p.at_ts(SELECTOR_START) || p.at_ts(COMBINATOR_TOKEN) {
             selector(p);
         } else {
             p.error("expected selector after `,`");
@@ -71,8 +71,15 @@ fn selector(p: &mut Parser<'_>) {
 /// e.g., `div.class#id[attr]:hover::before`
 fn compound_selector(p: &mut Parser<'_>) {
     simple_selector(p);
-    while p.at_ts(SELECTOR_START) && !p.has_whitespace_before() {
-        simple_selector(p);
+    while !p.at_end() && !p.has_whitespace_before() {
+        if p.at_ts(SELECTOR_START) {
+            simple_selector(p);
+        } else if p.at(MINUS) || p.at(NUMBER) || p.at(SyntaxKind::ERROR) {
+            // Hyphen/number/escape connecting selector parts: `.col#{$infix}-1`, `\.5`
+            p.bump();
+        } else {
+            break;
+        }
     }
 }
 
@@ -85,10 +92,14 @@ fn simple_selector(p: &mut Parser<'_>) {
             let _ = m.complete(p, SIMPLE_SELECTOR);
         }
         DOT => {
-            // .class
+            // .class or .#{$var}
             let m = p.start();
             p.bump(); // .
-            p.expect(IDENT);
+            if p.at(HASH_LBRACE) {
+                let _ = interpolation(p);
+            } else {
+                p.expect(IDENT);
+            }
             let _ = m.complete(p, SIMPLE_SELECTOR);
         }
         HASH => {
@@ -120,20 +131,28 @@ fn simple_selector(p: &mut Parser<'_>) {
             let _ = m.complete(p, SIMPLE_SELECTOR);
         }
         COLON_COLON => {
-            // ::pseudo-element
+            // ::pseudo-element or ::#{$var}
             let m = p.start();
             p.bump(); // ::
-            p.expect(IDENT);
+            if p.at(HASH_LBRACE) {
+                let _ = interpolation(p);
+            } else {
+                p.expect(IDENT);
+            }
             if p.at(LPAREN) {
                 eat_balanced_parens(p);
             }
             let _ = m.complete(p, PSEUDO_SELECTOR);
         }
         COLON => {
-            // :pseudo-class
+            // :pseudo-class or :#{$var}
             let m = p.start();
             p.bump(); // :
-            p.expect(IDENT);
+            if p.at(HASH_LBRACE) {
+                let _ = interpolation(p);
+            } else {
+                p.expect(IDENT);
+            }
             if p.at(LPAREN) {
                 eat_balanced_parens(p);
             }

@@ -32,6 +32,8 @@ pub fn source_file(p: &mut Parser<'_>) {
             at_rules::at_rule(p);
         } else if p.at(DOLLAR) {
             expressions::variable_declaration(p);
+        } else if at_namespace_var_assignment(p) {
+            namespace_variable_assignment(p);
         } else if p.at_ts(selectors::SELECTOR_START) || p.at_ts(selectors::COMBINATOR_TOKEN) {
             rule_set(p);
         } else if p.at(SEMICOLON) {
@@ -55,6 +57,34 @@ pub fn source_file(p: &mut Parser<'_>) {
     let _ = m.complete(p, SOURCE_FILE);
 }
 
+/// Check for `ns.$var: value` — namespace variable assignment.
+fn at_namespace_var_assignment(p: &Parser<'_>) -> bool {
+    p.at(IDENT)
+        && p.nth(1) == DOT
+        && !p.nth_has_whitespace_before(1)
+        && p.nth(2) == DOLLAR
+        && !p.nth_has_whitespace_before(2)
+        && p.nth(3) == IDENT
+        && p.nth(4) == COLON
+}
+
+/// Parse `ns.$var: value;` namespace variable assignment.
+fn namespace_variable_assignment(p: &mut Parser<'_>) {
+    let m = p.start();
+    p.bump(); // IDENT (namespace)
+    p.bump(); // DOT
+    p.bump(); // DOLLAR
+    p.expect(IDENT); // variable name
+    p.expect(COLON);
+    if !p.at(SEMICOLON) && !p.at(RBRACE) && !p.at_end() {
+        expressions::sass_value_list(p, ParseContext::SassScript);
+    }
+    if !p.at(RBRACE) && !p.at_end() {
+        p.expect(SEMICOLON);
+    }
+    let _ = m.complete(p, VARIABLE_DECL);
+}
+
 /// Parse a single item inside a block.
 /// Disambiguates between rule sets and declarations.
 fn block_item(p: &mut Parser<'_>) {
@@ -62,6 +92,8 @@ fn block_item(p: &mut Parser<'_>) {
         at_rules::at_rule(p);
     } else if p.at(DOLLAR) {
         expressions::variable_declaration(p);
+    } else if at_namespace_var_assignment(p) {
+        namespace_variable_assignment(p);
     } else if looks_like_declaration(p) {
         declarations::declaration(p);
     } else if p.at_ts(selectors::SELECTOR_START) || p.at_ts(selectors::COMBINATOR_TOKEN) {
@@ -77,11 +109,27 @@ fn block_item(p: &mut Parser<'_>) {
 /// - `IDENT COLON ...` — plain property, scan for `{`/`;`/`}`
 /// - `IDENT COLON LBRACE` — nested property
 /// - `HASH_LBRACE ... RBRACE [fragments] COLON` — interpolated property name
+/// - `IDENT("--") HASH_LBRACE ... RBRACE [fragments] COLON` — custom property with interpolation
 fn looks_like_declaration(p: &Parser<'_>) -> bool {
     if p.at(HASH_LBRACE) {
         return looks_like_interpolated_declaration(p);
     }
-    if !p.at(IDENT) || p.nth(1) != COLON {
+    if !p.at(IDENT) {
+        return false;
+    }
+    // Property with interpolation in name: `margin-#{$side}: val`, `--#{$prefix}name: val`
+    if p.nth(1) == HASH_LBRACE {
+        return scan_past_interpolated_name(p, 1).is_some_and(|offset| {
+            if p.nth(offset) != COLON {
+                return false;
+            }
+            if p.nth(offset + 1) == LBRACE {
+                return true; // nested property: #{$prop}: { sub: val }
+            }
+            scan_for_declaration_end(p, offset + 1)
+        });
+    }
+    if p.nth(1) != COLON {
         return false;
     }
     // 2.10: IDENT COLON LBRACE → nested property
@@ -92,19 +140,33 @@ fn looks_like_declaration(p: &Parser<'_>) -> bool {
 }
 
 /// Check if `#{...}[fragments]COLON` looks like a declaration with interpolated property.
-/// Scan is bounded to avoid O(n²) behavior on pathological inputs.
 fn looks_like_interpolated_declaration(p: &Parser<'_>) -> bool {
+    scan_past_interpolated_name(p, 0).is_some_and(|offset| {
+        if p.nth(offset) != COLON {
+            return false;
+        }
+        if p.nth(offset + 1) == LBRACE {
+            return true; // nested property: #{$prop}: { sub: val }
+        }
+        scan_for_declaration_end(p, offset + 1)
+    })
+}
+
+/// Scan past `HASH_LBRACE ... RBRACE [IDENT|MINUS|HASH_LBRACE...]` starting at `start`
+/// (which must point at a `HASH_LBRACE`).
+/// Returns the offset after the property name fragments, or `None` if scan exceeds budget.
+fn scan_past_interpolated_name(p: &Parser<'_>, start: usize) -> Option<usize> {
     const MAX_SCAN: usize = 100;
-    // Skip past the interpolation and any trailing property-name fragments
-    let mut offset = 1; // past HASH_LBRACE
+    let limit = start + MAX_SCAN;
+    let mut offset = start + 1; // past HASH_LBRACE
     let mut depth: u32 = 1;
     // Skip interpolation body
     loop {
-        if offset >= MAX_SCAN {
-            return false;
+        if offset >= limit {
+            return None;
         }
         match p.nth(offset) {
-            EOF => return false,
+            EOF => return None,
             LBRACE | HASH_LBRACE => depth += 1,
             RBRACE => {
                 depth -= 1;
@@ -119,8 +181,8 @@ fn looks_like_interpolated_declaration(p: &Parser<'_>) -> bool {
     }
     // Skip trailing property fragments (IDENT, MINUS, more interpolations)
     loop {
-        if offset >= MAX_SCAN {
-            return false;
+        if offset >= limit {
+            return None;
         }
         match p.nth(offset) {
             IDENT | MINUS => offset += 1,
@@ -129,11 +191,11 @@ fn looks_like_interpolated_declaration(p: &Parser<'_>) -> bool {
                 offset += 1;
                 let mut d: u32 = 1;
                 loop {
-                    if offset >= MAX_SCAN {
-                        return false;
+                    if offset >= limit {
+                        return None;
                     }
                     match p.nth(offset) {
-                        EOF => return false,
+                        EOF => return None,
                         LBRACE | HASH_LBRACE => d += 1,
                         RBRACE => {
                             d -= 1;
@@ -150,8 +212,7 @@ fn looks_like_interpolated_declaration(p: &Parser<'_>) -> bool {
             _ => break,
         }
     }
-    // After property name fragments, expect COLON
-    p.nth(offset) == COLON
+    Some(offset)
 }
 
 /// Scan tokens from `offset` looking for `{`, `;`, or `}` at depth 0.
@@ -160,6 +221,7 @@ fn looks_like_interpolated_declaration(p: &Parser<'_>) -> bool {
 fn scan_for_declaration_end(p: &Parser<'_>, start: usize) -> bool {
     const MAX_SCAN: usize = 100;
     let mut depth: u32 = 0;
+    let mut brace_depth: u32 = 0;
     let mut offset = start;
     let limit = start + MAX_SCAN;
     loop {
@@ -167,8 +229,20 @@ fn scan_for_declaration_end(p: &Parser<'_>, start: usize) -> bool {
             // Exceeded scan budget — guess declaration to avoid misparse as selector
             return true;
         }
+        // Inside interpolation #{...} — skip until matching RBRACE
+        if brace_depth > 0 {
+            match p.nth(offset) {
+                EOF => return true,
+                HASH_LBRACE | LBRACE => brace_depth += 1,
+                RBRACE => brace_depth -= 1,
+                _ => {}
+            }
+            offset += 1;
+            continue;
+        }
         match p.nth(offset) {
             EOF => return true,
+            HASH_LBRACE => brace_depth += 1,
             LBRACE if depth == 0 => return false,
             RBRACE if depth == 0 => return true,
             SEMICOLON if depth == 0 => return true,

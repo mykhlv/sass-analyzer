@@ -1,1 +1,6 @@
 /target/
+/test-corpus/bootstrap/
+/test-corpus/foundation/
+/test-corpus/primer/
+/test-corpus/bulma/
+/test-corpus/angular-material/

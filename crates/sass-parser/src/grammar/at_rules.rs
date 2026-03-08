@@ -127,9 +127,9 @@ fn param(p: &mut Parser<'_>) {
     p.expect(DOLLAR);
     p.expect(IDENT);
 
-    // Optional default value: $name: expr
+    // Optional default value: $name: expr (can be space-separated, stops at `,`/`)`)
     if p.eat(COLON) {
-        super::expressions::expr(p, super::ParseContext::SassScript);
+        super::expressions::sass_value(p, super::ParseContext::SassScript);
     }
 
     // Rest param: $args...
