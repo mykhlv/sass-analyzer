@@ -66,6 +66,15 @@ impl<'src> Parser<'src> {
         self.input.has_whitespace_before(self.pos)
     }
 
+    /// Returns the source text of the current token.
+    pub fn current_text(&self) -> &'src str {
+        if self.at_end() {
+            return "";
+        }
+        let range = self.input.range(self.pos);
+        &self.source[range]
+    }
+
     // ── Consuming tokens ─────────────────────────────────────────────
 
     pub fn bump(&mut self) {
