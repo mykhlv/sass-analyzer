@@ -8,7 +8,7 @@ use super::ParseContext;
 /// Tokens that can start an expression atom.
 #[rustfmt::skip]
 pub const EXPR_START: TokenSet = TokenSet::new(&[
-    NUMBER, QUOTED_STRING, STRING_START, HASH, IDENT, DOLLAR, LPAREN, LBRACKET,
+    NUMBER, QUOTED_STRING, STRING_START, HASH, HASH_LBRACE, IDENT, DOLLAR, LPAREN, LBRACKET,
     MINUS, PLUS, PERCENT, BANG,
 ]);
 
@@ -142,6 +142,7 @@ fn atom(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarker> {
         QUOTED_STRING => Some(quoted_string(p)),
         STRING_START => Some(interpolated_string(p, ctx)),
         HASH => Some(color_literal(p)),
+        HASH_LBRACE => Some(interpolation(p)),
         DOLLAR => Some(variable_ref(p)),
         IDENT => ident_or_call(p, ctx),
         LPAREN => Some(paren_or_map(p, ctx)),
@@ -180,18 +181,27 @@ fn quoted_string(p: &mut Parser<'_>) -> CompletedMarker {
 pub(crate) fn interpolated_string(p: &mut Parser<'_>, _ctx: ParseContext) -> CompletedMarker {
     let m = p.start();
     p.bump(); // STRING_START
-    // Expressions inside #{...} are always SassScript (/ is division, etc.)
-    if p.at_ts(EXPR_START) {
-        expr(p, ParseContext::SassScript);
-    }
-    // Consume STRING_MID* (text between }...#{) + inner expressions
-    while p.at(STRING_MID) {
-        p.bump(); // STRING_MID
-        if p.at_ts(EXPR_START) {
-            expr(p, ParseContext::SassScript);
+    // Token sequence: STRING_START (HASH_LBRACE expr RBRACE (STRING_MID | STRING_END))*
+    loop {
+        match p.current() {
+            HASH_LBRACE => {
+                let _ = interpolation(p);
+            }
+            STRING_MID => p.bump(),
+            STRING_END => {
+                p.bump();
+                break;
+            }
+            _ => {
+                if p.at_end() {
+                    p.error("unterminated interpolated string");
+                } else {
+                    p.error("expected string content or interpolation");
+                }
+                break;
+            }
         }
     }
-    p.expect(STRING_END);
     m.complete(p, INTERPOLATED_STRING)
 }
 
@@ -568,7 +578,7 @@ fn special_function_call(p: &mut Parser<'_>) -> CompletedMarker {
                 }
             }
             HASH_LBRACE => {
-                super::selectors::interpolation(p);
+                let _ = super::selectors::interpolation(p);
             }
             _ => p.bump(),
         }
@@ -613,7 +623,7 @@ pub fn variable_declaration(p: &mut Parser<'_>) {
 
 /// Parse `#{expr}` with fully-parsed inner expression.
 /// Replaces Phase 2's opaque `interpolation()`.
-pub fn interpolation(p: &mut Parser<'_>) {
+pub fn interpolation(p: &mut Parser<'_>) -> CompletedMarker {
     assert!(p.at(HASH_LBRACE));
     let m = p.start();
     p.bump(); // #{
@@ -621,5 +631,5 @@ pub fn interpolation(p: &mut Parser<'_>) {
         expr(p, ParseContext::SassScript);
     }
     p.expect(RBRACE);
-    let _ = m.complete(p, INTERPOLATION);
+    m.complete(p, INTERPOLATION)
 }

@@ -138,7 +138,7 @@ fn with_config_entry(p: &mut Parser<'_>) {
     p.expect(DOLLAR);
     p.expect(IDENT);
     p.expect(COLON);
-    crate::grammar::expressions::expr(p, crate::grammar::ParseContext::SassScript);
+    super::expressions::expr(p, super::ParseContext::SassScript);
 
     // Optional !default flag (valid in @forward with(), not @use with())
     if p.at(BANG) && p.nth(1) == IDENT && p.nth_text(1) == "default" {
@@ -173,10 +173,7 @@ fn import_argument(p: &mut Parser<'_>) {
         p.bump();
     } else if p.at(STRING_START) {
         // Interpolated string — consume the full STRING_START..STRING_END sequence
-        let _ = crate::grammar::expressions::interpolated_string(
-            p,
-            crate::grammar::ParseContext::SassScript,
-        );
+        let _ = super::expressions::interpolated_string(p, super::ParseContext::SassScript);
     } else if p.at(IDENT) && p.current_text().eq_ignore_ascii_case("url") {
         // url(...) import
         p.bump(); // url

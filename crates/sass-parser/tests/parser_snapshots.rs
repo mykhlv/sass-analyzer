@@ -1051,32 +1051,30 @@ fn interpolation_in_value() {
         "p { color: #{$c}; }",
         expect![[r##"
             SOURCE_FILE@0..19
-              RULE_SET@0..16
+              RULE_SET@0..19
                 SELECTOR_LIST@0..1
                   SELECTOR@0..1
                     SIMPLE_SELECTOR@0..1
                       IDENT@0..1 "p"
-                BLOCK@1..16
+                BLOCK@1..19
                   WHITESPACE@1..2 " "
                   LBRACE@2..3 "{"
-                  DECLARATION@3..15
+                  DECLARATION@3..17
                     PROPERTY@3..9
                       WHITESPACE@3..4 " "
                       IDENT@4..9 "color"
                     COLON@9..10 ":"
-                    VALUE@10..15
-                      WHITESPACE@10..11 " "
-                      HASH_LBRACE@11..13 "#{"
-                      VARIABLE_REF@13..15
-                        DOLLAR@13..14 "$"
-                        IDENT@14..15 "c"
-                  RBRACE@15..16 "}"
-              SEMICOLON@16..17 ";"
-              ERROR@17..19
-                WHITESPACE@17..18 " "
-                RBRACE@18..19 "}"
-            errors:
-              18..19: expected rule
+                    VALUE@10..16
+                      INTERPOLATION@10..16
+                        WHITESPACE@10..11 " "
+                        HASH_LBRACE@11..13 "#{"
+                        VARIABLE_REF@13..15
+                          DOLLAR@13..14 "$"
+                          IDENT@14..15 "c"
+                        RBRACE@15..16 "}"
+                    SEMICOLON@16..17 ";"
+                  WHITESPACE@17..18 " "
+                  RBRACE@18..19 "}"
         "##]],
     );
 }

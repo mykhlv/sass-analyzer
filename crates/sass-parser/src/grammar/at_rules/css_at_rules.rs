@@ -28,7 +28,7 @@ pub fn layer_rule(p: &mut Parser<'_>) {
     }
 
     if p.at(LBRACE) {
-        super::super::block(p);
+        super::block(p);
     } else if !p.at(RBRACE) && !p.at_end() {
         p.expect(SEMICOLON);
     }
@@ -60,14 +60,14 @@ pub fn container_rule(p: &mut Parser<'_>) {
                 p.bump();
             }
             HASH_LBRACE => {
-                crate::grammar::expressions::interpolation(p);
+                let _ = super::interpolation(p);
             }
             _ => p.bump(),
         }
     }
 
     if p.at(LBRACE) {
-        super::super::block(p);
+        super::block(p);
     } else {
         p.error("expected `{`");
     }
@@ -94,14 +94,14 @@ pub fn scope_rule(p: &mut Parser<'_>) {
                 p.bump();
             }
             HASH_LBRACE => {
-                crate::grammar::expressions::interpolation(p);
+                let _ = super::interpolation(p);
             }
             _ => p.bump(),
         }
     }
 
     if p.at(LBRACE) {
-        super::super::block(p);
+        super::block(p);
     } else {
         p.error("expected `{`");
     }
@@ -125,7 +125,7 @@ pub fn property_rule(p: &mut Parser<'_>) {
     }
 
     if p.at(LBRACE) {
-        super::super::block(p);
+        super::block(p);
     } else {
         p.error("expected `{`");
     }
@@ -150,10 +150,7 @@ pub fn namespace_rule(p: &mut Parser<'_>) {
     if p.at(QUOTED_STRING) {
         p.bump();
     } else if p.at(STRING_START) {
-        let _ = crate::grammar::expressions::interpolated_string(
-            p,
-            crate::grammar::ParseContext::SassScript,
-        );
+        let _ = super::expressions::interpolated_string(p, super::ParseContext::SassScript);
     } else if p.at(IDENT) && p.current_text().eq_ignore_ascii_case("url") {
         p.bump(); // url
         if p.at(LPAREN) {
@@ -191,7 +188,7 @@ pub fn page_rule(p: &mut Parser<'_>) {
     }
 
     if p.at(LBRACE) {
-        super::super::block(p);
+        super::block(p);
     } else {
         p.error("expected `{`");
     }
@@ -204,7 +201,7 @@ pub fn font_face_rule(p: &mut Parser<'_>) {
     p.bump(); // @
     p.bump(); // font-face
     if p.at(LBRACE) {
-        super::super::block(p);
+        super::block(p);
     } else {
         p.error("expected `{`");
     }

@@ -15,7 +15,7 @@ pub fn extend_rule(p: &mut Parser<'_>) {
     while !p.at(SEMICOLON) && !p.at(BANG) && !p.at(RBRACE) && !p.at_end() {
         if p.at(HASH_LBRACE) {
             has_selector_token = true;
-            crate::grammar::expressions::interpolation(p);
+            let _ = super::interpolation(p);
         } else {
             // Whitespace between selector-start tokens = descendant combinator
             if has_selector_token && p.has_whitespace_before() {

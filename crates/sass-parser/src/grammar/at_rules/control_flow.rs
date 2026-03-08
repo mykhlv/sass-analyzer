@@ -7,9 +7,9 @@ pub fn if_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // if
-    crate::grammar::expressions::expr(p, crate::grammar::ParseContext::SassScript);
+    super::expressions::expr(p, super::ParseContext::SassScript);
     if p.at(LBRACE) {
-        super::super::block(p);
+        super::block(p);
     } else {
         p.error("expected `{`");
     }
@@ -31,11 +31,11 @@ fn else_clause(p: &mut Parser<'_>) {
     // `@else if` — has a condition
     if p.at(IDENT) && p.current_text() == "if" {
         p.bump(); // if
-        crate::grammar::expressions::expr(p, crate::grammar::ParseContext::SassScript);
+        super::expressions::expr(p, super::ParseContext::SassScript);
     }
 
     if p.at(LBRACE) {
-        super::super::block(p);
+        super::block(p);
     } else {
         p.error("expected `{`");
     }
@@ -57,7 +57,7 @@ pub fn for_rule(p: &mut Parser<'_>) {
         p.error("expected `from`");
     }
 
-    crate::grammar::expressions::expr(p, crate::grammar::ParseContext::SassScript);
+    super::expressions::expr(p, super::ParseContext::SassScript);
 
     // Expect `through` or `to`
     if p.at(IDENT) && (p.current_text() == "through" || p.current_text() == "to") {
@@ -66,10 +66,10 @@ pub fn for_rule(p: &mut Parser<'_>) {
         p.error("expected `through` or `to`");
     }
 
-    crate::grammar::expressions::expr(p, crate::grammar::ParseContext::SassScript);
+    super::expressions::expr(p, super::ParseContext::SassScript);
 
     if p.at(LBRACE) {
-        super::super::block(p);
+        super::block(p);
     } else {
         p.error("expected `{`");
     }
@@ -97,10 +97,10 @@ pub fn each_rule(p: &mut Parser<'_>) {
         p.error("expected `in`");
     }
 
-    crate::grammar::expressions::expr_list(p, crate::grammar::ParseContext::SassScript);
+    super::expressions::expr_list(p, super::ParseContext::SassScript);
 
     if p.at(LBRACE) {
-        super::super::block(p);
+        super::block(p);
     } else {
         p.error("expected `{`");
     }
@@ -112,9 +112,9 @@ pub fn while_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // while
-    crate::grammar::expressions::expr(p, crate::grammar::ParseContext::SassScript);
+    super::expressions::expr(p, super::ParseContext::SassScript);
     if p.at(LBRACE) {
-        super::super::block(p);
+        super::block(p);
     } else {
         p.error("expected `{`");
     }

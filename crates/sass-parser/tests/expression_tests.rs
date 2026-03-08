@@ -1645,40 +1645,38 @@ fn interpolation_with_expression() {
     check(
         "div { color: #{$base + 1}; }",
         expect![[r##"
-        SOURCE_FILE@0..28
-          RULE_SET@0..25
-            SELECTOR_LIST@0..3
-              SELECTOR@0..3
-                SIMPLE_SELECTOR@0..3
-                  IDENT@0..3 "div"
-            BLOCK@3..25
-              WHITESPACE@3..4 " "
-              LBRACE@4..5 "{"
-              DECLARATION@5..24
-                PROPERTY@5..11
-                  WHITESPACE@5..6 " "
-                  IDENT@6..11 "color"
-                COLON@11..12 ":"
-                VALUE@12..24
-                  WHITESPACE@12..13 " "
-                  HASH_LBRACE@13..15 "#{"
-                  BINARY_EXPR@15..24
-                    VARIABLE_REF@15..20
-                      DOLLAR@15..16 "$"
-                      IDENT@16..20 "base"
-                    WHITESPACE@20..21 " "
-                    PLUS@21..22 "+"
-                    NUMBER_LITERAL@22..24
-                      WHITESPACE@22..23 " "
-                      NUMBER@23..24 "1"
-              RBRACE@24..25 "}"
-          SEMICOLON@25..26 ";"
-          ERROR@26..28
-            WHITESPACE@26..27 " "
-            RBRACE@27..28 "}"
-        errors:
-          27..28: expected rule
-    "##]],
+            SOURCE_FILE@0..28
+              RULE_SET@0..28
+                SELECTOR_LIST@0..3
+                  SELECTOR@0..3
+                    SIMPLE_SELECTOR@0..3
+                      IDENT@0..3 "div"
+                BLOCK@3..28
+                  WHITESPACE@3..4 " "
+                  LBRACE@4..5 "{"
+                  DECLARATION@5..26
+                    PROPERTY@5..11
+                      WHITESPACE@5..6 " "
+                      IDENT@6..11 "color"
+                    COLON@11..12 ":"
+                    VALUE@12..25
+                      INTERPOLATION@12..25
+                        WHITESPACE@12..13 " "
+                        HASH_LBRACE@13..15 "#{"
+                        BINARY_EXPR@15..24
+                          VARIABLE_REF@15..20
+                            DOLLAR@15..16 "$"
+                            IDENT@16..20 "base"
+                          WHITESPACE@20..21 " "
+                          PLUS@21..22 "+"
+                          NUMBER_LITERAL@22..24
+                            WHITESPACE@22..23 " "
+                            NUMBER@23..24 "1"
+                        RBRACE@24..25 "}"
+                    SEMICOLON@25..26 ";"
+                  WHITESPACE@26..27 " "
+                  RBRACE@27..28 "}"
+        "##]],
     );
 }
 
@@ -1758,32 +1756,23 @@ fn string_interpolation_simple() {
     check(
         "$s: \"hello #{$name}!\";",
         expect![[r##"
-        SOURCE_FILE@0..22
-          VARIABLE_DECL@0..11
-            DOLLAR@0..1 "$"
-            IDENT@1..2 "s"
-            COLON@2..3 ":"
-            INTERPOLATED_STRING@3..11
-              WHITESPACE@3..4 " "
-              STRING_START@4..11 "\"hello "
-          RULE_SET@11..19
-            SELECTOR_LIST@11..19
-              SELECTOR@11..19
-                INTERPOLATION@11..19
-                  HASH_LBRACE@11..13 "#{"
-                  VARIABLE_REF@13..18
-                    DOLLAR@13..14 "$"
-                    IDENT@14..18 "name"
-                  RBRACE@18..19 "}"
-          ERROR@19..21
-            STRING_END@19..21 "!\""
-          SEMICOLON@21..22 ";"
-        errors:
-          11..13: expected STRING_END
-          11..13: expected SEMICOLON
-          19..21: expected `{`
-          19..21: expected rule
-    "##]],
+            SOURCE_FILE@0..22
+              VARIABLE_DECL@0..22
+                DOLLAR@0..1 "$"
+                IDENT@1..2 "s"
+                COLON@2..3 ":"
+                INTERPOLATED_STRING@3..21
+                  WHITESPACE@3..4 " "
+                  STRING_START@4..11 "\"hello "
+                  INTERPOLATION@11..19
+                    HASH_LBRACE@11..13 "#{"
+                    VARIABLE_REF@13..18
+                      DOLLAR@13..14 "$"
+                      IDENT@14..18 "name"
+                    RBRACE@18..19 "}"
+                  STRING_END@19..21 "!\""
+                SEMICOLON@21..22 ";"
+        "##]],
     );
 }
 
@@ -1792,45 +1781,30 @@ fn string_interpolation_multiple() {
     check(
         "$s: \"#{$a}-#{$b}\";",
         expect![[r##"
-        SOURCE_FILE@0..18
-          VARIABLE_DECL@0..5
-            DOLLAR@0..1 "$"
-            IDENT@1..2 "s"
-            COLON@2..3 ":"
-            INTERPOLATED_STRING@3..5
-              WHITESPACE@3..4 " "
-              STRING_START@4..5 "\""
-          RULE_SET@5..10
-            SELECTOR_LIST@5..10
-              SELECTOR@5..10
-                INTERPOLATION@5..10
-                  HASH_LBRACE@5..7 "#{"
-                  VARIABLE_REF@7..9
-                    DOLLAR@7..8 "$"
-                    IDENT@8..9 "a"
-                  RBRACE@9..10 "}"
-          ERROR@10..11
-            STRING_MID@10..11 "-"
-          RULE_SET@11..16
-            SELECTOR_LIST@11..16
-              SELECTOR@11..16
-                INTERPOLATION@11..16
-                  HASH_LBRACE@11..13 "#{"
-                  VARIABLE_REF@13..15
-                    DOLLAR@13..14 "$"
-                    IDENT@14..15 "b"
-                  RBRACE@15..16 "}"
-          ERROR@16..17
-            STRING_END@16..17 "\""
-          SEMICOLON@17..18 ";"
-        errors:
-          5..7: expected STRING_END
-          5..7: expected SEMICOLON
-          10..11: expected `{`
-          10..11: expected rule
-          16..17: expected `{`
-          16..17: expected rule
-    "##]],
+            SOURCE_FILE@0..18
+              VARIABLE_DECL@0..18
+                DOLLAR@0..1 "$"
+                IDENT@1..2 "s"
+                COLON@2..3 ":"
+                INTERPOLATED_STRING@3..17
+                  WHITESPACE@3..4 " "
+                  STRING_START@4..5 "\""
+                  INTERPOLATION@5..10
+                    HASH_LBRACE@5..7 "#{"
+                    VARIABLE_REF@7..9
+                      DOLLAR@7..8 "$"
+                      IDENT@8..9 "a"
+                    RBRACE@9..10 "}"
+                  STRING_MID@10..11 "-"
+                  INTERPOLATION@11..16
+                    HASH_LBRACE@11..13 "#{"
+                    VARIABLE_REF@13..15
+                      DOLLAR@13..14 "$"
+                      IDENT@14..15 "b"
+                    RBRACE@15..16 "}"
+                  STRING_END@16..17 "\""
+                SEMICOLON@17..18 ";"
+        "##]],
     );
 }
 

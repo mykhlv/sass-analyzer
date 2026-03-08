@@ -12,7 +12,7 @@ pub fn function_rule(p: &mut Parser<'_>) {
         super::param_list(p);
     }
     if p.at(LBRACE) {
-        super::super::block(p);
+        super::block(p);
     } else {
         p.error("expected `{`");
     }
@@ -24,7 +24,7 @@ pub fn return_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // return
-    crate::grammar::expressions::expr(p, crate::grammar::ParseContext::SassScript);
+    super::expressions::expr(p, super::ParseContext::SassScript);
     if !p.at(RBRACE) && !p.at_end() {
         p.expect(SEMICOLON);
     }

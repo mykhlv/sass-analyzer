@@ -7,7 +7,7 @@ pub fn at_error_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // error
-    crate::grammar::expressions::expr(p, crate::grammar::ParseContext::SassScript);
+    super::expressions::expr(p, super::ParseContext::SassScript);
     if !p.at(RBRACE) && !p.at_end() {
         p.expect(SEMICOLON);
     }
@@ -19,7 +19,7 @@ pub fn warn_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // warn
-    crate::grammar::expressions::expr(p, crate::grammar::ParseContext::SassScript);
+    super::expressions::expr(p, super::ParseContext::SassScript);
     if !p.at(RBRACE) && !p.at_end() {
         p.expect(SEMICOLON);
     }
@@ -31,7 +31,7 @@ pub fn debug_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // debug
-    crate::grammar::expressions::expr(p, crate::grammar::ParseContext::SassScript);
+    super::expressions::expr(p, super::ParseContext::SassScript);
     if !p.at(RBRACE) && !p.at_end() {
         p.expect(SEMICOLON);
     }

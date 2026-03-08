@@ -88,7 +88,9 @@ fn property(p: &mut Parser<'_>) {
     loop {
         match p.current() {
             IDENT | MINUS => p.bump(),
-            HASH_LBRACE => expressions::interpolation(p),
+            HASH_LBRACE => {
+                let _ = expressions::interpolation(p);
+            }
             _ => break,
         }
         if p.has_whitespace_before() {
@@ -183,7 +185,7 @@ fn custom_property_value(p: &mut Parser<'_>) {
                 p.bump();
             }
             HASH_LBRACE => {
-                selectors::interpolation(p);
+                let _ = selectors::interpolation(p);
             }
             _ => p.bump(),
         }

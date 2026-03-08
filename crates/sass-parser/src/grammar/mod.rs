@@ -6,7 +6,6 @@ pub(crate) mod selectors;
 use crate::parser::Parser;
 #[allow(clippy::wildcard_imports)]
 use crate::syntax_kind::*;
-use crate::token_set::TokenSet;
 
 /// Parsing context — drives disambiguation for `/`, `%`, `min()`/`max()`, etc.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -24,19 +23,6 @@ pub enum ParseContext {
     /// Content is mostly opaque.
     SpecialFunction,
 }
-
-/// Tokens that can start a top-level statement (rule, declaration, at-rule).
-#[rustfmt::skip]
-pub const STMT_RECOVERY: TokenSet = TokenSet::new(&[
-    IDENT, DOT, HASH, COLON, COLON_COLON, LBRACKET, AMP, PERCENT, STAR,
-    AT, DOLLAR, RBRACE, SEMICOLON,
-]);
-
-/// Tokens that terminate a block — used to stop error recovery inside blocks.
-#[rustfmt::skip]
-pub const BLOCK_RECOVERY: TokenSet = TokenSet::new(&[
-    RBRACE, SEMICOLON,
-]);
 
 /// Parse `SourceFile` — top-level sequence of items with error recovery.
 pub fn source_file(p: &mut Parser<'_>) {
@@ -105,12 +91,17 @@ fn looks_like_declaration(p: &Parser<'_>) -> bool {
 }
 
 /// Check if `#{...}[fragments]COLON` looks like a declaration with interpolated property.
+/// Scan is bounded to avoid O(n²) behavior on pathological inputs.
 fn looks_like_interpolated_declaration(p: &Parser<'_>) -> bool {
+    const MAX_SCAN: usize = 100;
     // Skip past the interpolation and any trailing property-name fragments
     let mut offset = 1; // past HASH_LBRACE
     let mut depth: u32 = 1;
     // Skip interpolation body
     loop {
+        if offset >= MAX_SCAN {
+            return false;
+        }
         match p.nth(offset) {
             EOF => return false,
             LBRACE | HASH_LBRACE => depth += 1,
@@ -127,6 +118,9 @@ fn looks_like_interpolated_declaration(p: &Parser<'_>) -> bool {
     }
     // Skip trailing property fragments (IDENT, MINUS, more interpolations)
     loop {
+        if offset >= MAX_SCAN {
+            return false;
+        }
         match p.nth(offset) {
             IDENT | MINUS => offset += 1,
             HASH_LBRACE => {
@@ -134,6 +128,9 @@ fn looks_like_interpolated_declaration(p: &Parser<'_>) -> bool {
                 offset += 1;
                 let mut d: u32 = 1;
                 loop {
+                    if offset >= MAX_SCAN {
+                        return false;
+                    }
                     match p.nth(offset) {
                         EOF => return false,
                         LBRACE | HASH_LBRACE => d += 1,
@@ -158,10 +155,17 @@ fn looks_like_interpolated_declaration(p: &Parser<'_>) -> bool {
 
 /// Scan tokens from `offset` looking for `{`, `;`, or `}` at depth 0.
 /// Returns `true` if `;`/`}`/EOF found first (declaration), `false` if `{` found (selector).
+/// Scan is bounded to avoid O(n²) behavior on pathological inputs.
 fn scan_for_declaration_end(p: &Parser<'_>, start: usize) -> bool {
+    const MAX_SCAN: usize = 100;
     let mut depth: u32 = 0;
     let mut offset = start;
+    let limit = start + MAX_SCAN;
     loop {
+        if offset >= limit {
+            // Exceeded scan budget — guess declaration to avoid misparse as selector
+            return true;
+        }
         match p.nth(offset) {
             EOF => return true,
             LBRACE if depth == 0 => return false,

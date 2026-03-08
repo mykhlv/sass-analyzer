@@ -155,23 +155,6 @@ impl<'src> Parser<'src> {
         let _ = m.complete(self, SyntaxKind::ERROR);
     }
 
-    /// Skip tokens until one in `recovery` (or EOF) is found.
-    /// Skipped tokens are wrapped in a single `ERROR` node.
-    /// Returns `true` if any tokens were skipped.
-    pub fn err_recover(&mut self, msg: impl Into<String>, recovery: TokenSet) -> bool {
-        if self.at_end() || self.at_ts(recovery) {
-            self.error(msg);
-            return false;
-        }
-        let m = self.start();
-        self.error(msg);
-        while !self.at_end() && !self.at_ts(recovery) {
-            self.bump();
-        }
-        let _ = m.complete(self, SyntaxKind::ERROR);
-        true
-    }
-
     // ── Recursion depth ──────────────────────────────────────────────
 
     #[allow(clippy::result_unit_err)]

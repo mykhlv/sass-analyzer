@@ -12,7 +12,7 @@ pub fn mixin_rule(p: &mut Parser<'_>) {
         super::param_list(p);
     }
     if p.at(LBRACE) {
-        super::super::block(p);
+        super::block(p);
     } else {
         p.error("expected `{`");
     }
@@ -29,7 +29,7 @@ pub fn include_rule(p: &mut Parser<'_>) {
 
     // Optional argument list
     if p.at(LPAREN) && !p.has_whitespace_before() {
-        crate::grammar::expressions::arg_list(p, crate::grammar::ParseContext::SassScript);
+        super::expressions::arg_list(p, super::ParseContext::SassScript);
     }
 
     // Optional `using ($args)` for content block arguments
@@ -42,7 +42,7 @@ pub fn include_rule(p: &mut Parser<'_>) {
 
     // Optional content block
     if p.at(LBRACE) {
-        super::super::block(p);
+        super::block(p);
     } else if !p.at(RBRACE) && !p.at_end() {
         p.expect(SEMICOLON);
     }
@@ -55,7 +55,7 @@ pub fn content_rule(p: &mut Parser<'_>) {
     p.bump(); // @
     p.bump(); // content
     if p.at(LPAREN) && !p.has_whitespace_before() {
-        crate::grammar::expressions::arg_list(p, crate::grammar::ParseContext::SassScript);
+        super::expressions::arg_list(p, super::ParseContext::SassScript);
     }
     if !p.at(RBRACE) && !p.at_end() {
         p.expect(SEMICOLON);

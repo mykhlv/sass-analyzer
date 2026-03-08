@@ -1,4 +1,4 @@
-use crate::parser::Parser;
+use crate::parser::{CompletedMarker, Parser};
 #[allow(clippy::wildcard_imports)]
 use crate::syntax_kind::*;
 use crate::token_set::TokenSet;
@@ -139,7 +139,7 @@ fn simple_selector(p: &mut Parser<'_>) {
         }
         HASH_LBRACE => {
             // #{...} interpolation in selector (2.12)
-            interpolation(p);
+            let _ = interpolation(p);
         }
         _ => {
             p.err_and_bump("expected selector");
@@ -148,8 +148,8 @@ fn simple_selector(p: &mut Parser<'_>) {
 }
 
 /// Parse `#{...}` interpolation with fully-parsed inner expression.
-pub fn interpolation(p: &mut Parser<'_>) {
-    super::expressions::interpolation(p);
+pub fn interpolation(p: &mut Parser<'_>) -> CompletedMarker {
+    super::expressions::interpolation(p)
 }
 
 /// Consume `(...)` balanced parentheses, treating content as opaque.

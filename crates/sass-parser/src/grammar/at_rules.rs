@@ -12,6 +12,14 @@ use crate::parser::Parser;
 #[allow(clippy::wildcard_imports)]
 use crate::syntax_kind::*;
 
+// Re-exports for sub-modules — shortens `super::super::block` → `super::block`
+// and `crate::grammar::expressions::*` → `super::expressions::*`.
+use super::ParseContext;
+use super::block;
+use super::expressions;
+use super::expressions::interpolation;
+use super::selectors;
+
 /// Dispatch `@keyword` — called when parser is at `AT`.
 pub fn at_rule(p: &mut Parser<'_>) {
     assert!(p.at(AT));

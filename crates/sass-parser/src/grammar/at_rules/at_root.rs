@@ -15,12 +15,12 @@ pub fn at_root_rule(p: &mut Parser<'_>) {
 
     // Either a block directly or selector + block
     if p.at(LBRACE) {
-        super::super::block(p);
+        super::block(p);
     } else if !p.at(SEMICOLON) && !p.at(RBRACE) && !p.at_end() {
         // Selector(s) before block
-        crate::grammar::selectors::selector_list(p);
+        super::selectors::selector_list(p);
         if p.at(LBRACE) {
-            super::super::block(p);
+            super::block(p);
         } else {
             p.error("expected `{`");
         }

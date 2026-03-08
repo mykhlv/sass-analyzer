@@ -9,7 +9,7 @@ pub fn media_rule(p: &mut Parser<'_>) {
     p.bump(); // media
     media_query_list(p);
     if p.at(LBRACE) {
-        super::super::block(p);
+        super::block(p);
     } else {
         p.error("expected `{`");
     }
@@ -44,7 +44,7 @@ fn media_query(p: &mut Parser<'_>) {
                 p.bump();
             }
             HASH_LBRACE => {
-                crate::grammar::expressions::interpolation(p);
+                let _ = super::interpolation(p);
             }
             _ => p.bump(),
         }
@@ -59,7 +59,7 @@ pub fn supports_rule(p: &mut Parser<'_>) {
     p.bump(); // supports
     supports_condition(p);
     if p.at(LBRACE) {
-        super::super::block(p);
+        super::block(p);
     } else {
         p.error("expected `{`");
     }
@@ -83,7 +83,7 @@ fn supports_condition(p: &mut Parser<'_>) {
                 p.bump();
             }
             HASH_LBRACE => {
-                crate::grammar::expressions::interpolation(p);
+                let _ = super::interpolation(p);
             }
             _ => p.bump(),
         }
@@ -99,7 +99,7 @@ pub fn keyframes_rule(p: &mut Parser<'_>) {
 
     // Name (can be interpolated)
     if p.at(HASH_LBRACE) {
-        crate::grammar::expressions::interpolation(p);
+        let _ = super::interpolation(p);
     } else if p.at(IDENT) {
         p.bump();
     } else {
@@ -136,7 +136,7 @@ fn keyframe_block(p: &mut Parser<'_>) {
     }
 
     if p.at(LBRACE) {
-        super::super::block(p);
+        super::block(p);
     } else {
         p.error("expected `{`");
     }
