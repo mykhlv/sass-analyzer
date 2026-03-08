@@ -9,6 +9,8 @@ rust-version = "1.85"
 [workspace.dependencies]
 text-size = "1.1"
 rowan = "0.16"
+clap = { version = "4", features = ["derive"] }
+miette = { version = "7", features = ["fancy"] }
 expect-test = "1.5"
 divan = "0.1"
 

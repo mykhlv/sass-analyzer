@@ -10,6 +10,7 @@ pub mod syntax;
 
 pub mod ast;
 pub mod grammar;
+pub mod line_index;
 
 mod bridge;
 pub use bridge::build_tree;

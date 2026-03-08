@@ -20,8 +20,13 @@ pub fn extend_rule(p: &mut Parser<'_>) {
             // Whitespace between selector-start tokens = descendant combinator
             if has_selector_token && p.has_whitespace_before() {
                 let kind = p.current();
-                if kind == IDENT || kind == DOT || kind == HASH || kind == PERCENT
-                    || kind == COLON || kind == COLON_COLON || kind == LBRACKET
+                if kind == IDENT
+                    || kind == DOT
+                    || kind == HASH
+                    || kind == PERCENT
+                    || kind == COLON
+                    || kind == COLON_COLON
+                    || kind == LBRACKET
                 {
                     has_combinator = true;
                 }
