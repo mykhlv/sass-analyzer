@@ -25,7 +25,21 @@ pub fn include_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // include
-    p.expect(IDENT); // mixin name
+    // Mixin name — plain IDENT or namespace-qualified ns.name
+    if p.at(IDENT)
+        && p.nth(1) == DOT
+        && !p.nth_has_whitespace_before(1)
+        && p.nth(2) == IDENT
+        && !p.nth_has_whitespace_before(2)
+    {
+        let nm = p.start();
+        p.bump(); // IDENT (namespace)
+        p.bump(); // DOT
+        p.bump(); // IDENT (mixin name)
+        let _ = nm.complete(p, NAMESPACE_REF);
+    } else {
+        p.expect(IDENT);
+    }
 
     // Optional argument list (whitespace before `(` is allowed in @include)
     if p.at(LPAREN) {

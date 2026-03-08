@@ -2972,3 +2972,129 @@ fn css_value_and_or_are_plain_idents() {
         "#]],
     );
 }
+
+// ── Namespace member access ───────────────────────────────────────
+
+#[test]
+fn namespace_variable_ref() {
+    check(
+        "$x: ns.$var;",
+        expect![[r#"
+            SOURCE_FILE@0..12
+              VARIABLE_DECL@0..12
+                DOLLAR@0..1 "$"
+                IDENT@1..2 "x"
+                COLON@2..3 ":"
+                NAMESPACE_REF@3..11
+                  WHITESPACE@3..4 " "
+                  IDENT@4..6 "ns"
+                  DOT@6..7 "."
+                  DOLLAR@7..8 "$"
+                  IDENT@8..11 "var"
+                SEMICOLON@11..12 ";"
+        "#]],
+    );
+}
+
+#[test]
+fn namespace_function_call() {
+    check(
+        "$x: math.floor(4.7);",
+        expect![[r#"
+            SOURCE_FILE@0..20
+              VARIABLE_DECL@0..20
+                DOLLAR@0..1 "$"
+                IDENT@1..2 "x"
+                COLON@2..3 ":"
+                NAMESPACE_REF@3..19
+                  WHITESPACE@3..4 " "
+                  IDENT@4..8 "math"
+                  DOT@8..9 "."
+                  FUNCTION_CALL@9..19
+                    IDENT@9..14 "floor"
+                    ARG_LIST@14..19
+                      LPAREN@14..15 "("
+                      ARG@15..18
+                        NUMBER_LITERAL@15..18
+                          NUMBER@15..18 "4.7"
+                      RPAREN@18..19 ")"
+                SEMICOLON@19..20 ";"
+        "#]],
+    );
+}
+
+#[test]
+fn namespace_function_with_args() {
+    check(
+        "$x: color.adjust($c, $lightness: 10%);",
+        expect![[r#"
+            SOURCE_FILE@0..38
+              VARIABLE_DECL@0..38
+                DOLLAR@0..1 "$"
+                IDENT@1..2 "x"
+                COLON@2..3 ":"
+                NAMESPACE_REF@3..37
+                  WHITESPACE@3..4 " "
+                  IDENT@4..9 "color"
+                  DOT@9..10 "."
+                  FUNCTION_CALL@10..37
+                    IDENT@10..16 "adjust"
+                    ARG_LIST@16..37
+                      LPAREN@16..17 "("
+                      ARG@17..19
+                        VARIABLE_REF@17..19
+                          DOLLAR@17..18 "$"
+                          IDENT@18..19 "c"
+                      COMMA@19..20 ","
+                      ARG@20..36
+                        WHITESPACE@20..21 " "
+                        DOLLAR@21..22 "$"
+                        IDENT@22..31 "lightness"
+                        COLON@31..32 ":"
+                        DIMENSION@32..36
+                          WHITESPACE@32..33 " "
+                          NUMBER@33..35 "10"
+                          PERCENT@35..36 "%"
+                      RPAREN@36..37 ")"
+                SEMICOLON@37..38 ";"
+        "#]],
+    );
+}
+
+#[test]
+fn include_namespace_mixin() {
+    check(
+        ".foo { @include ns.mixin(1px); }",
+        expect![[r#"
+            SOURCE_FILE@0..32
+              RULE_SET@0..32
+                SELECTOR_LIST@0..4
+                  SELECTOR@0..4
+                    SIMPLE_SELECTOR@0..4
+                      DOT@0..1 "."
+                      IDENT@1..4 "foo"
+                BLOCK@4..32
+                  WHITESPACE@4..5 " "
+                  LBRACE@5..6 "{"
+                  INCLUDE_RULE@6..30
+                    WHITESPACE@6..7 " "
+                    AT@7..8 "@"
+                    IDENT@8..15 "include"
+                    NAMESPACE_REF@15..24
+                      WHITESPACE@15..16 " "
+                      IDENT@16..18 "ns"
+                      DOT@18..19 "."
+                      IDENT@19..24 "mixin"
+                    ARG_LIST@24..29
+                      LPAREN@24..25 "("
+                      ARG@25..28
+                        DIMENSION@25..28
+                          NUMBER@25..26 "1"
+                          IDENT@26..28 "px"
+                      RPAREN@28..29 ")"
+                    SEMICOLON@29..30 ";"
+                  WHITESPACE@30..31 " "
+                  RBRACE@31..32 "}"
+        "#]],
+    );
+}

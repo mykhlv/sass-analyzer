@@ -258,9 +258,28 @@ fn variable_ref(p: &mut Parser<'_>) -> CompletedMarker {
     m.complete(p, VARIABLE_REF)
 }
 
-/// Dispatch IDENT: boolean/null literal, function call, or plain identifier.
+/// Dispatch IDENT: namespace member, boolean/null literal, function call, or plain identifier.
 fn ident_or_call(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarker> {
     let text = p.current_text();
+
+    // Namespace member access: ns.$var or ns.func()
+    if p.nth(1) == DOT && !p.nth_has_whitespace_before(1) && !p.nth_has_whitespace_before(2) {
+        if p.nth(2) == DOLLAR && p.nth(3) == IDENT {
+            let m = p.start();
+            p.bump(); // IDENT (namespace)
+            p.bump(); // DOT
+            p.bump(); // DOLLAR
+            p.bump(); // IDENT (variable name)
+            return Some(m.complete(p, NAMESPACE_REF));
+        }
+        if p.nth(2) == IDENT && p.nth(3) == LPAREN {
+            let m = p.start();
+            p.bump(); // IDENT (namespace)
+            p.bump(); // DOT
+            let _ = function_call(p, ctx);
+            return Some(m.complete(p, NAMESPACE_REF));
+        }
+    }
 
     // Boolean and null literals
     if text == "true" || text == "false" {

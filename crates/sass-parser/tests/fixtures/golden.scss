@@ -362,6 +362,16 @@ $counter: 5;
 
 @import "legacy/normalize";
 
+// ── Namespace member access ─────────────────────────────────────────
+
+$math-result: math.floor(4.7);
+$color-val: c.adjust($primary, $lightness: 10%);
+$ns-var: math.$pi;
+
+.ns-test {
+  @include ns.flex-center(row, 8px);
+}
+
 // ── @layer ───────────────────────────────────────────────────────────
 
 @layer base, components, utilities;
