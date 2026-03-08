@@ -24,7 +24,7 @@ pub fn return_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // return
-    super::expressions::expr(p, super::ParseContext::SassScript);
+    super::expressions::sass_value_list(p, super::ParseContext::SassScript);
     if !p.at(RBRACE) && !p.at_end() {
         p.expect(SEMICOLON);
     }

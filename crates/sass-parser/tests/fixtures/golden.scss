@@ -5,7 +5,7 @@
 // ── Variables ────────────────────────────────────────────────────────
 
 $primary: #3498db;
-$font-stack: 'Helvetica Neue';
+$font-stack: 'Helvetica Neue', Arial, sans-serif;
 $base-size: 16px;
 $line-height: 1.5;
 $spacing: (sm: 4px, md: 8px, lg: 16px);
@@ -138,7 +138,7 @@ input[type="password"] {
       margin-top: 8px;
     }
 
-    *:last-child {
+    > *:last-child {
       margin-bottom: 0;
     }
   }
@@ -428,8 +428,8 @@ $counter: 5;
 
 // ── Complex expressions ──────────────────────────────────────────────
 
-$result: if($enable-shadows, inset, none);
-$list: (1px, 2px, 3px);
+$result: if($enable-shadows, 0 2px 4px rgba(0, 0, 0, 0.1), none);
+$list: 1px 2px 3px;
 $map: (a: 1, b: 2, c: (nested: true));
 $bracketed: [a, b, c];
 $calc-val: 100% - 2 * $base-size;

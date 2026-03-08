@@ -7,7 +7,7 @@ pub fn at_error_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // error
-    super::expressions::expr(p, super::ParseContext::SassScript);
+    super::expressions::sass_value_list(p, super::ParseContext::SassScript);
     if !p.at(RBRACE) && !p.at_end() {
         p.expect(SEMICOLON);
     }
@@ -19,7 +19,7 @@ pub fn warn_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // warn
-    super::expressions::expr(p, super::ParseContext::SassScript);
+    super::expressions::sass_value_list(p, super::ParseContext::SassScript);
     if !p.at(RBRACE) && !p.at_end() {
         p.expect(SEMICOLON);
     }
@@ -31,7 +31,7 @@ pub fn debug_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // debug
-    super::expressions::expr(p, super::ParseContext::SassScript);
+    super::expressions::sass_value_list(p, super::ParseContext::SassScript);
     if !p.at(RBRACE) && !p.at_end() {
         p.expect(SEMICOLON);
     }

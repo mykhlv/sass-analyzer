@@ -12,7 +12,7 @@ pub const SELECTOR_START: TokenSet = TokenSet::new(&[
 
 /// Combinator tokens (explicit combinators between compound selectors).
 #[rustfmt::skip]
-const COMBINATOR_TOKEN: TokenSet = TokenSet::new(&[
+pub const COMBINATOR_TOKEN: TokenSet = TokenSet::new(&[
     GT, PLUS, TILDE,
 ]);
 
@@ -35,12 +35,20 @@ pub fn selector_list(p: &mut Parser<'_>) {
 /// Parse a single compound selector (sequence of simple selectors and combinators).
 fn selector(p: &mut Parser<'_>) {
     let m = p.start();
-    if !p.at_ts(SELECTOR_START) {
+    if !p.at_ts(SELECTOR_START) && !p.at_ts(COMBINATOR_TOKEN) {
         p.error("expected selector");
         m.abandon(p);
         return;
     }
-    compound_selector(p);
+    // Leading combinator in nested context: `> .child`, `+ .sibling`
+    if p.at_ts(COMBINATOR_TOKEN) {
+        let cm = p.start();
+        p.bump();
+        let _ = cm.complete(p, COMBINATOR);
+    }
+    if p.at_ts(SELECTOR_START) {
+        compound_selector(p);
+    }
     loop {
         if p.at_ts(COMBINATOR_TOKEN) {
             let cm = p.start();

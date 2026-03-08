@@ -1506,12 +1506,12 @@ fn complex_real_world() {
                         NUMBER@22..25 "100"
                         PERCENT@25..26 "%"
                     SEMICOLON@26..27 ";"
-                  ERROR@27..31
-                    WHITESPACE@27..30 "\n  "
-                    GT@30..31 ">"
-                  RULE_SET@31..61
-                    SELECTOR_LIST@31..36
-                      SELECTOR@31..36
+                  RULE_SET@27..61
+                    SELECTOR_LIST@27..36
+                      SELECTOR@27..36
+                        COMBINATOR@27..31
+                          WHITESPACE@27..30 "\n  "
+                          GT@30..31 ">"
                         SIMPLE_SELECTOR@31..36
                           WHITESPACE@31..32 " "
                           DOT@32..33 "."
@@ -1533,8 +1533,6 @@ fn complex_real_world() {
                       RBRACE@60..61 "}"
                   WHITESPACE@61..62 "\n"
                   RBRACE@62..63 "}"
-            errors:
-              30..31: expected declaration or nested rule
         "#]],
     );
 }

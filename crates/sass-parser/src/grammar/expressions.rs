@@ -76,6 +76,38 @@ pub fn expr_list(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarke
     Some(m.complete(p, LIST_EXPR))
 }
 
+/// Parse a space-separated group of expressions in `SassScript` context.
+/// Stops at `;`, `}`, `!`, `,`, `)`, or EOF.
+/// Extra values become siblings (no wrapper node).
+fn sass_value(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarker> {
+    let cm = expr(p, ctx)?;
+    while !at_value_end(p) && !p.at(COMMA) && !p.at(RPAREN) && p.at_ts(EXPR_START) {
+        expr(p, ctx);
+    }
+    Some(cm)
+}
+
+/// Parse a comma-separated list of space-separated groups.
+/// `$x: 1px 2px, 3px 4px;` → `LIST_EXPR` containing both groups separated by COMMA.
+/// Single values or space-only groups return without wrapper.
+pub(crate) fn sass_value_list(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarker> {
+    let first = sass_value(p, ctx)?;
+    if !p.at(COMMA) {
+        return Some(first);
+    }
+    let m = first.precede(p);
+    while p.eat(COMMA) {
+        if !at_value_end(p) {
+            sass_value(p, ctx);
+        }
+    }
+    Some(m.complete(p, LIST_EXPR))
+}
+
+fn at_value_end(p: &Parser<'_>) -> bool {
+    p.at(SEMICOLON) || p.at(RBRACE) || p.at(BANG) || p.at_end()
+}
+
 // ── Pratt parser core ──────────────────────────────────────────────
 
 fn expr_bp(p: &mut Parser<'_>, min_bp: u8, ctx: ParseContext) -> Option<CompletedMarker> {
@@ -436,13 +468,13 @@ fn arg(p: &mut Parser<'_>, ctx: ParseContext) {
         p.bump(); // $
         p.bump(); // name
         p.bump(); // :
-        expr(p, ctx);
+        sass_value(p, ctx);
         let _ = m.complete(p, ARG);
         return;
     }
 
-    // Positional argument
-    expr(p, ctx);
+    // Positional argument (may be space-separated: `func(1px 2px, 3px)`)
+    sass_value(p, ctx);
 
     // Check for splat: `$list...`
     if p.at(DOT_DOT_DOT) {
@@ -600,7 +632,7 @@ pub fn variable_declaration(p: &mut Parser<'_>) {
     p.expect(IDENT);
     p.expect(COLON);
 
-    expr(p, ParseContext::SassScript);
+    sass_value_list(p, ParseContext::SassScript);
 
     // Parse flags: !default, !global (can co-occur)
     while p.at(BANG) {

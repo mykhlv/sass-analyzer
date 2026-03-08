@@ -32,7 +32,7 @@ pub fn source_file(p: &mut Parser<'_>) {
             at_rules::at_rule(p);
         } else if p.at(DOLLAR) {
             expressions::variable_declaration(p);
-        } else if p.at_ts(selectors::SELECTOR_START) {
+        } else if p.at_ts(selectors::SELECTOR_START) || p.at_ts(selectors::COMBINATOR_TOKEN) {
             rule_set(p);
         } else if p.at(SEMICOLON) {
             p.bump();
@@ -43,6 +43,7 @@ pub fn source_file(p: &mut Parser<'_>) {
             while !p.at_end()
                 && !p.at(AT)
                 && !p.at_ts(selectors::SELECTOR_START)
+                && !p.at_ts(selectors::COMBINATOR_TOKEN)
                 && !p.at(SEMICOLON)
                 && !p.at(DOLLAR)
             {
@@ -63,7 +64,7 @@ fn block_item(p: &mut Parser<'_>) {
         expressions::variable_declaration(p);
     } else if looks_like_declaration(p) {
         declarations::declaration(p);
-    } else if p.at_ts(selectors::SELECTOR_START) {
+    } else if p.at_ts(selectors::SELECTOR_START) || p.at_ts(selectors::COMBINATOR_TOKEN) {
         rule_set(p);
     } else {
         p.err_and_bump("expected declaration or nested rule");
@@ -242,7 +243,11 @@ pub(crate) fn block(p: &mut Parser<'_>) {
     while !g.at(RBRACE) && !g.at_end() {
         if g.at(SEMICOLON) {
             g.bump();
-        } else if g.at(AT) || g.at(DOLLAR) || g.at_ts(selectors::SELECTOR_START) {
+        } else if g.at(AT)
+            || g.at(DOLLAR)
+            || g.at_ts(selectors::SELECTOR_START)
+            || g.at_ts(selectors::COMBINATOR_TOKEN)
+        {
             block_item(&mut g);
         } else {
             g.err_and_bump("expected declaration or nested rule");

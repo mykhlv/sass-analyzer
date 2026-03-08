@@ -729,24 +729,20 @@ fn ws_no_space_is_infix() {
     check(
         "$a: $x-$y;",
         expect![[r#"
-        SOURCE_FILE@0..10
-          VARIABLE_DECL@0..7
-            DOLLAR@0..1 "$"
-            IDENT@1..2 "a"
-            COLON@2..3 ":"
-            VARIABLE_REF@3..7
-              WHITESPACE@3..4 " "
-              DOLLAR@4..5 "$"
-              IDENT@5..7 "x-"
-          VARIABLE_DECL@7..10
-            DOLLAR@7..8 "$"
-            IDENT@8..9 "y"
-            SEMICOLON@9..10 ";"
-        errors:
-          7..8: expected SEMICOLON
-          9..10: expected COLON
-          9..10: expected expression
-    "#]],
+            SOURCE_FILE@0..10
+              VARIABLE_DECL@0..10
+                DOLLAR@0..1 "$"
+                IDENT@1..2 "a"
+                COLON@2..3 ":"
+                VARIABLE_REF@3..7
+                  WHITESPACE@3..4 " "
+                  DOLLAR@4..5 "$"
+                  IDENT@5..7 "x-"
+                VARIABLE_REF@7..9
+                  DOLLAR@7..8 "$"
+                  IDENT@8..9 "y"
+                SEMICOLON@9..10 ";"
+        "#]],
     );
 }
 
@@ -1555,6 +1551,177 @@ fn paren_list_comma() {
               RPAREN@12..13 ")"
             SEMICOLON@13..14 ";"
     "#]],
+    );
+}
+
+// ── Space-separated and comma-separated lists in variable values ──
+
+#[test]
+fn var_space_separated_list() {
+    check(
+        "$x: 1px 2px 3px;",
+        expect![[r#"
+            SOURCE_FILE@0..16
+              VARIABLE_DECL@0..16
+                DOLLAR@0..1 "$"
+                IDENT@1..2 "x"
+                COLON@2..3 ":"
+                DIMENSION@3..7
+                  WHITESPACE@3..4 " "
+                  NUMBER@4..5 "1"
+                  IDENT@5..7 "px"
+                DIMENSION@7..11
+                  WHITESPACE@7..8 " "
+                  NUMBER@8..9 "2"
+                  IDENT@9..11 "px"
+                DIMENSION@11..15
+                  WHITESPACE@11..12 " "
+                  NUMBER@12..13 "3"
+                  IDENT@13..15 "px"
+                SEMICOLON@15..16 ";"
+        "#]],
+    );
+}
+
+#[test]
+fn var_comma_separated_list() {
+    check(
+        "$fonts: Arial, sans-serif;",
+        expect![[r#"
+            SOURCE_FILE@0..26
+              VARIABLE_DECL@0..26
+                DOLLAR@0..1 "$"
+                IDENT@1..6 "fonts"
+                COLON@6..7 ":"
+                LIST_EXPR@7..25
+                  VALUE@7..13
+                    WHITESPACE@7..8 " "
+                    IDENT@8..13 "Arial"
+                  COMMA@13..14 ","
+                  VALUE@14..25
+                    WHITESPACE@14..15 " "
+                    IDENT@15..25 "sans-serif"
+                SEMICOLON@25..26 ";"
+        "#]],
+    );
+}
+
+#[test]
+fn var_comma_of_space_lists() {
+    check(
+        "$x: 1px 2px, 3px 4px;",
+        expect![[r#"
+            SOURCE_FILE@0..21
+              VARIABLE_DECL@0..21
+                DOLLAR@0..1 "$"
+                IDENT@1..2 "x"
+                COLON@2..3 ":"
+                LIST_EXPR@3..20
+                  DIMENSION@3..7
+                    WHITESPACE@3..4 " "
+                    NUMBER@4..5 "1"
+                    IDENT@5..7 "px"
+                  DIMENSION@7..11
+                    WHITESPACE@7..8 " "
+                    NUMBER@8..9 "2"
+                    IDENT@9..11 "px"
+                  COMMA@11..12 ","
+                  DIMENSION@12..16
+                    WHITESPACE@12..13 " "
+                    NUMBER@13..14 "3"
+                    IDENT@14..16 "px"
+                  DIMENSION@16..20
+                    WHITESPACE@16..17 " "
+                    NUMBER@17..18 "4"
+                    IDENT@18..20 "px"
+                SEMICOLON@20..21 ";"
+        "#]],
+    );
+}
+
+#[test]
+fn function_arg_space_list() {
+    check(
+        "$x: if($a, 1px 2px, none);",
+        expect![[r#"
+            SOURCE_FILE@0..26
+              VARIABLE_DECL@0..26
+                DOLLAR@0..1 "$"
+                IDENT@1..2 "x"
+                COLON@2..3 ":"
+                FUNCTION_CALL@3..25
+                  WHITESPACE@3..4 " "
+                  IDENT@4..6 "if"
+                  ARG_LIST@6..25
+                    LPAREN@6..7 "("
+                    ARG@7..9
+                      VARIABLE_REF@7..9
+                        DOLLAR@7..8 "$"
+                        IDENT@8..9 "a"
+                    COMMA@9..10 ","
+                    ARG@10..18
+                      DIMENSION@10..14
+                        WHITESPACE@10..11 " "
+                        NUMBER@11..12 "1"
+                        IDENT@12..14 "px"
+                      DIMENSION@14..18
+                        WHITESPACE@14..15 " "
+                        NUMBER@15..16 "2"
+                        IDENT@16..18 "px"
+                    COMMA@18..19 ","
+                    ARG@19..24
+                      VALUE@19..24
+                        WHITESPACE@19..20 " "
+                        IDENT@20..24 "none"
+                    RPAREN@24..25 ")"
+                SEMICOLON@25..26 ";"
+        "#]],
+    );
+}
+
+#[test]
+fn nested_rule_leading_combinator() {
+    check(
+        ".parent { > .child { color: red; } }",
+        expect![[r#"
+            SOURCE_FILE@0..36
+              RULE_SET@0..36
+                SELECTOR_LIST@0..7
+                  SELECTOR@0..7
+                    SIMPLE_SELECTOR@0..7
+                      DOT@0..1 "."
+                      IDENT@1..7 "parent"
+                BLOCK@7..36
+                  WHITESPACE@7..8 " "
+                  LBRACE@8..9 "{"
+                  RULE_SET@9..34
+                    SELECTOR_LIST@9..18
+                      SELECTOR@9..18
+                        COMBINATOR@9..11
+                          WHITESPACE@9..10 " "
+                          GT@10..11 ">"
+                        SIMPLE_SELECTOR@11..18
+                          WHITESPACE@11..12 " "
+                          DOT@12..13 "."
+                          IDENT@13..18 "child"
+                    BLOCK@18..34
+                      WHITESPACE@18..19 " "
+                      LBRACE@19..20 "{"
+                      DECLARATION@20..32
+                        PROPERTY@20..26
+                          WHITESPACE@20..21 " "
+                          IDENT@21..26 "color"
+                        COLON@26..27 ":"
+                        VALUE@27..31
+                          VALUE@27..31
+                            WHITESPACE@27..28 " "
+                            IDENT@28..31 "red"
+                        SEMICOLON@31..32 ";"
+                      WHITESPACE@32..33 " "
+                      RBRACE@33..34 "}"
+                  WHITESPACE@34..35 " "
+                  RBRACE@35..36 "}"
+        "#]],
     );
 }
 
