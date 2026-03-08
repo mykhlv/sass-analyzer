@@ -311,6 +311,322 @@ fn standalone_caret_is_error() {
     assert_eq!(lex("^"), vec![(ERROR, "^")]);
 }
 
+// ── Strings (1.7) ────────────────────────────────────────────────────
+
+#[test]
+fn double_quoted_string() {
+    assert_eq!(lex("\"hello\""), vec![(QUOTED_STRING, "\"hello\"")]);
+}
+
+#[test]
+fn single_quoted_string() {
+    assert_eq!(lex("'hello'"), vec![(QUOTED_STRING, "'hello'")]);
+}
+
+#[test]
+fn empty_double_string() {
+    assert_eq!(lex("\"\""), vec![(QUOTED_STRING, "\"\"")]);
+}
+
+#[test]
+fn empty_single_string() {
+    assert_eq!(lex("''"), vec![(QUOTED_STRING, "''")]);
+}
+
+#[test]
+fn string_with_escaped_quote() {
+    assert_eq!(lex("\"he\\\"llo\""), vec![(QUOTED_STRING, "\"he\\\"llo\"")]);
+}
+
+#[test]
+fn string_with_escaped_backslash() {
+    assert_eq!(lex("\"a\\\\b\""), vec![(QUOTED_STRING, "\"a\\\\b\"")]);
+}
+
+#[test]
+fn unterminated_double_string() {
+    assert_eq!(lex("\"hello"), vec![(ERROR, "\"hello")]);
+}
+
+#[test]
+fn unterminated_single_string() {
+    assert_eq!(lex("'hello"), vec![(ERROR, "'hello")]);
+}
+
+#[test]
+fn string_in_declaration() {
+    assert_eq!(
+        lex("content: \"red\";"),
+        vec![
+            (IDENT, "content"),
+            (COLON, ":"),
+            (WHITESPACE, " "),
+            (QUOTED_STRING, "\"red\""),
+            (SEMICOLON, ";"),
+        ]
+    );
+}
+
+#[test]
+fn string_with_hash_no_brace() {
+    assert_eq!(lex("\"#fff\""), vec![(QUOTED_STRING, "\"#fff\"")]);
+}
+
+#[test]
+fn escaped_hash_prevents_interpolation() {
+    assert_eq!(lex("\"\\#{$x}\""), vec![(QUOTED_STRING, "\"\\#{$x}\"")]);
+}
+
+#[test]
+fn escaped_hash_non_brace() {
+    assert_eq!(lex("\"\\#fff\""), vec![(QUOTED_STRING, "\"\\#fff\"")]);
+}
+
+#[test]
+fn unterminated_string_trailing_backslash() {
+    assert_eq!(lex("\"hello\\"), vec![(ERROR, "\"hello\\")]);
+}
+
+#[test]
+fn string_with_escaped_multibyte() {
+    assert_eq!(lex("\"\\é\""), vec![(QUOTED_STRING, "\"\\é\"")]);
+}
+
+#[test]
+fn double_backslash_before_interpolation() {
+    // \\#{ — first \ escapes second \, so #{ triggers interpolation
+    assert_eq!(
+        lex("\"\\\\#{$x}\""),
+        vec![
+            (STRING_START, "\"\\\\"),
+            (HASH_LBRACE, "#{"),
+            (DOLLAR, "$"),
+            (IDENT, "x"),
+            (RBRACE, "}"),
+            (STRING_END, "\""),
+        ]
+    );
+}
+
+// ── String interpolation (1.8) ───────────────────────────────────────
+
+#[test]
+fn string_with_interpolation() {
+    assert_eq!(
+        lex("\"hello #{$x}\""),
+        vec![
+            (STRING_START, "\"hello "),
+            (HASH_LBRACE, "#{"),
+            (DOLLAR, "$"),
+            (IDENT, "x"),
+            (RBRACE, "}"),
+            (STRING_END, "\""),
+        ]
+    );
+}
+
+#[test]
+fn string_interpolation_at_start() {
+    assert_eq!(
+        lex("\"#{$x} world\""),
+        vec![
+            (STRING_START, "\""),
+            (HASH_LBRACE, "#{"),
+            (DOLLAR, "$"),
+            (IDENT, "x"),
+            (RBRACE, "}"),
+            (STRING_END, " world\""),
+        ]
+    );
+}
+
+#[test]
+fn string_interpolation_only() {
+    assert_eq!(
+        lex("\"#{$x}\""),
+        vec![
+            (STRING_START, "\""),
+            (HASH_LBRACE, "#{"),
+            (DOLLAR, "$"),
+            (IDENT, "x"),
+            (RBRACE, "}"),
+            (STRING_END, "\""),
+        ]
+    );
+}
+
+#[test]
+fn string_multiple_interpolations() {
+    assert_eq!(
+        lex("\"#{$a} and #{$b}\""),
+        vec![
+            (STRING_START, "\""),
+            (HASH_LBRACE, "#{"),
+            (DOLLAR, "$"),
+            (IDENT, "a"),
+            (RBRACE, "}"),
+            (STRING_MID, " and "),
+            (HASH_LBRACE, "#{"),
+            (DOLLAR, "$"),
+            (IDENT, "b"),
+            (RBRACE, "}"),
+            (STRING_END, "\""),
+        ]
+    );
+}
+
+#[test]
+fn string_adjacent_interpolations() {
+    assert_eq!(
+        lex("\"#{$a}#{$b}\""),
+        vec![
+            (STRING_START, "\""),
+            (HASH_LBRACE, "#{"),
+            (DOLLAR, "$"),
+            (IDENT, "a"),
+            (RBRACE, "}"),
+            (HASH_LBRACE, "#{"),
+            (DOLLAR, "$"),
+            (IDENT, "b"),
+            (RBRACE, "}"),
+            (STRING_END, "\""),
+        ]
+    );
+}
+
+#[test]
+fn single_quoted_interpolation() {
+    assert_eq!(
+        lex("'hello #{$x}'"),
+        vec![
+            (STRING_START, "'hello "),
+            (HASH_LBRACE, "#{"),
+            (DOLLAR, "$"),
+            (IDENT, "x"),
+            (RBRACE, "}"),
+            (STRING_END, "'"),
+        ]
+    );
+}
+
+#[test]
+fn nested_string_in_interpolation() {
+    assert_eq!(
+        lex("\"a #{\"b\"} c\""),
+        vec![
+            (STRING_START, "\"a "),
+            (HASH_LBRACE, "#{"),
+            (QUOTED_STRING, "\"b\""),
+            (RBRACE, "}"),
+            (STRING_END, " c\""),
+        ]
+    );
+}
+
+#[test]
+fn deeply_nested_interpolation() {
+    assert_eq!(
+        lex("\"a #{\"b #{$c} d\"} e\""),
+        vec![
+            (STRING_START, "\"a "),
+            (HASH_LBRACE, "#{"),
+            (STRING_START, "\"b "),
+            (HASH_LBRACE, "#{"),
+            (DOLLAR, "$"),
+            (IDENT, "c"),
+            (RBRACE, "}"),
+            (STRING_END, " d\""),
+            (RBRACE, "}"),
+            (STRING_END, " e\""),
+        ]
+    );
+}
+
+#[test]
+fn interpolation_with_expression() {
+    assert_eq!(
+        lex("\"#{1 + 2}\""),
+        vec![
+            (STRING_START, "\""),
+            (HASH_LBRACE, "#{"),
+            (NUMBER, "1"),
+            (WHITESPACE, " "),
+            (PLUS, "+"),
+            (WHITESPACE, " "),
+            (NUMBER, "2"),
+            (RBRACE, "}"),
+            (STRING_END, "\""),
+        ]
+    );
+}
+
+#[test]
+fn interpolation_with_braces_inside() {
+    // Braces inside interpolation are tracked for depth
+    assert_eq!(
+        lex("\"#{fn()} x\""),
+        vec![
+            (STRING_START, "\""),
+            (HASH_LBRACE, "#{"),
+            (IDENT, "fn"),
+            (LPAREN, "("),
+            (RPAREN, ")"),
+            (RBRACE, "}"),
+            (STRING_END, " x\""),
+        ]
+    );
+}
+
+#[test]
+fn unterminated_string_after_interpolation() {
+    assert_eq!(
+        lex("\"#{$x} oops"),
+        vec![
+            (STRING_START, "\""),
+            (HASH_LBRACE, "#{"),
+            (DOLLAR, "$"),
+            (IDENT, "x"),
+            (RBRACE, "}"),
+            (ERROR, " oops"),
+        ]
+    );
+}
+
+#[test]
+fn escaped_hash_in_string_content() {
+    // After interpolation, \# should NOT start a second interpolation
+    assert_eq!(
+        lex("\"#{$a}\\#{$b}\""),
+        vec![
+            (STRING_START, "\""),
+            (HASH_LBRACE, "#{"),
+            (DOLLAR, "$"),
+            (IDENT, "a"),
+            (RBRACE, "}"),
+            (STRING_END, "\\#{$b}\""),
+        ]
+    );
+}
+
+#[test]
+fn braces_inside_interpolation() {
+    // { and } inside interpolation are depth-tracked
+    assert_eq!(
+        lex("\"#{ {a} }\""),
+        vec![
+            (STRING_START, "\""),
+            (HASH_LBRACE, "#{"),
+            (WHITESPACE, " "),
+            (LBRACE, "{"),
+            (IDENT, "a"),
+            (RBRACE, "}"),
+            (WHITESPACE, " "),
+            (RBRACE, "}"),
+            (STRING_END, "\""),
+        ]
+    );
+}
+
 // ── Round-trip ────────────────────────────────────────────────────────
 
 #[test]
@@ -334,6 +650,23 @@ fn round_trip_basic() {
         "café",
         "🦀",
         "\x01",
+        // Strings
+        "\"hello world\"",
+        "'single'",
+        "\"\"",
+        "\"unterminated",
+        "\"esc\\\"ape\"",
+        // String interpolation
+        "\"hello #{$x}\"",
+        "\"#{$a} and #{$b}\"",
+        "\"#{$a}#{$b}\"",
+        "\"a #{\"b\"} c\"",
+        "\"a #{\"b #{$c} d\"} e\"",
+        "\"\\#{$x}\"",
+        "\"\\\\#{$x}\"",
+        "\"#{$a}\\#{$b}\"",
+        "\"#{ {a} }\"",
+        "\"hello\\",
     ];
     for input in inputs {
         let tokens = lex(input);
@@ -345,6 +678,15 @@ fn round_trip_basic() {
 #[test]
 fn round_trip_real_css() {
     let input = "div.class > #id:hover {\n  color: red; /* comment */\n  font-size: 16px;\n}\n";
+    let tokens = lex(input);
+    let reconstructed: String = tokens.iter().map(|(_, text)| *text).collect();
+    assert_eq!(reconstructed, input);
+}
+
+#[test]
+fn round_trip_scss_with_strings() {
+    let input =
+        "$name: 'world';\n.greeting {\n  content: \"hello #{$name}\";\n  font: \"Arial\";\n}\n";
     let tokens = lex(input);
     let reconstructed: String = tokens.iter().map(|(_, text)| *text).collect();
     assert_eq!(reconstructed, input);

@@ -1,18 +1,33 @@
 use crate::syntax_kind::SyntaxKind;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LexContext {
+    Interpolation { brace_depth: u32 },
+    String { quote: u8 },
+}
+
 pub struct Lexer<'src> {
     input: &'src str,
     pos: usize,
+    context_stack: Vec<LexContext>,
 }
 
 impl<'src> Lexer<'src> {
     pub fn new(input: &'src str) -> Self {
-        Self { input, pos: 0 }
+        Self {
+            input,
+            pos: 0,
+            context_stack: Vec::new(),
+        }
     }
 
     pub fn next_token(&mut self) -> (SyntaxKind, &'src str) {
         if self.pos >= self.input.len() {
             return (SyntaxKind::EOF, "");
+        }
+
+        if let Some(&LexContext::String { quote }) = self.context_stack.last() {
+            return self.lex_string_content(quote);
         }
 
         let start = self.pos;
@@ -46,9 +61,14 @@ impl<'src> Lexer<'src> {
             b'a'..=b'z' | b'A'..=b'Z' | b'_' => self.lex_ident(),
             b'-' if self.is_ident_start_after_hyphen() => self.lex_ident(),
 
+            // ── Strings ──────────────────────────────────────────────
+            b'"' | b'\'' => return self.lex_string(start, b),
+
             // ── Multi-char operators (must come before single-char) ──
             b'#' if self.peek() == Some(b'{') => {
                 self.bump();
+                self.context_stack
+                    .push(LexContext::Interpolation { brace_depth: 1 });
                 SyntaxKind::HASH_LBRACE
             }
             b'.' if self.peek() == Some(b'.') && self.peek_at(1) == Some(b'.') => {
@@ -104,8 +124,28 @@ impl<'src> Lexer<'src> {
             b'.' => SyntaxKind::DOT,
             b'(' => SyntaxKind::LPAREN,
             b')' => SyntaxKind::RPAREN,
-            b'{' => SyntaxKind::LBRACE,
-            b'}' => SyntaxKind::RBRACE,
+            b'{' => {
+                if let Some(LexContext::Interpolation { brace_depth }) =
+                    self.context_stack.last_mut()
+                {
+                    *brace_depth += 1;
+                }
+                SyntaxKind::LBRACE
+            }
+            b'}' => {
+                let pop = matches!(
+                    self.context_stack.last(),
+                    Some(LexContext::Interpolation { brace_depth: 1 })
+                );
+                if pop {
+                    self.context_stack.pop();
+                } else if let Some(LexContext::Interpolation { brace_depth }) =
+                    self.context_stack.last_mut()
+                {
+                    *brace_depth -= 1;
+                }
+                SyntaxKind::RBRACE
+            }
             b'[' => SyntaxKind::LBRACKET,
             b']' => SyntaxKind::RBRACKET,
             b'+' => SyntaxKind::PLUS,
@@ -158,6 +198,72 @@ impl<'src> Lexer<'src> {
                     self.bump();
                 }
             }
+        }
+    }
+
+    fn lex_string(&mut self, start: usize, quote: u8) -> (SyntaxKind, &'src str) {
+        loop {
+            match self.peek() {
+                None => return (SyntaxKind::ERROR, &self.input[start..self.pos]),
+                Some(b) if b == quote => {
+                    self.pos += 1;
+                    return (SyntaxKind::QUOTED_STRING, &self.input[start..self.pos]);
+                }
+                Some(b'#') if self.peek_at(1) == Some(b'{') => {
+                    self.context_stack.push(LexContext::String { quote });
+                    return (SyntaxKind::STRING_START, &self.input[start..self.pos]);
+                }
+                Some(b'\\') => {
+                    self.pos += 1;
+                    self.skip_escape_char();
+                }
+                _ => {
+                    self.pos += 1;
+                }
+            }
+        }
+    }
+
+    fn lex_string_content(&mut self, quote: u8) -> (SyntaxKind, &'src str) {
+        if self.peek() == Some(b'#') && self.peek_at(1) == Some(b'{') {
+            let start = self.pos;
+            self.pos += 2;
+            self.context_stack
+                .push(LexContext::Interpolation { brace_depth: 1 });
+            return (SyntaxKind::HASH_LBRACE, &self.input[start..self.pos]);
+        }
+
+        let start = self.pos;
+        loop {
+            match self.peek() {
+                None => {
+                    self.context_stack.pop();
+                    return (SyntaxKind::ERROR, &self.input[start..self.pos]);
+                }
+                Some(b) if b == quote => {
+                    self.pos += 1;
+                    self.context_stack.pop();
+                    return (SyntaxKind::STRING_END, &self.input[start..self.pos]);
+                }
+                Some(b'#') if self.peek_at(1) == Some(b'{') => {
+                    return (SyntaxKind::STRING_MID, &self.input[start..self.pos]);
+                }
+                Some(b'\\') => {
+                    self.pos += 1;
+                    self.skip_escape_char();
+                }
+                _ => {
+                    self.pos += 1;
+                }
+            }
+        }
+    }
+
+    fn skip_escape_char(&mut self) {
+        match self.peek() {
+            None => {}
+            Some(b) if b >= 0x80 => self.pos += self.current_char().len_utf8(),
+            Some(_) => self.pos += 1,
         }
     }
 
