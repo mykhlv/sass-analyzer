@@ -177,7 +177,7 @@ fn quoted_string(p: &mut Parser<'_>) -> CompletedMarker {
     m.complete(p, STRING_LITERAL)
 }
 
-fn interpolated_string(p: &mut Parser<'_>, _ctx: ParseContext) -> CompletedMarker {
+pub(crate) fn interpolated_string(p: &mut Parser<'_>, _ctx: ParseContext) -> CompletedMarker {
     let m = p.start();
     p.bump(); // STRING_START
     // Expressions inside #{...} are always SassScript (/ is division, etc.)
@@ -397,7 +397,7 @@ fn function_call(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
 }
 
 /// Parse argument list `(...)` for function calls and `@include`.
-fn arg_list(p: &mut Parser<'_>, ctx: ParseContext) {
+pub(crate) fn arg_list(p: &mut Parser<'_>, ctx: ParseContext) {
     assert!(p.at(LPAREN));
     let m = p.start();
     p.bump(); // (

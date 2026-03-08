@@ -118,6 +118,45 @@ pub enum SyntaxKind {
     STANDALONE_PERCENT,     // standalone % atom
     IMPORTANT,              // !important
     SASS_FLAG,              // !default, !global, !optional
+
+    // ── Nodes: at-rules (Phase 4) ────────────────────────────────
+    MIXIN_RULE,             // @mixin name(params) { }
+    INCLUDE_RULE,           // @include name(args) { content }
+    CONTENT_RULE,           // @content or @content(args)
+    FUNCTION_RULE,          // @function name(params) { }
+    RETURN_RULE,            // @return expr;
+    IF_RULE,                // @if cond { } @else if { } @else { }
+    ELSE_CLAUSE,            // @else if ... { } or @else { }
+    FOR_RULE,               // @for $var from expr through/to expr { }
+    EACH_RULE,              // @each $var in expr { }
+    WHILE_RULE,             // @while cond { }
+    EXTEND_RULE,            // @extend selector !optional;
+    ERROR_RULE,             // @error expr;
+    WARN_RULE,              // @warn expr;
+    DEBUG_RULE,             // @debug expr;
+    AT_ROOT_RULE,           // @at-root { } / @at-root (query) { }
+    AT_ROOT_QUERY,          // (with: media) or (without: ...)
+    MEDIA_RULE,             // @media query { }
+    MEDIA_QUERY,            // individual media query
+    SUPPORTS_RULE,          // @supports condition { }
+    SUPPORTS_CONDITION,     // not/and/or (prop: value)
+    KEYFRAMES_RULE,         // @keyframes name { }
+    KEYFRAME_SELECTOR,      // from, to, 50%, etc.
+    LAYER_RULE,             // @layer name { } or @layer name;
+    CONTAINER_RULE,         // @container name (query) { }
+    SCOPE_RULE,             // @scope (.card) to (.content) { }
+    PROPERTY_RULE,          // @property --name { }
+    NAMESPACE_RULE,         // @namespace prefix url();
+    CHARSET_RULE,           // @charset "UTF-8";
+    PAGE_RULE,              // @page :first { }
+    FONT_FACE_RULE,         // @font-face { }
+    USE_RULE,               // @use "path" as name with (...)
+    FORWARD_RULE,           // @forward "path" ...
+    IMPORT_RULE,            // @import "path"
+    NAMESPACE_REF,          // ns.$var, ns.func()
+    GENERIC_AT_RULE,        // unknown @foo
+    PARAM_LIST,             // ($name, $name: default, $rest...)
+    PARAM,                  // single parameter
 }
 
 impl SyntaxKind {
@@ -232,6 +271,44 @@ impl From<u16> for SyntaxKind {
             90 => STANDALONE_PERCENT,
             91 => IMPORTANT,
             92 => SASS_FLAG,
+            // Phase 4: at-rules
+            93  => MIXIN_RULE,
+            94  => INCLUDE_RULE,
+            95  => CONTENT_RULE,
+            96  => FUNCTION_RULE,
+            97  => RETURN_RULE,
+            98  => IF_RULE,
+            99  => ELSE_CLAUSE,
+            100 => FOR_RULE,
+            101 => EACH_RULE,
+            102 => WHILE_RULE,
+            103 => EXTEND_RULE,
+            104 => ERROR_RULE,
+            105 => WARN_RULE,
+            106 => DEBUG_RULE,
+            107 => AT_ROOT_RULE,
+            108 => AT_ROOT_QUERY,
+            109 => MEDIA_RULE,
+            110 => MEDIA_QUERY,
+            111 => SUPPORTS_RULE,
+            112 => SUPPORTS_CONDITION,
+            113 => KEYFRAMES_RULE,
+            114 => KEYFRAME_SELECTOR,
+            115 => LAYER_RULE,
+            116 => CONTAINER_RULE,
+            117 => SCOPE_RULE,
+            118 => PROPERTY_RULE,
+            119 => NAMESPACE_RULE,
+            120 => CHARSET_RULE,
+            121 => PAGE_RULE,
+            122 => FONT_FACE_RULE,
+            123 => USE_RULE,
+            124 => FORWARD_RULE,
+            125 => IMPORT_RULE,
+            126 => NAMESPACE_REF,
+            127 => GENERIC_AT_RULE,
+            128 => PARAM_LIST,
+            129 => PARAM,
             _ => panic!("invalid SyntaxKind: {raw}"),
         }
     }

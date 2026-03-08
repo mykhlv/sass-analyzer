@@ -1,3 +1,4 @@
+pub(crate) mod at_rules;
 mod declarations;
 pub mod expressions;
 pub(crate) mod selectors;
@@ -41,7 +42,9 @@ pub const BLOCK_RECOVERY: TokenSet = TokenSet::new(&[
 pub fn source_file(p: &mut Parser<'_>) {
     let m = p.start();
     while !p.at_end() {
-        if p.at(DOLLAR) {
+        if p.at(AT) {
+            at_rules::at_rule(p);
+        } else if p.at(DOLLAR) {
             expressions::variable_declaration(p);
         } else if p.at_ts(selectors::SELECTOR_START) {
             rule_set(p);
@@ -52,6 +55,7 @@ pub fn source_file(p: &mut Parser<'_>) {
             p.error("expected rule");
             p.bump();
             while !p.at_end()
+                && !p.at(AT)
                 && !p.at_ts(selectors::SELECTOR_START)
                 && !p.at(SEMICOLON)
                 && !p.at(DOLLAR)
@@ -67,7 +71,9 @@ pub fn source_file(p: &mut Parser<'_>) {
 /// Parse a single item inside a block.
 /// Disambiguates between rule sets and declarations.
 fn block_item(p: &mut Parser<'_>) {
-    if p.at(DOLLAR) {
+    if p.at(AT) {
+        at_rules::at_rule(p);
+    } else if p.at(DOLLAR) {
         expressions::variable_declaration(p);
     } else if looks_like_declaration(p) {
         declarations::declaration(p);
@@ -220,7 +226,7 @@ fn skip_until_block_end(p: &mut Parser<'_>) {
 }
 
 /// Parse a `{ ... }` block containing declarations and/or nested rules.
-pub(super) fn block(p: &mut Parser<'_>) {
+pub(crate) fn block(p: &mut Parser<'_>) {
     let Ok(mut g) = p.depth_guard() else {
         // Skip past the block to prevent infinite loops at depth limit
         skip_until_block_end(p);
@@ -232,7 +238,7 @@ pub(super) fn block(p: &mut Parser<'_>) {
     while !g.at(RBRACE) && !g.at_end() {
         if g.at(SEMICOLON) {
             g.bump();
-        } else if g.at(DOLLAR) || g.at_ts(selectors::SELECTOR_START) {
+        } else if g.at(AT) || g.at(DOLLAR) || g.at_ts(selectors::SELECTOR_START) {
             block_item(&mut g);
         } else {
             g.err_and_bump("expected declaration or nested rule");

@@ -1665,24 +1665,18 @@ fn error_garbage_tokens_between_rules() {
                   LBRACE@4..5 "{"
                   WHITESPACE@5..6 " "
                   RBRACE@6..7 "}"
-              ERROR@7..11
+              GENERIC_AT_RULE@7..18
                 WHITESPACE@7..8 " "
                 AT@8..9 "@"
                 AT@9..10 "@"
                 AT@10..11 "@"
-              RULE_SET@11..18
-                SELECTOR_LIST@11..14
-                  SELECTOR@11..14
-                    SIMPLE_SELECTOR@11..14
-                      WHITESPACE@11..12 " "
-                      IDENT@12..14 "h1"
+                WHITESPACE@11..12 " "
+                IDENT@12..14 "h1"
                 BLOCK@14..18
                   WHITESPACE@14..15 " "
                   LBRACE@15..16 "{"
                   WHITESPACE@16..17 " "
                   RBRACE@17..18 "}"
-            errors:
-              8..9: expected rule
         "#]],
     );
 }
@@ -1787,21 +1781,15 @@ fn error_at_without_ident() {
         "@ div { }",
         expect![[r#"
             SOURCE_FILE@0..9
-              ERROR@0..1
+              GENERIC_AT_RULE@0..9
                 AT@0..1 "@"
-              RULE_SET@1..9
-                SELECTOR_LIST@1..5
-                  SELECTOR@1..5
-                    SIMPLE_SELECTOR@1..5
-                      WHITESPACE@1..2 " "
-                      IDENT@2..5 "div"
+                WHITESPACE@1..2 " "
+                IDENT@2..5 "div"
                 BLOCK@5..9
                   WHITESPACE@5..6 " "
                   LBRACE@6..7 "{"
                   WHITESPACE@7..8 " "
                   RBRACE@8..9 "}"
-            errors:
-              0..1: expected rule
         "#]],
     );
 }
@@ -1892,17 +1880,13 @@ fn error_multiple_errors_same_file() {
                   LBRACE@4..5 "{"
                   WHITESPACE@5..6 " "
                   RBRACE@6..7 "}"
-              ERROR@7..11
+              GENERIC_AT_RULE@7..24
                 WHITESPACE@7..8 " "
                 AT@8..9 "@"
                 AT@9..10 "@"
                 AT@10..11 "@"
-              RULE_SET@11..24
-                SELECTOR_LIST@11..13
-                  SELECTOR@11..13
-                    SIMPLE_SELECTOR@11..13
-                      WHITESPACE@11..12 " "
-                      IDENT@12..13 "p"
+                WHITESPACE@11..12 " "
+                IDENT@12..13 "p"
                 BLOCK@13..24
                   WHITESPACE@13..14 " "
                   LBRACE@14..15 "{"
@@ -1927,7 +1911,6 @@ fn error_multiple_errors_same_file() {
                   WHITESPACE@29..30 " "
                   RBRACE@30..31 "}"
             errors:
-              8..9: expected rule
               21..22: expected `{`
         "#]],
     );
@@ -2001,16 +1984,12 @@ fn error_recovery_correct_after_error() {
         "@@@ h1 { color: red; }",
         expect![[r#"
             SOURCE_FILE@0..22
-              ERROR@0..3
+              GENERIC_AT_RULE@0..22
                 AT@0..1 "@"
                 AT@1..2 "@"
                 AT@2..3 "@"
-              RULE_SET@3..22
-                SELECTOR_LIST@3..6
-                  SELECTOR@3..6
-                    SIMPLE_SELECTOR@3..6
-                      WHITESPACE@3..4 " "
-                      IDENT@4..6 "h1"
+                WHITESPACE@3..4 " "
+                IDENT@4..6 "h1"
                 BLOCK@6..22
                   WHITESPACE@6..7 " "
                   LBRACE@7..8 "{"
@@ -2026,8 +2005,6 @@ fn error_recovery_correct_after_error() {
                     SEMICOLON@19..20 ";"
                   WHITESPACE@20..21 " "
                   RBRACE@21..22 "}"
-            errors:
-              0..1: expected rule
         "#]],
     );
 }
@@ -2127,24 +2104,18 @@ fn error_utf8_bom_then_error() {
         "\u{FEFF}@@@ div { }",
         expect![[r#"
             SOURCE_FILE@0..14
-              ERROR@0..6
+              GENERIC_AT_RULE@0..14
                 WHITESPACE@0..3 "\u{feff}"
                 AT@3..4 "@"
                 AT@4..5 "@"
                 AT@5..6 "@"
-              RULE_SET@6..14
-                SELECTOR_LIST@6..10
-                  SELECTOR@6..10
-                    SIMPLE_SELECTOR@6..10
-                      WHITESPACE@6..7 " "
-                      IDENT@7..10 "div"
+                WHITESPACE@6..7 " "
+                IDENT@7..10 "div"
                 BLOCK@10..14
                   WHITESPACE@10..11 " "
                   LBRACE@11..12 "{"
                   WHITESPACE@12..13 " "
                   RBRACE@13..14 "}"
-            errors:
-              3..4: expected rule
         "#]],
     );
 }
