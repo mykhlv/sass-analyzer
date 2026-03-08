@@ -28,7 +28,7 @@ fn check(source: &str, expect: Expect) {
 fn simple_rule() {
     check(
         "div { color: red; }",
-        expect![[r##"
+        expect![[r#"
             SOURCE_FILE@0..19
               RULE_SET@0..19
                 SELECTOR_LIST@0..3
@@ -44,12 +44,13 @@ fn simple_rule() {
                       IDENT@6..11 "color"
                     COLON@11..12 ":"
                     VALUE@12..16
-                      WHITESPACE@12..13 " "
-                      IDENT@13..16 "red"
+                      VALUE@12..16
+                        WHITESPACE@12..13 " "
+                        IDENT@13..16 "red"
                     SEMICOLON@16..17 ";"
                   WHITESPACE@17..18 " "
                   RBRACE@18..19 "}"
-        "##]],
+        "#]],
     );
 }
 
@@ -57,7 +58,7 @@ fn simple_rule() {
 fn multiple_declarations() {
     check(
         "p { color: red; font-size: 14px; }",
-        expect![[r##"
+        expect![[r#"
             SOURCE_FILE@0..34
               RULE_SET@0..34
                 SELECTOR_LIST@0..1
@@ -73,8 +74,9 @@ fn multiple_declarations() {
                       IDENT@4..9 "color"
                     COLON@9..10 ":"
                     VALUE@10..14
-                      WHITESPACE@10..11 " "
-                      IDENT@11..14 "red"
+                      VALUE@10..14
+                        WHITESPACE@10..11 " "
+                        IDENT@11..14 "red"
                     SEMICOLON@14..15 ";"
                   DECLARATION@15..32
                     PROPERTY@15..25
@@ -82,13 +84,14 @@ fn multiple_declarations() {
                       IDENT@16..25 "font-size"
                     COLON@25..26 ":"
                     VALUE@26..31
-                      WHITESPACE@26..27 " "
-                      NUMBER@27..29 "14"
-                      IDENT@29..31 "px"
+                      DIMENSION@26..31
+                        WHITESPACE@26..27 " "
+                        NUMBER@27..29 "14"
+                        IDENT@29..31 "px"
                     SEMICOLON@31..32 ";"
                   WHITESPACE@32..33 " "
                   RBRACE@33..34 "}"
-        "##]],
+        "#]],
     );
 }
 
@@ -98,7 +101,7 @@ fn multiple_declarations() {
 fn nested_rule() {
     check(
         "nav { ul { margin: 0; } }",
-        expect![[r##"
+        expect![[r#"
             SOURCE_FILE@0..25
               RULE_SET@0..25
                 SELECTOR_LIST@0..3
@@ -123,14 +126,15 @@ fn nested_rule() {
                           IDENT@11..17 "margin"
                         COLON@17..18 ":"
                         VALUE@18..20
-                          WHITESPACE@18..19 " "
-                          NUMBER@19..20 "0"
+                          NUMBER_LITERAL@18..20
+                            WHITESPACE@18..19 " "
+                            NUMBER@19..20 "0"
                         SEMICOLON@20..21 ";"
                       WHITESPACE@21..22 " "
                       RBRACE@22..23 "}"
                   WHITESPACE@23..24 " "
                   RBRACE@24..25 "}"
-        "##]],
+        "#]],
     );
 }
 
@@ -140,7 +144,7 @@ fn nested_rule() {
 fn selector_list() {
     check(
         "h1, h2, h3 { margin: 0; }",
-        expect![[r##"
+        expect![[r#"
             SOURCE_FILE@0..25
               RULE_SET@0..25
                 SELECTOR_LIST@0..10
@@ -166,12 +170,13 @@ fn selector_list() {
                       IDENT@13..19 "margin"
                     COLON@19..20 ":"
                     VALUE@20..22
-                      WHITESPACE@20..21 " "
-                      NUMBER@21..22 "0"
+                      NUMBER_LITERAL@20..22
+                        WHITESPACE@20..21 " "
+                        NUMBER@21..22 "0"
                     SEMICOLON@22..23 ";"
                   WHITESPACE@23..24 " "
                   RBRACE@24..25 "}"
-        "##]],
+        "#]],
     );
 }
 
@@ -203,8 +208,9 @@ fn compound_selector_class_id() {
                       IDENT@18..25 "display"
                     COLON@25..26 ":"
                     VALUE@26..32
-                      WHITESPACE@26..27 " "
-                      IDENT@27..32 "block"
+                      VALUE@26..32
+                        WHITESPACE@26..27 " "
+                        IDENT@27..32 "block"
                     SEMICOLON@32..33 ";"
                   WHITESPACE@33..34 " "
                   RBRACE@34..35 "}"
@@ -357,7 +363,7 @@ fn descendant_combinator() {
 fn parent_selector() {
     check(
         ".btn { &:hover { color: blue; } }",
-        expect![[r##"
+        expect![[r#"
             SOURCE_FILE@0..33
               RULE_SET@0..33
                 SELECTOR_LIST@0..4
@@ -386,14 +392,15 @@ fn parent_selector() {
                           IDENT@17..22 "color"
                         COLON@22..23 ":"
                         VALUE@23..28
-                          WHITESPACE@23..24 " "
-                          IDENT@24..28 "blue"
+                          VALUE@23..28
+                            WHITESPACE@23..24 " "
+                            IDENT@24..28 "blue"
                         SEMICOLON@28..29 ";"
                       WHITESPACE@29..30 " "
                       RBRACE@30..31 "}"
                   WHITESPACE@31..32 " "
                   RBRACE@32..33 "}"
-        "##]],
+        "#]],
     );
 }
 
@@ -436,7 +443,7 @@ fn parent_selector_suffix() {
 fn placeholder_selector() {
     check(
         "%placeholder { color: red; }",
-        expect![[r##"
+        expect![[r#"
             SOURCE_FILE@0..28
               RULE_SET@0..28
                 SELECTOR_LIST@0..12
@@ -453,12 +460,13 @@ fn placeholder_selector() {
                       IDENT@15..20 "color"
                     COLON@20..21 ":"
                     VALUE@21..25
-                      WHITESPACE@21..22 " "
-                      IDENT@22..25 "red"
+                      VALUE@21..25
+                        WHITESPACE@21..22 " "
+                        IDENT@22..25 "red"
                     SEMICOLON@25..26 ";"
                   WHITESPACE@26..27 " "
                   RBRACE@27..28 "}"
-        "##]],
+        "#]],
     );
 }
 
@@ -468,7 +476,7 @@ fn placeholder_selector() {
 fn universal_selector() {
     check(
         "* { margin: 0; }",
-        expect![[r##"
+        expect![[r#"
             SOURCE_FILE@0..16
               RULE_SET@0..16
                 SELECTOR_LIST@0..1
@@ -484,12 +492,13 @@ fn universal_selector() {
                       IDENT@4..10 "margin"
                     COLON@10..11 ":"
                     VALUE@11..13
-                      WHITESPACE@11..12 " "
-                      NUMBER@12..13 "0"
+                      NUMBER_LITERAL@11..13
+                        WHITESPACE@11..12 " "
+                        NUMBER@12..13 "0"
                     SEMICOLON@13..14 ";"
                   WHITESPACE@14..15 " "
                   RBRACE@15..16 "}"
-        "##]],
+        "#]],
     );
 }
 
@@ -499,7 +508,7 @@ fn universal_selector() {
 fn important_value() {
     check(
         "p { color: red !important; }",
-        expect![[r##"
+        expect![[r#"
             SOURCE_FILE@0..28
               RULE_SET@0..28
                 SELECTOR_LIST@0..1
@@ -514,16 +523,18 @@ fn important_value() {
                       WHITESPACE@3..4 " "
                       IDENT@4..9 "color"
                     COLON@9..10 ":"
-                    VALUE@10..25
-                      WHITESPACE@10..11 " "
-                      IDENT@11..14 "red"
+                    VALUE@10..14
+                      VALUE@10..14
+                        WHITESPACE@10..11 " "
+                        IDENT@11..14 "red"
+                    IMPORTANT@14..25
                       WHITESPACE@14..15 " "
                       BANG@15..16 "!"
                       IDENT@16..25 "important"
                     SEMICOLON@25..26 ";"
                   WHITESPACE@26..27 " "
                   RBRACE@27..28 "}"
-        "##]],
+        "#]],
     );
 }
 
@@ -533,7 +544,7 @@ fn important_value() {
 fn comments_in_rule() {
     check(
         "/* heading */ h1 { /* color */ color: red; }",
-        expect![[r##"
+        expect![[r#"
             SOURCE_FILE@0..44
               RULE_SET@0..44
                 SELECTOR_LIST@0..16
@@ -553,12 +564,13 @@ fn comments_in_rule() {
                       IDENT@31..36 "color"
                     COLON@36..37 ":"
                     VALUE@37..41
-                      WHITESPACE@37..38 " "
-                      IDENT@38..41 "red"
+                      VALUE@37..41
+                        WHITESPACE@37..38 " "
+                        IDENT@38..41 "red"
                     SEMICOLON@41..42 ";"
                   WHITESPACE@42..43 " "
                   RBRACE@43..44 "}"
-        "##]],
+        "#]],
     );
 }
 
@@ -584,8 +596,9 @@ fn single_line_comment_in_rule() {
                       IDENT@22..27 "color"
                     COLON@27..28 ":"
                     VALUE@28..33
-                      WHITESPACE@28..29 " "
-                      IDENT@29..33 "blue"
+                      VALUE@28..33
+                        WHITESPACE@28..29 " "
+                        IDENT@29..33 "blue"
                     SEMICOLON@33..34 ";"
                   WHITESPACE@34..35 "\n"
                   RBRACE@35..36 "}"
@@ -892,8 +905,9 @@ fn nested_property_block() {
                           IDENT@12..18 "weight"
                         COLON@18..19 ":"
                         VALUE@19..24
-                          WHITESPACE@19..20 " "
-                          IDENT@20..24 "bold"
+                          VALUE@19..24
+                            WHITESPACE@19..20 " "
+                            IDENT@20..24 "bold"
                         SEMICOLON@24..25 ";"
                       DECLARATION@25..37
                         PROPERTY@25..30
@@ -901,9 +915,10 @@ fn nested_property_block() {
                           IDENT@26..30 "size"
                         COLON@30..31 ":"
                         VALUE@31..36
-                          WHITESPACE@31..32 " "
-                          NUMBER@32..34 "14"
-                          IDENT@34..36 "px"
+                          DIMENSION@31..36
+                            WHITESPACE@31..32 " "
+                            NUMBER@32..34 "14"
+                            IDENT@34..36 "px"
                         SEMICOLON@36..37 ";"
                       WHITESPACE@37..38 " "
                       RBRACE@38..39 "}"
@@ -952,9 +967,10 @@ fn nested_property_with_value() {
                           IDENT@19..22 "top"
                         COLON@22..23 ":"
                         VALUE@23..28
-                          WHITESPACE@23..24 " "
-                          NUMBER@24..26 "20"
-                          IDENT@26..28 "px"
+                          DIMENSION@23..28
+                            WHITESPACE@23..24 " "
+                            NUMBER@24..26 "20"
+                            IDENT@26..28 "px"
                         SEMICOLON@28..29 ";"
                       WHITESPACE@29..30 " "
                       RBRACE@30..31 "}"
@@ -981,8 +997,9 @@ fn interpolation_in_selector() {
                   SELECTOR@0..7
                     INTERPOLATION@0..7
                       HASH_LBRACE@0..2 "#{"
-                      DOLLAR@2..3 "$"
-                      IDENT@3..6 "tag"
+                      VARIABLE_REF@2..6
+                        DOLLAR@2..3 "$"
+                        IDENT@3..6 "tag"
                       RBRACE@6..7 "}"
                 BLOCK@7..11
                   WHITESPACE@7..8 " "
@@ -1012,13 +1029,15 @@ fn interpolation_in_property() {
                       INTERPOLATION@3..12
                         WHITESPACE@3..4 " "
                         HASH_LBRACE@4..6 "#{"
-                        DOLLAR@6..7 "$"
-                        IDENT@7..11 "prop"
+                        VARIABLE_REF@6..11
+                          DOLLAR@6..7 "$"
+                          IDENT@7..11 "prop"
                         RBRACE@11..12 "}"
                     COLON@12..13 ":"
                     VALUE@13..17
-                      WHITESPACE@13..14 " "
-                      IDENT@14..17 "red"
+                      VALUE@13..17
+                        WHITESPACE@13..14 " "
+                        IDENT@14..17 "red"
                     SEMICOLON@17..18 ";"
                   WHITESPACE@18..19 " "
                   RBRACE@19..20 "}"
@@ -1032,29 +1051,32 @@ fn interpolation_in_value() {
         "p { color: #{$c}; }",
         expect![[r##"
             SOURCE_FILE@0..19
-              RULE_SET@0..19
+              RULE_SET@0..16
                 SELECTOR_LIST@0..1
                   SELECTOR@0..1
                     SIMPLE_SELECTOR@0..1
                       IDENT@0..1 "p"
-                BLOCK@1..19
+                BLOCK@1..16
                   WHITESPACE@1..2 " "
                   LBRACE@2..3 "{"
-                  DECLARATION@3..17
+                  DECLARATION@3..15
                     PROPERTY@3..9
                       WHITESPACE@3..4 " "
                       IDENT@4..9 "color"
                     COLON@9..10 ":"
-                    VALUE@10..16
-                      INTERPOLATION@10..16
-                        WHITESPACE@10..11 " "
-                        HASH_LBRACE@11..13 "#{"
+                    VALUE@10..15
+                      WHITESPACE@10..11 " "
+                      HASH_LBRACE@11..13 "#{"
+                      VARIABLE_REF@13..15
                         DOLLAR@13..14 "$"
                         IDENT@14..15 "c"
-                        RBRACE@15..16 "}"
-                    SEMICOLON@16..17 ";"
-                  WHITESPACE@17..18 " "
-                  RBRACE@18..19 "}"
+                  RBRACE@15..16 "}"
+              SEMICOLON@16..17 ";"
+              ERROR@17..19
+                WHITESPACE@17..18 " "
+                RBRACE@18..19 "}"
+            errors:
+              18..19: expected rule
         "##]],
     );
 }
@@ -1065,7 +1087,7 @@ fn interpolation_in_value() {
 fn multiple_rules() {
     check(
         "h1 { color: red; }\nh2 { color: blue; }",
-        expect![[r##"
+        expect![[r#"
             SOURCE_FILE@0..38
               RULE_SET@0..18
                 SELECTOR_LIST@0..2
@@ -1081,8 +1103,9 @@ fn multiple_rules() {
                       IDENT@5..10 "color"
                     COLON@10..11 ":"
                     VALUE@11..15
-                      WHITESPACE@11..12 " "
-                      IDENT@12..15 "red"
+                      VALUE@11..15
+                        WHITESPACE@11..12 " "
+                        IDENT@12..15 "red"
                     SEMICOLON@15..16 ";"
                   WHITESPACE@16..17 " "
                   RBRACE@17..18 "}"
@@ -1101,12 +1124,13 @@ fn multiple_rules() {
                       IDENT@24..29 "color"
                     COLON@29..30 ":"
                     VALUE@30..35
-                      WHITESPACE@30..31 " "
-                      IDENT@31..35 "blue"
+                      VALUE@30..35
+                        WHITESPACE@30..31 " "
+                        IDENT@31..35 "blue"
                     SEMICOLON@35..36 ";"
                   WHITESPACE@36..37 " "
                   RBRACE@37..38 "}"
-        "##]],
+        "#]],
     );
 }
 
@@ -1116,7 +1140,7 @@ fn multiple_rules() {
 fn value_with_parens() {
     check(
         "p { background: url(img.png); }",
-        expect![[r##"
+        expect![[r#"
             SOURCE_FILE@0..31
               RULE_SET@0..31
                 SELECTOR_LIST@0..1
@@ -1132,15 +1156,16 @@ fn value_with_parens() {
                       IDENT@4..14 "background"
                     COLON@14..15 ":"
                     VALUE@15..28
-                      WHITESPACE@15..16 " "
-                      IDENT@16..19 "url"
-                      LPAREN@19..20 "("
-                      URL_CONTENTS@20..27 "img.png"
-                      RPAREN@27..28 ")"
+                      SPECIAL_FUNCTION_CALL@15..28
+                        WHITESPACE@15..16 " "
+                        IDENT@16..19 "url"
+                        LPAREN@19..20 "("
+                        URL_CONTENTS@20..27 "img.png"
+                        RPAREN@27..28 ")"
                     SEMICOLON@28..29 ";"
                   WHITESPACE@29..30 " "
                   RBRACE@30..31 "}"
-        "##]],
+        "#]],
     );
 }
 
@@ -1148,7 +1173,7 @@ fn value_with_parens() {
 fn value_with_function_call() {
     check(
         "p { color: rgba(255, 0, 0, 0.5); }",
-        expect![[r##"
+        expect![[r#"
             SOURCE_FILE@0..34
               RULE_SET@0..34
                 SELECTOR_LIST@0..1
@@ -1164,24 +1189,34 @@ fn value_with_function_call() {
                       IDENT@4..9 "color"
                     COLON@9..10 ":"
                     VALUE@10..31
-                      WHITESPACE@10..11 " "
-                      IDENT@11..15 "rgba"
-                      LPAREN@15..16 "("
-                      NUMBER@16..19 "255"
-                      COMMA@19..20 ","
-                      WHITESPACE@20..21 " "
-                      NUMBER@21..22 "0"
-                      COMMA@22..23 ","
-                      WHITESPACE@23..24 " "
-                      NUMBER@24..25 "0"
-                      COMMA@25..26 ","
-                      WHITESPACE@26..27 " "
-                      NUMBER@27..30 "0.5"
-                      RPAREN@30..31 ")"
+                      FUNCTION_CALL@10..31
+                        WHITESPACE@10..11 " "
+                        IDENT@11..15 "rgba"
+                        ARG_LIST@15..31
+                          LPAREN@15..16 "("
+                          ARG@16..19
+                            NUMBER_LITERAL@16..19
+                              NUMBER@16..19 "255"
+                          COMMA@19..20 ","
+                          ARG@20..22
+                            NUMBER_LITERAL@20..22
+                              WHITESPACE@20..21 " "
+                              NUMBER@21..22 "0"
+                          COMMA@22..23 ","
+                          ARG@23..25
+                            NUMBER_LITERAL@23..25
+                              WHITESPACE@23..24 " "
+                              NUMBER@24..25 "0"
+                          COMMA@25..26 ","
+                          ARG@26..30
+                            NUMBER_LITERAL@26..30
+                              WHITESPACE@26..27 " "
+                              NUMBER@27..30 "0.5"
+                          RPAREN@30..31 ")"
                     SEMICOLON@31..32 ";"
                   WHITESPACE@32..33 " "
                   RBRACE@33..34 "}"
-        "##]],
+        "#]],
     );
 }
 
@@ -1191,7 +1226,7 @@ fn value_with_function_call() {
 fn declaration_no_trailing_semicolon() {
     check(
         "p { color: red }",
-        expect![[r##"
+        expect![[r#"
             SOURCE_FILE@0..16
               RULE_SET@0..16
                 SELECTOR_LIST@0..1
@@ -1207,11 +1242,12 @@ fn declaration_no_trailing_semicolon() {
                       IDENT@4..9 "color"
                     COLON@9..10 ":"
                     VALUE@10..14
-                      WHITESPACE@10..11 " "
-                      IDENT@11..14 "red"
+                      VALUE@10..14
+                        WHITESPACE@10..11 " "
+                        IDENT@11..14 "red"
                   WHITESPACE@14..15 " "
                   RBRACE@15..16 "}"
-        "##]],
+        "#]],
     );
 }
 
@@ -1330,7 +1366,7 @@ fn pseudo_nth_child() {
 fn deeply_nested_rules() {
     check(
         "a { b { c { d: e; } } }",
-        expect![[r##"
+        expect![[r#"
             SOURCE_FILE@0..23
               RULE_SET@0..23
                 SELECTOR_LIST@0..1
@@ -1364,8 +1400,9 @@ fn deeply_nested_rules() {
                               IDENT@12..13 "d"
                             COLON@13..14 ":"
                             VALUE@14..16
-                              WHITESPACE@14..15 " "
-                              IDENT@15..16 "e"
+                              VALUE@14..16
+                                WHITESPACE@14..15 " "
+                                IDENT@15..16 "e"
                             SEMICOLON@16..17 ";"
                           WHITESPACE@17..18 " "
                           RBRACE@18..19 "}"
@@ -1373,7 +1410,7 @@ fn deeply_nested_rules() {
                       RBRACE@20..21 "}"
                   WHITESPACE@21..22 " "
                   RBRACE@22..23 "}"
-        "##]],
+        "#]],
     );
 }
 
@@ -1383,7 +1420,7 @@ fn deeply_nested_rules() {
 fn mixed_declarations_and_nested() {
     check(
         "nav { color: black; a { color: blue; } }",
-        expect![[r##"
+        expect![[r#"
             SOURCE_FILE@0..40
               RULE_SET@0..40
                 SELECTOR_LIST@0..3
@@ -1399,8 +1436,9 @@ fn mixed_declarations_and_nested() {
                       IDENT@6..11 "color"
                     COLON@11..12 ":"
                     VALUE@12..18
-                      WHITESPACE@12..13 " "
-                      IDENT@13..18 "black"
+                      VALUE@12..18
+                        WHITESPACE@12..13 " "
+                        IDENT@13..18 "black"
                     SEMICOLON@18..19 ";"
                   RULE_SET@19..38
                     SELECTOR_LIST@19..21
@@ -1417,14 +1455,15 @@ fn mixed_declarations_and_nested() {
                           IDENT@24..29 "color"
                         COLON@29..30 ":"
                         VALUE@30..35
-                          WHITESPACE@30..31 " "
-                          IDENT@31..35 "blue"
+                          VALUE@30..35
+                            WHITESPACE@30..31 " "
+                            IDENT@31..35 "blue"
                         SEMICOLON@35..36 ";"
                       WHITESPACE@36..37 " "
                       RBRACE@37..38 "}"
                   WHITESPACE@38..39 " "
                   RBRACE@39..40 "}"
-        "##]],
+        "#]],
     );
 }
 
@@ -1464,9 +1503,10 @@ fn complex_real_world() {
                       IDENT@15..20 "width"
                     COLON@20..21 ":"
                     VALUE@21..26
-                      WHITESPACE@21..22 " "
-                      NUMBER@22..25 "100"
-                      PERCENT@25..26 "%"
+                      DIMENSION@21..26
+                        WHITESPACE@21..22 " "
+                        NUMBER@22..25 "100"
+                        PERCENT@25..26 "%"
                     SEMICOLON@26..27 ";"
                   ERROR@27..31
                     WHITESPACE@27..30 "\n  "
@@ -1487,8 +1527,9 @@ fn complex_real_world() {
                           IDENT@43..50 "display"
                         COLON@50..51 ":"
                         VALUE@51..56
-                          WHITESPACE@51..52 " "
-                          IDENT@52..56 "flex"
+                          VALUE@51..56
+                            WHITESPACE@51..52 " "
+                            IDENT@52..56 "flex"
                         SEMICOLON@56..57 ";"
                       WHITESPACE@57..60 "\n  "
                       RBRACE@60..61 "}"
@@ -1528,8 +1569,9 @@ fn error_missing_closing_brace() {
                       IDENT@6..11 "color"
                     COLON@11..12 ":"
                     VALUE@12..16
-                      WHITESPACE@12..13 " "
-                      IDENT@13..16 "red"
+                      VALUE@12..16
+                        WHITESPACE@12..13 " "
+                        IDENT@13..16 "red"
                     SEMICOLON@16..17 ";"
             errors:
               17..17: expected RBRACE
@@ -1557,14 +1599,17 @@ fn error_missing_semicolon() {
                       IDENT@4..9 "color"
                     COLON@9..10 ":"
                     VALUE@10..30
-                      WHITESPACE@10..11 " "
-                      IDENT@11..14 "red"
-                      WHITESPACE@14..15 " "
-                      IDENT@15..24 "font-size"
+                      VALUE@10..14
+                        WHITESPACE@10..11 " "
+                        IDENT@11..14 "red"
+                      VALUE@14..24
+                        WHITESPACE@14..15 " "
+                        IDENT@15..24 "font-size"
                       COLON@24..25 ":"
-                      WHITESPACE@25..26 " "
-                      NUMBER@26..28 "14"
-                      IDENT@28..30 "px"
+                      DIMENSION@25..30
+                        WHITESPACE@25..26 " "
+                        NUMBER@26..28 "14"
+                        IDENT@28..30 "px"
                     SEMICOLON@30..31 ";"
                   WHITESPACE@31..32 " "
                   RBRACE@32..33 "}"
@@ -1713,8 +1758,9 @@ fn error_nested_missing_brace() {
                           IDENT@11..16 "color"
                         COLON@16..17 ":"
                         VALUE@17..21
-                          WHITESPACE@17..18 " "
-                          IDENT@18..21 "red"
+                          VALUE@17..21
+                            WHITESPACE@17..18 " "
+                            IDENT@18..21 "red"
                         SEMICOLON@21..22 ";"
                       WHITESPACE@22..23 " "
                       RBRACE@23..24 "}"
@@ -1974,8 +2020,9 @@ fn error_recovery_correct_after_error() {
                       IDENT@9..14 "color"
                     COLON@14..15 ":"
                     VALUE@15..19
-                      WHITESPACE@15..16 " "
-                      IDENT@16..19 "red"
+                      VALUE@15..19
+                        WHITESPACE@15..16 " "
+                        IDENT@16..19 "red"
                     SEMICOLON@19..20 ";"
                   WHITESPACE@20..21 " "
                   RBRACE@21..22 "}"
@@ -2008,8 +2055,9 @@ fn error_unmatched_lbrace() {
                       IDENT@8..13 "color"
                     COLON@13..14 ":"
                     VALUE@14..18
-                      WHITESPACE@14..15 " "
-                      IDENT@15..18 "red"
+                      VALUE@14..18
+                        WHITESPACE@14..15 " "
+                        IDENT@15..18 "red"
                     SEMICOLON@18..19 ";"
                   WHITESPACE@19..20 " "
                   RBRACE@20..21 "}"
@@ -2174,11 +2222,9 @@ fn error_recovery_continuity_after_bad_decl() {
                         SIMPLE_SELECTOR@3..7
                           WHITESPACE@3..4 " "
                           IDENT@4..7 "col"
-                  ERROR@7..8
+                  VARIABLE_DECL@7..16
                     DOLLAR@7..8 "$"
-                  DECLARATION@8..16
-                    PROPERTY@8..10
-                      IDENT@8..10 "or"
+                    IDENT@8..10 "or"
                     COLON@10..11 ":"
                     VALUE@11..15
                       WHITESPACE@11..12 " "
@@ -2190,15 +2236,15 @@ fn error_recovery_continuity_after_bad_decl() {
                       IDENT@17..26 "font-size"
                     COLON@26..27 ":"
                     VALUE@27..32
-                      WHITESPACE@27..28 " "
-                      NUMBER@28..30 "14"
-                      IDENT@30..32 "px"
+                      DIMENSION@27..32
+                        WHITESPACE@27..28 " "
+                        NUMBER@28..30 "14"
+                        IDENT@30..32 "px"
                     SEMICOLON@32..33 ";"
                   WHITESPACE@33..34 " "
                   RBRACE@34..35 "}"
             errors:
               7..8: expected `{`
-              7..8: expected declaration or nested rule
         "#]],
     );
 }
@@ -2277,9 +2323,10 @@ fn error_nested_error_recovery() {
                           IDENT@23..32 "font-size"
                         COLON@32..33 ":"
                         VALUE@33..38
-                          WHITESPACE@33..34 " "
-                          NUMBER@34..36 "14"
-                          IDENT@36..38 "px"
+                          DIMENSION@33..38
+                            WHITESPACE@33..34 " "
+                            NUMBER@34..36 "14"
+                            IDENT@36..38 "px"
                         SEMICOLON@38..39 ";"
                       WHITESPACE@39..40 " "
                       RBRACE@40..41 "}"

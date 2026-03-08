@@ -75,6 +75,25 @@ impl<'src> Parser<'src> {
         &self.source[range]
     }
 
+    /// Returns the source text of the token at `pos + offset`.
+    pub fn nth_text(&self, offset: usize) -> &'src str {
+        let target = self.pos.saturating_add(offset);
+        if target >= self.input.len() {
+            return "";
+        }
+        let range = self.input.range(target);
+        &self.source[range]
+    }
+
+    /// Whether any whitespace trivia exists before the token at `pos + offset`.
+    pub fn nth_has_whitespace_before(&self, offset: usize) -> bool {
+        let target = self.pos.saturating_add(offset);
+        if target == 0 || target >= self.input.len() {
+            return false;
+        }
+        self.input.has_whitespace_before(target)
+    }
+
     // ── Consuming tokens ─────────────────────────────────────────────
 
     pub fn bump(&mut self) {

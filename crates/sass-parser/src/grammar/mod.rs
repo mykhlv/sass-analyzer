@@ -1,10 +1,28 @@
 mod declarations;
+pub mod expressions;
 pub(crate) mod selectors;
 
 use crate::parser::Parser;
 #[allow(clippy::wildcard_imports)]
 use crate::syntax_kind::*;
 use crate::token_set::TokenSet;
+
+/// Parsing context — drives disambiguation for `/`, `%`, `min()`/`max()`, etc.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ParseContext {
+    /// Inside variable declarations, function bodies, `@if` conditions, mixin args.
+    /// `/` is division, `%` is modulo.
+    SassScript,
+    /// Inside CSS property values.
+    /// `/` is a separator (unless heuristics say otherwise), `%` can be a unit.
+    CssValue,
+    /// Inside `calc()`, `min()`, `max()`, `clamp()`, etc.
+    /// `/` is always division, Sass variables allowed, `%` modulo NOT allowed.
+    Calculation,
+    /// Inside `url()`, `element()`, `progid:...()`.
+    /// Content is mostly opaque.
+    SpecialFunction,
+}
 
 /// Tokens that can start a top-level statement (rule, declaration, at-rule).
 #[rustfmt::skip]
@@ -19,22 +37,25 @@ pub const BLOCK_RECOVERY: TokenSet = TokenSet::new(&[
     RBRACE, SEMICOLON,
 ]);
 
-/// 2.4: Parse `SourceFile` — top-level sequence of items with error recovery.
+/// Parse `SourceFile` — top-level sequence of items with error recovery.
 pub fn source_file(p: &mut Parser<'_>) {
     let m = p.start();
     while !p.at_end() {
-        if p.at_ts(selectors::SELECTOR_START) {
+        if p.at(DOLLAR) {
+            expressions::variable_declaration(p);
+        } else if p.at_ts(selectors::SELECTOR_START) {
             rule_set(p);
         } else if p.at(SEMICOLON) {
             p.bump();
         } else {
-            // Wrap garbage tokens in an ERROR node, always consuming at least one
-            // to guarantee progress (tokens like AT, DOLLAR, RBRACE are in
-            // STMT_RECOVERY but not handled above).
             let m = p.start();
             p.error("expected rule");
             p.bump();
-            while !p.at_end() && !p.at_ts(selectors::SELECTOR_START) && !p.at(SEMICOLON) {
+            while !p.at_end()
+                && !p.at_ts(selectors::SELECTOR_START)
+                && !p.at(SEMICOLON)
+                && !p.at(DOLLAR)
+            {
                 p.bump();
             }
             let _ = m.complete(p, SyntaxKind::ERROR);
@@ -46,7 +67,9 @@ pub fn source_file(p: &mut Parser<'_>) {
 /// Parse a single item inside a block.
 /// Disambiguates between rule sets and declarations.
 fn block_item(p: &mut Parser<'_>) {
-    if looks_like_declaration(p) {
+    if p.at(DOLLAR) {
+        expressions::variable_declaration(p);
+    } else if looks_like_declaration(p) {
         declarations::declaration(p);
     } else if p.at_ts(selectors::SELECTOR_START) {
         rule_set(p);
@@ -209,7 +232,7 @@ pub(super) fn block(p: &mut Parser<'_>) {
     while !g.at(RBRACE) && !g.at_end() {
         if g.at(SEMICOLON) {
             g.bump();
-        } else if g.at_ts(selectors::SELECTOR_START) {
+        } else if g.at(DOLLAR) || g.at_ts(selectors::SELECTOR_START) {
             block_item(&mut g);
         } else {
             g.err_and_bump("expected declaration or nested rule");

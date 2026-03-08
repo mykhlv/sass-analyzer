@@ -2,6 +2,8 @@ use crate::parser::Parser;
 #[allow(clippy::wildcard_imports)]
 use crate::syntax_kind::*;
 
+use super::ParseContext;
+use super::expressions;
 use super::selectors;
 
 /// 2.7: Parse declaration or nested property.
@@ -26,8 +28,19 @@ pub fn declaration(p: &mut Parser<'_>) {
         return;
     }
 
-    if !p.at(SEMICOLON) && !p.at(RBRACE) && !p.at_end() {
+    if !p.at(SEMICOLON) && !p.at(RBRACE) && !p.at_end() && !p.at(LBRACE) {
         value(p);
+    }
+
+    // Check for !important after the value
+    if p.at(BANG) {
+        let flag_text = if p.nth(1) == IDENT { p.nth_text(1) } else { "" };
+        if flag_text == "important" {
+            let fm = p.start();
+            p.bump(); // !
+            p.bump(); // important
+            let _ = fm.complete(p, IMPORTANT);
+        }
     }
 
     // 2.10(c): Value-and-block: `margin: 10px { top: 20px; }`
@@ -75,7 +88,7 @@ fn property(p: &mut Parser<'_>) {
     loop {
         match p.current() {
             IDENT | MINUS => p.bump(),
-            HASH_LBRACE => selectors::interpolation(p),
+            HASH_LBRACE => expressions::interpolation(p),
             _ => break,
         }
         if p.has_whitespace_before() {
@@ -85,42 +98,48 @@ fn property(p: &mut Parser<'_>) {
     let _ = m.complete(p, PROPERTY);
 }
 
-/// 2.8: Parse declaration value — depth-aware flat token scan.
+/// Parse declaration value using expression-based parsing.
 ///
-/// Tracks `()` and `[]` depth. Scans until `;`, `}`, or `{` at depth 0.
-/// Stops before `{` at depth 0 (nested property check by caller).
+/// Parses space-separated expressions as direct children of the DECLARATION.
+/// Wraps in a VALUE node (acts as the expression-group container).
+/// Comma-separated values and `/` separators are consumed within.
 fn value(p: &mut Parser<'_>) {
     let m = p.start();
-    let mut paren_depth: u32 = 0;
-    let mut bracket_depth: u32 = 0;
+    let ctx = ParseContext::CssValue;
+
+    let mut count = 0;
     loop {
-        let at_depth_zero = paren_depth == 0 && bracket_depth == 0;
-        match p.current() {
-            EOF => break,
-            SEMICOLON | RBRACE if at_depth_zero => break,
-            LBRACE if at_depth_zero => break,
-            LPAREN => {
-                paren_depth += 1;
-                p.bump();
-            }
-            RPAREN => {
-                paren_depth = paren_depth.saturating_sub(1);
-                p.bump();
-            }
-            LBRACKET => {
-                bracket_depth += 1;
-                p.bump();
-            }
-            RBRACKET => {
-                bracket_depth = bracket_depth.saturating_sub(1);
-                p.bump();
-            }
-            HASH_LBRACE => {
-                selectors::interpolation(p);
-            }
-            _ => p.bump(),
+        if p.at(SEMICOLON) || p.at(RBRACE) || p.at(LBRACE) || p.at_end() || p.at(BANG) {
+            break;
+        }
+        // In CssValue context, `/` is a separator — just consume it
+        if p.at(SLASH) {
+            p.bump();
+            count += 1;
+            continue;
+        }
+        if p.at(COMMA) {
+            p.bump();
+            count += 1;
+            continue;
+        }
+        if !p.at_ts(expressions::EXPR_START) {
+            // Unknown token in value position — bump for progress
+            p.bump();
+            count += 1;
+            continue;
+        }
+        if expressions::expr(p, ctx).is_some() {
+            count += 1;
+        } else {
+            break;
         }
     }
+
+    if count == 0 && !p.at(SEMICOLON) && !p.at(RBRACE) && !p.at(LBRACE) && !p.at_end() {
+        p.err_and_bump("expected value");
+    }
+
     let _ = m.complete(p, VALUE);
 }
 

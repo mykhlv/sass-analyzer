@@ -89,6 +89,35 @@ pub enum SyntaxKind {
     BLOCK,
     PROPERTY,
     INTERPOLATION,
+
+    // ── Nodes: expressions (Phase 3) ─────────────────────────────
+    VARIABLE_DECL,          // $var: expr;
+    VARIABLE_REF,           // $var
+    BINARY_EXPR,            // a + b, a * b, etc.
+    UNARY_EXPR,             // -a, +a, not a
+    PAREN_EXPR,             // (expr)
+    NUMBER_LITERAL,         // 42, 3.14
+    DIMENSION,              // 10px, 2em, 100%
+    STRING_LITERAL,         // "hello" or 'hello' (non-interpolated)
+    INTERPOLATED_STRING,    // "hello #{$name}!"
+    COLOR_LITERAL,          // #fff, #aabbcc
+    BOOL_LITERAL,           // true, false
+    NULL_LITERAL,           // null
+    LIST_EXPR,              // comma-separated list
+    BRACKETED_LIST,         // [a, b, c]
+    MAP_EXPR,               // (key: value, ...)
+    MAP_ENTRY,              // key: value (inside map)
+    FUNCTION_CALL,          // name(args)
+    ARG_LIST,               // (a, $b: c, $rest...)
+    ARG,                    // single argument (positional or keyword)
+    CALCULATION,            // calc(), min(), max(), clamp(), etc.
+    CALC_SUM,               // a + b or a - b inside calculation
+    CALC_PRODUCT,           // a * b or a / b inside calculation
+    CALC_VALUE,             // single value inside calculation
+    SPECIAL_FUNCTION_CALL,  // url(), element(), progid:...()
+    STANDALONE_PERCENT,     // standalone % atom
+    IMPORTANT,              // !important
+    SASS_FLAG,              // !default, !global, !optional
 }
 
 impl SyntaxKind {
@@ -175,6 +204,34 @@ impl From<u16> for SyntaxKind {
             63 => BLOCK,
             64 => PROPERTY,
             65 => INTERPOLATION,
+            // Phase 3: expressions
+            66 => VARIABLE_DECL,
+            67 => VARIABLE_REF,
+            68 => BINARY_EXPR,
+            69 => UNARY_EXPR,
+            70 => PAREN_EXPR,
+            71 => NUMBER_LITERAL,
+            72 => DIMENSION,
+            73 => STRING_LITERAL,
+            74 => INTERPOLATED_STRING,
+            75 => COLOR_LITERAL,
+            76 => BOOL_LITERAL,
+            77 => NULL_LITERAL,
+            78 => LIST_EXPR,
+            79 => BRACKETED_LIST,
+            80 => MAP_EXPR,
+            81 => MAP_ENTRY,
+            82 => FUNCTION_CALL,
+            83 => ARG_LIST,
+            84 => ARG,
+            85 => CALCULATION,
+            86 => CALC_SUM,
+            87 => CALC_PRODUCT,
+            88 => CALC_VALUE,
+            89 => SPECIAL_FUNCTION_CALL,
+            90 => STANDALONE_PERCENT,
+            91 => IMPORTANT,
+            92 => SASS_FLAG,
             _ => panic!("invalid SyntaxKind: {raw}"),
         }
     }

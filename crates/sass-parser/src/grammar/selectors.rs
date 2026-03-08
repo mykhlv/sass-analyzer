@@ -147,29 +147,9 @@ fn simple_selector(p: &mut Parser<'_>) {
     }
 }
 
-/// Parse `#{...}` interpolation — opaque for Phase 2.
+/// Parse `#{...}` interpolation with fully-parsed inner expression.
 pub fn interpolation(p: &mut Parser<'_>) {
-    assert!(p.at(HASH_LBRACE));
-    let m = p.start();
-    p.bump(); // #{
-    let mut depth: u32 = 1;
-    while !p.at_end() {
-        match p.current() {
-            LBRACE | HASH_LBRACE => {
-                depth += 1;
-                p.bump();
-            }
-            RBRACE => {
-                depth -= 1;
-                p.bump();
-                if depth == 0 {
-                    break;
-                }
-            }
-            _ => p.bump(),
-        }
-    }
-    let _ = m.complete(p, INTERPOLATION);
+    super::expressions::interpolation(p);
 }
 
 /// Consume `(...)` balanced parentheses, treating content as opaque.
