@@ -406,3 +406,30 @@ fn boundary_bom_alone() {
     let (tree, _) = parse("\u{FEFF}");
     assert_eq!(tree.text().to_string(), "\u{FEFF}");
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// 2.20: Real-world CSS parsing
+// ═══════════════════════════════════════════════════════════════════════
+
+#[test]
+fn parse_normalize_css() {
+    let source = include_str!("fixtures/normalize.css");
+    let (tree, errors) = parse(source);
+
+    assert_eq!(tree.kind(), SOURCE_FILE);
+    assert_eq!(
+        tree.text().to_string(),
+        source,
+        "lossless round-trip failed for normalize.css"
+    );
+    assert!(
+        errors.is_empty(),
+        "normalize.css should parse without errors, got: {errors:?}"
+    );
+    // Should contain rule sets
+    let rule_count = tree.children().filter(|n| n.kind() == RULE_SET).count();
+    assert!(
+        rule_count > 10,
+        "normalize.css should have many rules, got {rule_count}"
+    );
+}
