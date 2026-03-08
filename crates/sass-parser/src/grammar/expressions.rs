@@ -429,6 +429,42 @@ const CALC_NAMES: &[&str] = &[
     "pow", "sqrt", "hypot", "log", "exp", "abs", "sign",
 ];
 
+/// Scan tokens inside parentheses to detect SassScript-only features.
+/// Used to disambiguate `min()`/`max()`: CSS calculation vs Sass function call.
+fn has_sass_signals(p: &Parser<'_>) -> bool {
+    let mut offset = 2; // skip function name + LPAREN
+    let mut depth = 1u32;
+    loop {
+        let kind = p.nth(offset);
+        match kind {
+            LPAREN => depth += 1,
+            RPAREN => {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            EOF => break,
+            // Comparison operators — never valid in CSS calc
+            EQ_EQ | BANG_EQ | LT | GT | LT_EQ | GT_EQ => return true,
+            // Interpolation, brackets, strings — not valid CSS calc atoms
+            HASH_LBRACE | LBRACKET | STRING_START => return true,
+            // `%` with whitespace before = modulo operator, not dimension unit
+            PERCENT if p.nth_has_whitespace_before(offset) => return true,
+            // `and`/`or`/`not` keywords as operators
+            IDENT => {
+                let text = p.nth_text(offset);
+                if text == "and" || text == "or" || text == "not" {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+        offset += 1;
+    }
+    false
+}
+
 /// Dispatch function call by name.
 fn function_dispatch(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
     let name = p.current_text();
@@ -443,8 +479,12 @@ fn function_dispatch(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
 
     // Calculation functions
     if CALC_NAMES.iter().any(|n| name.eq_ignore_ascii_case(n)) {
-        // min()/max() with SassScript-only features → fall back to normal call
-        // For now, always parse as calculation; Phase 3.10 refinement handles fallback
+        // min()/max() with SassScript-only features → Sass function call
+        if (name.eq_ignore_ascii_case("min") || name.eq_ignore_ascii_case("max"))
+            && has_sass_signals(p)
+        {
+            return function_call(p, ctx);
+        }
         return calculation(p);
     }
 

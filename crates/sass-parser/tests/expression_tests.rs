@@ -3098,3 +3098,122 @@ fn include_namespace_mixin() {
         "#]],
     );
 }
+
+// ── min()/max() SassScript fallback ───────────────────────────────
+
+#[test]
+fn min_sass_fallback_modulo() {
+    check(
+        "$x: min($a, $b % 2);",
+        expect![[r#"
+            SOURCE_FILE@0..20
+              VARIABLE_DECL@0..20
+                DOLLAR@0..1 "$"
+                IDENT@1..2 "x"
+                COLON@2..3 ":"
+                FUNCTION_CALL@3..19
+                  WHITESPACE@3..4 " "
+                  IDENT@4..7 "min"
+                  ARG_LIST@7..19
+                    LPAREN@7..8 "("
+                    ARG@8..10
+                      VARIABLE_REF@8..10
+                        DOLLAR@8..9 "$"
+                        IDENT@9..10 "a"
+                    COMMA@10..11 ","
+                    ARG@11..18
+                      BINARY_EXPR@11..18
+                        VARIABLE_REF@11..14
+                          WHITESPACE@11..12 " "
+                          DOLLAR@12..13 "$"
+                          IDENT@13..14 "b"
+                        WHITESPACE@14..15 " "
+                        PERCENT@15..16 "%"
+                        NUMBER_LITERAL@16..18
+                          WHITESPACE@16..17 " "
+                          NUMBER@17..18 "2"
+                    RPAREN@18..19 ")"
+                SEMICOLON@19..20 ";"
+        "#]],
+    );
+}
+
+#[test]
+fn min_sass_fallback_comparison() {
+    check(
+        "$x: min($a > $b, $c);",
+        expect![[r#"
+            SOURCE_FILE@0..21
+              VARIABLE_DECL@0..21
+                DOLLAR@0..1 "$"
+                IDENT@1..2 "x"
+                COLON@2..3 ":"
+                FUNCTION_CALL@3..20
+                  WHITESPACE@3..4 " "
+                  IDENT@4..7 "min"
+                  ARG_LIST@7..20
+                    LPAREN@7..8 "("
+                    ARG@8..15
+                      BINARY_EXPR@8..15
+                        VARIABLE_REF@8..10
+                          DOLLAR@8..9 "$"
+                          IDENT@9..10 "a"
+                        WHITESPACE@10..11 " "
+                        GT@11..12 ">"
+                        VARIABLE_REF@12..15
+                          WHITESPACE@12..13 " "
+                          DOLLAR@13..14 "$"
+                          IDENT@14..15 "b"
+                    COMMA@15..16 ","
+                    ARG@16..19
+                      VARIABLE_REF@16..19
+                        WHITESPACE@16..17 " "
+                        DOLLAR@17..18 "$"
+                        IDENT@18..19 "c"
+                    RPAREN@19..20 ")"
+                SEMICOLON@20..21 ";"
+        "#]],
+    );
+}
+
+#[test]
+fn max_css_calculation() {
+    check(
+        "div { width: max(100px, 50%); }",
+        expect![[r#"
+            SOURCE_FILE@0..31
+              RULE_SET@0..31
+                SELECTOR_LIST@0..3
+                  SELECTOR@0..3
+                    SIMPLE_SELECTOR@0..3
+                      IDENT@0..3 "div"
+                BLOCK@3..31
+                  WHITESPACE@3..4 " "
+                  LBRACE@4..5 "{"
+                  DECLARATION@5..29
+                    PROPERTY@5..11
+                      WHITESPACE@5..6 " "
+                      IDENT@6..11 "width"
+                    COLON@11..12 ":"
+                    VALUE@12..28
+                      CALCULATION@12..28
+                        WHITESPACE@12..13 " "
+                        IDENT@13..16 "max"
+                        LPAREN@16..17 "("
+                        CALC_VALUE@17..22
+                          DIMENSION@17..22
+                            NUMBER@17..20 "100"
+                            IDENT@20..22 "px"
+                        COMMA@22..23 ","
+                        CALC_VALUE@23..27
+                          DIMENSION@23..27
+                            WHITESPACE@23..24 " "
+                            NUMBER@24..26 "50"
+                            PERCENT@26..27 "%"
+                        RPAREN@27..28 ")"
+                    SEMICOLON@28..29 ";"
+                  WHITESPACE@29..30 " "
+                  RBRACE@30..31 "}"
+        "#]],
+    );
+}

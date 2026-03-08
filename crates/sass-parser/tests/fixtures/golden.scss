@@ -372,6 +372,10 @@ $ns-var: math.$pi;
   @include ns.flex-center(row, 8px);
 }
 
+// ── min()/max() SassScript fallback ─────────────────────────────────
+
+$clamped: min($a, $b % 2);
+
 // ── @layer ───────────────────────────────────────────────────────────
 
 @layer base, components, utilities;
