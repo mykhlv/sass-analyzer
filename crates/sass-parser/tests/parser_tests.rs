@@ -28,8 +28,7 @@ fn check(
         "lossless round-trip failed"
     );
 
-    let mut buf = String::new();
-    pretty_print(&tree, &mut buf, 0);
+    let mut buf = sass_parser::syntax::debug_tree(&tree);
     if !errs.is_empty() {
         buf.push_str("errors:\n");
         for (msg, range) in &errs {
@@ -37,31 +36,6 @@ fn check(
         }
     }
     expect.assert_eq(&buf);
-}
-
-fn pretty_print(node: &rowan::SyntaxNode<SassLanguage>, buf: &mut String, indent: usize) {
-    let kind = node.kind();
-    let range = node.text_range();
-    buf.push_str(&format!(
-        "{:indent$}{kind:?}@{range:?}\n",
-        "",
-        indent = indent,
-    ));
-    for child in node.children_with_tokens() {
-        match child {
-            rowan::NodeOrToken::Node(n) => pretty_print(&n, buf, indent + 2),
-            rowan::NodeOrToken::Token(t) => {
-                let kind = t.kind();
-                let range = t.text_range();
-                let text = t.text();
-                buf.push_str(&format!(
-                    "{:indent$}{kind:?}@{range:?} {text:?}\n",
-                    "",
-                    indent = indent + 2,
-                ));
-            }
-        }
-    }
 }
 
 #[test]
@@ -276,8 +250,7 @@ fn lex_parse_check(source: &str, expect: Expect) {
         "lossless round-trip failed"
     );
 
-    let mut buf = String::new();
-    pretty_print(&tree, &mut buf, 0);
+    let mut buf = sass_parser::syntax::debug_tree(&tree);
     if !errs.is_empty() {
         buf.push_str("errors:\n");
         for (msg, range) in &errs {
