@@ -1,20 +1,33 @@
+use std::collections::HashMap;
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
+use std::time::Duration;
 
 use dashmap::DashMap;
+use tokio::sync::mpsc;
 use tower_lsp_server::jsonrpc::Result;
 use tower_lsp_server::ls_types::{
     Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, InitializeParams, InitializeResult, Position, Range,
-    SemanticTokenModifier, SemanticTokenType, SemanticTokensFullOptions, SemanticTokensLegend,
-    SemanticTokensOptions, SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo,
-    TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
+    DidOpenTextDocumentParams, InitializeParams, InitializeResult, InitializedParams, Position,
+    Range, SemanticTokenModifier, SemanticTokenType, SemanticTokensFullOptions,
+    SemanticTokensLegend, SemanticTokensOptions, SemanticTokensServerCapabilities,
+    ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
 };
 use tower_lsp_server::{Client, LanguageServer, LspService, Server};
 
+const MAX_FILE_SIZE: usize = 2_000_000;
+const DEBOUNCE_MS: u64 = 50;
+
+enum Task {
+    Parse { uri: Uri, version: i32, text: String },
+    Close { uri: Uri },
+}
+
+#[allow(dead_code)]
 struct Backend {
     client: Client,
     documents: Arc<DashMap<Uri, DocumentState>>,
+    task_tx: mpsc::UnboundedSender<Task>,
 }
 
 #[allow(dead_code)]
@@ -26,32 +39,10 @@ struct DocumentState {
     line_index: sass_parser::line_index::LineIndex,
 }
 
-const MAX_FILE_SIZE: usize = 2_000_000;
-
-fn parse_document(text: &str) -> Option<(rowan::GreenNode, Vec<(String, sass_parser::text_range::TextRange)>)> {
+fn parse_document(
+    text: &str,
+) -> Option<(rowan::GreenNode, Vec<(String, sass_parser::text_range::TextRange)>)> {
     std::panic::catch_unwind(AssertUnwindSafe(|| sass_parser::parse(text))).ok()
-}
-
-impl Backend {
-    fn reparse_and_publish(&self, uri: Uri, version: i32, text: String) {
-        let Some((green, errors)) = parse_document(&text) else {
-            tracing::error!("parser panic for {uri:?}");
-            return;
-        };
-
-        let line_index = sass_parser::line_index::LineIndex::new(&text);
-        let diagnostics = errors_to_diagnostics(&errors, &line_index);
-
-        self.documents.insert(
-            uri.clone(),
-            DocumentState { version, text, green, errors, line_index },
-        );
-
-        let client = self.client.clone();
-        tokio::spawn(async move {
-            client.publish_diagnostics(uri, diagnostics, Some(version)).await;
-        });
-    }
 }
 
 fn errors_to_diagnostics(
@@ -75,6 +66,65 @@ fn errors_to_diagnostics(
             }
         })
         .collect()
+}
+
+async fn run_worker(
+    mut rx: mpsc::UnboundedReceiver<Task>,
+    client: Client,
+    documents: Arc<DashMap<Uri, DocumentState>>,
+) {
+    let mut pending: HashMap<Uri, (i32, String)> = HashMap::new();
+    let debounce = Duration::from_millis(DEBOUNCE_MS);
+    let sleep = tokio::time::sleep(debounce);
+    tokio::pin!(sleep);
+    let mut has_pending = false;
+
+    loop {
+        tokio::select! {
+            task = rx.recv() => {
+                let Some(task) = task else { break };
+                match task {
+                    Task::Parse { uri, version, text } => {
+                        pending.insert(uri, (version, text));
+                        sleep.as_mut().reset(tokio::time::Instant::now() + debounce);
+                        has_pending = true;
+                    }
+                    Task::Close { uri } => {
+                        pending.remove(&uri);
+                        documents.remove(&uri);
+                        client.publish_diagnostics(uri, vec![], None).await;
+                    }
+                }
+            }
+            () = &mut sleep, if has_pending => {
+                for (uri, (version, text)) in pending.drain() {
+                    let Some((green, errors)) = parse_document(&text) else {
+                        tracing::error!("parser panic for {uri:?}");
+                        continue;
+                    };
+                    let line_index = sass_parser::line_index::LineIndex::new(&text);
+                    let diagnostics = errors_to_diagnostics(&errors, &line_index);
+
+                    // Stale version check: only publish if version is still current
+                    let is_current = documents
+                        .get(&uri)
+                        .is_none_or(|state| state.version <= version);
+
+                    documents.insert(
+                        uri.clone(),
+                        DocumentState { version, text, green, errors, line_index },
+                    );
+
+                    if is_current {
+                        client
+                            .publish_diagnostics(uri, diagnostics, Some(version))
+                            .await;
+                    }
+                }
+                has_pending = false;
+            }
+        }
+    }
 }
 
 impl LanguageServer for Backend {
@@ -117,6 +167,10 @@ impl LanguageServer for Backend {
         })
     }
 
+    async fn initialized(&self, _: InitializedParams) {
+        tracing::info!("sass-analyzer server initialized");
+    }
+
     async fn shutdown(&self) -> Result<()> {
         Ok(())
     }
@@ -126,7 +180,11 @@ impl LanguageServer for Backend {
         if doc.text.len() > MAX_FILE_SIZE {
             return;
         }
-        self.reparse_and_publish(doc.uri, doc.version, doc.text);
+        let _ = self.task_tx.send(Task::Parse {
+            uri: doc.uri,
+            version: doc.version,
+            text: doc.text,
+        });
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -138,15 +196,16 @@ impl LanguageServer for Backend {
         if change.text.len() > MAX_FILE_SIZE {
             return;
         }
-        self.reparse_and_publish(uri, version, change.text);
+        let _ = self.task_tx.send(Task::Parse {
+            uri,
+            version,
+            text: change.text,
+        });
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
-        let uri = params.text_document.uri;
-        self.documents.remove(&uri);
-        let client = self.client.clone();
-        tokio::spawn(async move {
-            client.publish_diagnostics(uri, vec![], None).await;
+        let _ = self.task_tx.send(Task::Close {
+            uri: params.text_document.uri,
         });
     }
 }
@@ -164,9 +223,11 @@ async fn main() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
-    let (service, socket) = LspService::new(|client| Backend {
-        client,
-        documents: Arc::new(DashMap::new()),
+    let (service, socket) = LspService::new(|client| {
+        let documents = Arc::new(DashMap::new());
+        let (task_tx, task_rx) = mpsc::unbounded_channel();
+        tokio::spawn(run_worker(task_rx, client.clone(), Arc::clone(&documents)));
+        Backend { client, documents, task_tx }
     });
     Server::new(stdin, stdout, socket).serve(service).await;
 }
