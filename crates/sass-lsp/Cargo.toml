@@ -1,0 +1,21 @@
+[package]
+name = "sass-lsp"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "sass-lsp"
+path = "src/main.rs"
+
+[dependencies]
+sass-parser = { path = "../sass-parser" }
+rowan.workspace = true
+tower-lsp-server.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+dashmap.workspace = true
+
+[lints]
+workspace = true
