@@ -1,0 +1,91 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rust-target: x86_64-unknown-linux-gnu
+            vsce-target: linux-x64
+          - os: windows-latest
+            rust-target: x86_64-pc-windows-msvc
+            vsce-target: win32-x64
+          - os: macos-latest
+            rust-target: x86_64-apple-darwin
+            vsce-target: darwin-x64
+          - os: macos-latest
+            rust-target: aarch64-apple-darwin
+            vsce-target: darwin-arm64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-target }}
+
+      - name: Build sass-lsp (release)
+        run: cargo build --release --target ${{ matrix.rust-target }} -p sass-lsp
+
+      - name: Copy binary to extension (unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p editors/code/bin
+          cp target/${{ matrix.rust-target }}/release/sass-lsp editors/code/bin/
+
+      - name: Copy binary to extension (windows)
+        if: runner.os == 'Windows'
+        run: |
+          mkdir -p editors/code/bin
+          cp target/${{ matrix.rust-target }}/release/sass-lsp.exe editors/code/bin/sass-lsp.exe
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install extension dependencies
+        working-directory: editors/code
+        run: npm ci
+
+      - name: Build extension
+        working-directory: editors/code
+        run: npm run build
+
+      - name: Package VSIX
+        working-directory: editors/code
+        run: npx @vscode/vsce package --target ${{ matrix.vsce-target }} -o sass-analyzer-${{ matrix.vsce-target }}.vsix
+
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix-${{ matrix.vsce-target }}
+          path: editors/code/sass-analyzer-${{ matrix.vsce-target }}.vsix
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all VSIX artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: vsix-*
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: "*.vsix"
+          generate_release_notes: true

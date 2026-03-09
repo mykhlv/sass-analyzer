@@ -1,3 +1,4 @@
+import * as fs from "fs";
 import * as path from "path";
 import { ExtensionContext, workspace } from "vscode";
 import {
@@ -14,7 +15,20 @@ function getServerPath(context: ExtensionContext): string {
   if (customPath) {
     return customPath;
   }
-  return path.join(context.extensionPath, "bin", "sass-lsp");
+
+  // Bundled binary (production VSIX)
+  const bundled = path.join(context.extensionPath, "bin", "sass-lsp");
+  if (fs.existsSync(bundled)) {
+    return bundled;
+  }
+
+  // Dev fallback: cargo debug binary (editors/code/../../target/debug/sass-lsp)
+  const devBinary = path.join(context.extensionPath, "..", "..", "target", "debug", "sass-lsp");
+  if (fs.existsSync(devBinary)) {
+    return devBinary;
+  }
+
+  return bundled;
 }
 
 export async function activate(context: ExtensionContext): Promise<void> {
