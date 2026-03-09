@@ -35,6 +35,7 @@ pub struct ImportEdge {
 pub struct ModuleInfo {
     pub symbols: FileSymbols,
     pub green: rowan::GreenNode,
+    pub line_index: sass_parser::line_index::LineIndex,
 }
 
 /// Cross-file dependency graph for the SCSS workspace.
@@ -60,13 +61,14 @@ impl ModuleGraph {
         uri: &Uri,
         green: rowan::GreenNode,
         symbols: FileSymbols,
-        _source_text: &str,
+        line_index: sass_parser::line_index::LineIndex,
     ) {
         self.files.insert(
             uri.clone(),
             ModuleInfo {
                 symbols,
                 green: green.clone(),
+                line_index,
             },
         );
 
@@ -115,7 +117,6 @@ impl ModuleGraph {
 
     /// Resolve a qualified name (`namespace.$name` or `namespace.func()`)
     /// from a given source file. Returns the target URI and matching Symbol.
-    #[allow(dead_code)]
     pub fn resolve_qualified(
         &self,
         from: &Uri,
@@ -142,7 +143,6 @@ impl ModuleGraph {
 
     /// Resolve an unqualified name from a given source file.
     /// Searches: local definitions, then `@use ... as *` imports, then `@import` imports.
-    #[allow(dead_code)]
     pub fn resolve_unqualified(
         &self,
         from: &Uri,
@@ -221,6 +221,10 @@ impl ModuleGraph {
         result
     }
 
+    pub fn line_index(&self, uri: &Uri) -> Option<sass_parser::line_index::LineIndex> {
+        self.files.get(uri).map(|info| info.line_index.clone())
+    }
+
     fn index_dependency(&self, uri: &Uri, path: &Path) {
         let Ok(source) = std::fs::read_to_string(path) else {
             return;
@@ -231,6 +235,7 @@ impl ModuleGraph {
         else {
             return;
         };
+        let line_index = sass_parser::line_index::LineIndex::new(&source);
         let file_symbols = {
             let root = SyntaxNode::new_root(green.clone());
             symbols::collect_symbols(&root)
@@ -240,6 +245,7 @@ impl ModuleGraph {
             ModuleInfo {
                 symbols: file_symbols,
                 green,
+                line_index,
             },
         );
     }
@@ -394,18 +400,31 @@ mod tests {
         assert_eq!(ns, Namespace::Named("utils".into()));
     }
 
+    fn make_info(
+        source: &str,
+    ) -> (
+        rowan::GreenNode,
+        FileSymbols,
+        sass_parser::line_index::LineIndex,
+    ) {
+        let (green, _) = sass_parser::parse(source);
+        let root = SyntaxNode::new_root(green.clone());
+        let syms = symbols::collect_symbols(&root);
+        let li = sass_parser::line_index::LineIndex::new(source);
+        (green, syms, li)
+    }
+
     #[test]
     fn module_graph_local_resolution() {
         let graph = ModuleGraph::new();
         let uri: Uri = "file:///test.scss".parse().unwrap();
-        let (green, _) = sass_parser::parse("$color: red;\n@mixin btn { }");
-        let root = SyntaxNode::new_root(green.clone());
-        let syms = symbols::collect_symbols(&root);
+        let (green, syms, line_index) = make_info("$color: red;\n@mixin btn { }");
         graph.files.insert(
             uri.clone(),
             ModuleInfo {
                 symbols: syms,
                 green,
+                line_index,
             },
         );
 
@@ -426,26 +445,24 @@ mod tests {
         let dep_uri: Uri = "file:///colors.scss".parse().unwrap();
 
         // Index dependency
-        let (green, _) = sass_parser::parse("$primary: blue;");
-        let root = SyntaxNode::new_root(green.clone());
-        let syms = symbols::collect_symbols(&root);
+        let (green, syms, line_index) = make_info("$primary: blue;");
         graph.files.insert(
             dep_uri.clone(),
             ModuleInfo {
                 symbols: syms,
                 green,
+                line_index,
             },
         );
 
         // Index main with manual edge
-        let (green, _) = sass_parser::parse("$local: red;");
-        let root = SyntaxNode::new_root(green.clone());
-        let syms = symbols::collect_symbols(&root);
+        let (green, syms, line_index) = make_info("$local: red;");
         graph.files.insert(
             uri.clone(),
             ModuleInfo {
                 symbols: syms,
                 green,
+                line_index,
             },
         );
         graph.edges.insert(
@@ -473,23 +490,23 @@ mod tests {
         let uri: Uri = "file:///main.scss".parse().unwrap();
         let dep_uri: Uri = "file:///colors.scss".parse().unwrap();
 
-        let (green, _) = sass_parser::parse("$primary: blue;\n$secondary: green;");
-        let root = SyntaxNode::new_root(green.clone());
-        let syms = symbols::collect_symbols(&root);
+        let (green, syms, line_index) = make_info("$primary: blue;\n$secondary: green;");
         graph.files.insert(
             dep_uri.clone(),
             ModuleInfo {
                 symbols: syms,
                 green,
+                line_index,
             },
         );
 
-        let (green, _) = sass_parser::parse("");
+        let (green, _, line_index) = make_info("");
         graph.files.insert(
             uri.clone(),
             ModuleInfo {
                 symbols: symbols::FileSymbols::default(),
                 green,
+                line_index,
             },
         );
         graph.edges.insert(

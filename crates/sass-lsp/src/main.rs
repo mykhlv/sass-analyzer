@@ -14,12 +14,12 @@ use tokio::sync::mpsc;
 use tower_lsp_server::jsonrpc::Result;
 use tower_lsp_server::ls_types::{
     Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DocumentSymbolParams, DocumentSymbolResponse, InitializeParams,
-    InitializeResult, InitializedParams, OneOf, Position, Range, SemanticToken,
-    SemanticTokenModifier, SemanticTokenType, SemanticTokens, SemanticTokensFullOptions,
-    SemanticTokensLegend, SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
-    SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo, TextDocumentSyncCapability,
-    TextDocumentSyncKind, Uri,
+    DidOpenTextDocumentParams, DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams,
+    GotoDefinitionResponse, InitializeParams, InitializeResult, InitializedParams, Location, OneOf,
+    Position, Range, SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokens,
+    SemanticTokensFullOptions, SemanticTokensLegend, SemanticTokensOptions, SemanticTokensParams,
+    SemanticTokensResult, SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo,
+    TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
 };
 use tower_lsp_server::{Client, LanguageServer, LspService, Server};
 
@@ -373,7 +373,7 @@ async fn run_worker(
                         &uri,
                         green.clone(),
                         file_symbols.clone(),
-                        &text,
+                        line_index.clone(),
                     );
 
                     documents.insert(
@@ -433,6 +433,7 @@ impl LanguageServer for Backend {
                     ),
                 ),
                 document_symbol_provider: Some(OneOf::Left(true)),
+                definition_provider: Some(OneOf::Left(true)),
                 ..ServerCapabilities::default()
             },
             server_info: Some(ServerInfo {
@@ -518,6 +519,51 @@ impl LanguageServer for Backend {
             .collect();
         Ok(Some(DocumentSymbolResponse::Nested(lsp_symbols)))
     }
+
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        let (green, offset) = {
+            let Some(doc) = self.documents.get(&uri) else {
+                return Ok(None);
+            };
+            let Some(offset) = lsp_position_to_offset(&doc.text, &doc.line_index, position) else {
+                return Ok(None);
+            };
+            (doc.green.clone(), offset)
+        };
+
+        let root = SyntaxNode::new_root(green);
+        let Some(ref_info) = find_reference_at_offset(&root, offset) else {
+            return Ok(None);
+        };
+
+        let resolved = if let Some(namespace) = &ref_info.namespace {
+            self.module_graph
+                .resolve_qualified(&uri, namespace, &ref_info.name)
+        } else {
+            self.module_graph
+                .resolve_unqualified(&uri, &ref_info.name, ref_info.kind)
+        };
+
+        let Some((target_uri, symbol)) = resolved else {
+            return Ok(None);
+        };
+
+        let Some(target_line_index) = self.module_graph.line_index(&target_uri) else {
+            return Ok(None);
+        };
+
+        let range = text_range_to_lsp(symbol.selection_range, &target_line_index);
+        Ok(Some(GotoDefinitionResponse::Scalar(Location {
+            uri: target_uri,
+            range,
+        })))
+    }
 }
 
 #[allow(deprecated)]
@@ -565,6 +611,209 @@ fn text_range_to_lsp(
         Position::new(start.line - 1, start.col - 1),
         Position::new(end.line - 1, end.col - 1),
     )
+}
+
+// ── Go-to-definition ────────────────────────────────────────────────
+
+/// Convert an LSP Position (0-based line, 0-based UTF-16 col) to a byte offset.
+#[allow(clippy::cast_possible_truncation)]
+fn lsp_position_to_offset(
+    source: &str,
+    line_index: &sass_parser::line_index::LineIndex,
+    position: Position,
+) -> Option<sass_parser::text_range::TextSize> {
+    let line_start = line_index.line_start(position.line)? as usize;
+    let remaining = &source[line_start..];
+    let line_text = remaining.split('\n').next().unwrap_or(remaining);
+
+    let target_utf16 = position.character;
+    let mut byte_offset = 0usize;
+    let mut utf16_offset = 0u32;
+
+    for ch in line_text.chars() {
+        if utf16_offset >= target_utf16 {
+            break;
+        }
+        byte_offset += ch.len_utf8();
+        utf16_offset += ch.len_utf16() as u32;
+    }
+
+    Some(sass_parser::text_range::TextSize::from(
+        (line_start + byte_offset) as u32,
+    ))
+}
+
+struct ReferenceInfo {
+    namespace: Option<String>,
+    name: String,
+    kind: symbols::SymbolKind,
+}
+
+fn find_reference_at_offset(
+    root: &SyntaxNode,
+    offset: sass_parser::text_range::TextSize,
+) -> Option<ReferenceInfo> {
+    let token = root.token_at_offset(offset).right_biased()?;
+
+    for node in token.parent()?.ancestors() {
+        match node.kind() {
+            SyntaxKind::NAMESPACE_REF => {
+                return extract_namespace_ref_info(&node);
+            }
+            SyntaxKind::VARIABLE_REF => {
+                if node
+                    .parent()
+                    .is_some_and(|p| p.kind() == SyntaxKind::VARIABLE_DECL)
+                {
+                    return None;
+                }
+                let name = dollar_ident_name(&node)?;
+                return Some(ReferenceInfo {
+                    namespace: None,
+                    name,
+                    kind: symbols::SymbolKind::Variable,
+                });
+            }
+            SyntaxKind::FUNCTION_CALL => {
+                let name = ident_text_of(&node)?;
+                return Some(ReferenceInfo {
+                    namespace: None,
+                    name,
+                    kind: symbols::SymbolKind::Function,
+                });
+            }
+            SyntaxKind::INCLUDE_RULE => {
+                if node
+                    .children()
+                    .any(|c| c.kind() == SyntaxKind::NAMESPACE_REF)
+                {
+                    return None;
+                }
+                let name = nth_ident_text_of(&node, 1)?;
+                return Some(ReferenceInfo {
+                    namespace: None,
+                    name,
+                    kind: symbols::SymbolKind::Mixin,
+                });
+            }
+            SyntaxKind::EXTEND_RULE => {
+                let name = percent_ident_name(&node)?;
+                return Some(ReferenceInfo {
+                    namespace: None,
+                    name,
+                    kind: symbols::SymbolKind::Placeholder,
+                });
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn extract_namespace_ref_info(node: &SyntaxNode) -> Option<ReferenceInfo> {
+    let tokens: Vec<_> = node
+        .children_with_tokens()
+        .filter_map(rowan::NodeOrToken::into_token)
+        .collect();
+
+    let namespace = tokens
+        .iter()
+        .find(|t| t.kind() == SyntaxKind::IDENT)?
+        .text()
+        .to_string();
+
+    // ns.$var pattern: IDENT DOT DOLLAR IDENT
+    if tokens.iter().any(|t| t.kind() == SyntaxKind::DOLLAR) {
+        let name = tokens
+            .iter()
+            .skip_while(|t| t.kind() != SyntaxKind::DOLLAR)
+            .find(|t| t.kind() == SyntaxKind::IDENT)?
+            .text()
+            .to_string();
+        return Some(ReferenceInfo {
+            namespace: Some(namespace),
+            name,
+            kind: symbols::SymbolKind::Variable,
+        });
+    }
+
+    // ns.func() pattern: has FUNCTION_CALL child
+    if let Some(func_call) = node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::FUNCTION_CALL)
+    {
+        let name = ident_text_of(&func_call)?;
+        return Some(ReferenceInfo {
+            namespace: Some(namespace),
+            name,
+            kind: symbols::SymbolKind::Function,
+        });
+    }
+
+    // ns.mixin pattern: IDENT DOT IDENT (inside @include)
+    let dot_pos = tokens.iter().position(|t| t.kind() == SyntaxKind::DOT)?;
+    let name = tokens[dot_pos + 1..]
+        .iter()
+        .find(|t| t.kind() == SyntaxKind::IDENT)?
+        .text()
+        .to_string();
+
+    let is_mixin = node
+        .parent()
+        .is_some_and(|p| p.kind() == SyntaxKind::INCLUDE_RULE);
+
+    Some(ReferenceInfo {
+        namespace: Some(namespace),
+        name,
+        kind: if is_mixin {
+            symbols::SymbolKind::Mixin
+        } else {
+            symbols::SymbolKind::Function
+        },
+    })
+}
+
+fn dollar_ident_name(node: &SyntaxNode) -> Option<String> {
+    let mut found_dollar = false;
+    for element in node.children_with_tokens() {
+        if let Some(token) = element.into_token() {
+            match token.kind() {
+                SyntaxKind::DOLLAR => found_dollar = true,
+                SyntaxKind::IDENT if found_dollar => return Some(token.text().to_string()),
+                _ => {}
+            }
+        }
+    }
+    None
+}
+
+fn ident_text_of(node: &SyntaxNode) -> Option<String> {
+    node.children_with_tokens()
+        .filter_map(rowan::NodeOrToken::into_token)
+        .find(|t| t.kind() == SyntaxKind::IDENT)
+        .map(|t| t.text().to_string())
+}
+
+fn nth_ident_text_of(node: &SyntaxNode, n: usize) -> Option<String> {
+    node.children_with_tokens()
+        .filter_map(rowan::NodeOrToken::into_token)
+        .filter(|t| t.kind() == SyntaxKind::IDENT)
+        .nth(n)
+        .map(|t| t.text().to_string())
+}
+
+fn percent_ident_name(node: &SyntaxNode) -> Option<String> {
+    let mut found_pct = false;
+    for element in node.children_with_tokens() {
+        if let Some(token) = element.into_token() {
+            match token.kind() {
+                SyntaxKind::PERCENT => found_pct = true,
+                SyntaxKind::IDENT if found_pct => return Some(token.text().to_string()),
+                _ => {}
+            }
+        }
+    }
+    None
 }
 
 // ── Tests ───────────────────────────────────────────────────────────
@@ -956,6 +1205,201 @@ mod tests {
         assert_eq!(result[1]["name"], "btn");
         assert_eq!(result[1]["kind"], 12); // SymbolKind::FUNCTION = 12
         assert!(result[1]["detail"].as_str().unwrap().contains("@mixin"));
+    }
+
+    #[tokio::test]
+    async fn goto_definition_variable() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "$color: red;\n.btn { color: $color; }\n";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///def.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader).await;
+
+        // Cursor on $color reference at line 1, character 15
+        // Line 1: ".btn { color: $color; }"
+        //                        ^ char 14 ($), char 15 (c)
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 10,
+                "method": "textDocument/definition",
+                "params": {
+                    "textDocument": { "uri": "file:///def.scss" },
+                    "position": { "line": 1, "character": 15 }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader).await;
+        let result = &resp["result"];
+        assert_eq!(result["uri"], "file:///def.scss");
+        // Definition: $color at line 0, characters 0..6
+        assert_eq!(result["range"]["start"]["line"], 0);
+        assert_eq!(result["range"]["start"]["character"], 0);
+        assert_eq!(result["range"]["end"]["line"], 0);
+        assert_eq!(result["range"]["end"]["character"], 6);
+    }
+
+    #[tokio::test]
+    async fn goto_definition_mixin() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "@mixin btn { display: block; }\n.card { @include btn; }\n";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///mixin.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader).await;
+
+        // Cursor on "btn" in @include btn at line 1
+        // Line 1: ".card { @include btn; }"
+        //                          ^ char 17
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 11,
+                "method": "textDocument/definition",
+                "params": {
+                    "textDocument": { "uri": "file:///mixin.scss" },
+                    "position": { "line": 1, "character": 17 }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader).await;
+        let result = &resp["result"];
+        assert_eq!(result["uri"], "file:///mixin.scss");
+        // @mixin btn → name "btn" starts at character 7
+        assert_eq!(result["range"]["start"]["line"], 0);
+        assert_eq!(result["range"]["start"]["character"], 7);
+    }
+
+    #[tokio::test]
+    async fn goto_definition_function() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "@function double($n) { @return $n * 2; }\n.x { width: double(5px); }\n";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///func.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader).await;
+
+        // Cursor on "double" call at line 1
+        // Line 1: ".x { width: double(5px); }"
+        //                      ^ char 12
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 12,
+                "method": "textDocument/definition",
+                "params": {
+                    "textDocument": { "uri": "file:///func.scss" },
+                    "position": { "line": 1, "character": 13 }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader).await;
+        let result = &resp["result"];
+        assert_eq!(result["uri"], "file:///func.scss");
+        // @function double → name "double" at character 10
+        assert_eq!(result["range"]["start"]["line"], 0);
+        assert_eq!(result["range"]["start"]["character"], 10);
+    }
+
+    #[tokio::test]
+    async fn goto_definition_returns_null_on_definition() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "$color: red;\n";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///nodef.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader).await;
+
+        // Cursor on $color declaration itself (should return null)
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 13,
+                "method": "textDocument/definition",
+                "params": {
+                    "textDocument": { "uri": "file:///nodef.scss" },
+                    "position": { "line": 0, "character": 1 }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader).await;
+        assert!(
+            resp["result"].is_null(),
+            "definition on a decl should be null"
+        );
     }
 }
 

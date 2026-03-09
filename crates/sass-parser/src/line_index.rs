@@ -52,6 +52,11 @@ impl LineIndex {
         }
     }
 
+    /// Byte offset of the start of a line (0-based line index).
+    pub fn line_start(&self, line_0based: u32) -> Option<u32> {
+        self.newlines.get(line_0based as usize).copied()
+    }
+
     /// Total number of lines.
     #[allow(clippy::cast_possible_truncation)]
     pub fn line_count(&self) -> u32 {
