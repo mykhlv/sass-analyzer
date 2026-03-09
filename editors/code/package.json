@@ -1,0 +1,52 @@
+{
+  "name": "sass-analyzer",
+  "displayName": "sass-analyzer",
+  "description": "SCSS language support powered by sass-analyzer",
+  "version": "0.1.0",
+  "publisher": "sass-analyzer",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "sass-analyzer",
+      "properties": {
+        "sass-analyzer.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Traces the communication between VS Code and the sass-analyzer language server."
+        },
+        "sass-analyzer.server.path": {
+          "type": "string",
+          "default": "",
+          "description": "Override the path to the sass-lsp binary. Leave empty to use the bundled binary."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --minify",
+    "watch": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --watch",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.5",
+    "@types/vscode": "^1.74.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.7.0"
+  }
+}
