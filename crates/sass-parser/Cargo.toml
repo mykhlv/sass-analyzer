@@ -11,6 +11,7 @@ rowan.workspace = true
 [dev-dependencies]
 expect-test.workspace = true
 divan.workspace = true
+mimalloc.workspace = true
 
 [[bench]]
 name = "parse_benchmark"

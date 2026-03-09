@@ -13,6 +13,7 @@ clap = { version = "4", features = ["derive"] }
 miette = { version = "7", features = ["fancy"] }
 expect-test = "1.5"
 divan = "0.1"
+mimalloc = "0.1"
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }
@@ -23,3 +24,6 @@ missing_panics_doc = "allow"
 too_many_lines = "allow"
 match_same_arms = "allow"
 similar_names = "allow"
+
+[profile.bench]
+lto = "thin"

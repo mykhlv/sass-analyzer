@@ -2219,3 +2219,94 @@ fn content_with_whitespace_before_parens() {
         "#]],
     );
 }
+
+// ── Stress: semantic AST accuracy ──────────────────────────────────────
+
+#[test]
+fn use_as_with_combined() {
+    check(
+        r#"@use "theme" as t with ($primary: red, $size: 16px);"#,
+        expect![[r#"
+            SOURCE_FILE@0..52
+              USE_RULE@0..52
+                AT@0..1 "@"
+                IDENT@1..4 "use"
+                WHITESPACE@4..5 " "
+                QUOTED_STRING@5..12 "\"theme\""
+                WHITESPACE@12..13 " "
+                IDENT@13..15 "as"
+                WHITESPACE@15..16 " "
+                IDENT@16..17 "t"
+                WHITESPACE@17..18 " "
+                IDENT@18..22 "with"
+                WHITESPACE@22..23 " "
+                LPAREN@23..24 "("
+                DOLLAR@24..25 "$"
+                IDENT@25..32 "primary"
+                COLON@32..33 ":"
+                VALUE@33..37
+                  WHITESPACE@33..34 " "
+                  IDENT@34..37 "red"
+                COMMA@37..38 ","
+                WHITESPACE@38..39 " "
+                DOLLAR@39..40 "$"
+                IDENT@40..44 "size"
+                COLON@44..45 ":"
+                DIMENSION@45..50
+                  WHITESPACE@45..46 " "
+                  NUMBER@46..48 "16"
+                  IDENT@48..50 "px"
+                RPAREN@50..51 ")"
+                SEMICOLON@51..52 ";"
+        "#]],
+    );
+}
+
+#[test]
+fn forward_show_members() {
+    check(
+        r#"@forward "utils" show flex-center, $breakpoints;"#,
+        expect![[r#"
+            SOURCE_FILE@0..48
+              FORWARD_RULE@0..48
+                AT@0..1 "@"
+                IDENT@1..8 "forward"
+                WHITESPACE@8..9 " "
+                QUOTED_STRING@9..16 "\"utils\""
+                WHITESPACE@16..17 " "
+                IDENT@17..21 "show"
+                WHITESPACE@21..22 " "
+                IDENT@22..33 "flex-center"
+                COMMA@33..34 ","
+                WHITESPACE@34..35 " "
+                DOLLAR@35..36 "$"
+                IDENT@36..47 "breakpoints"
+                SEMICOLON@47..48 ";"
+        "#]],
+    );
+}
+
+#[test]
+fn forward_as_hide_combined() {
+    check(
+        r#"@forward "src" as btn-* hide _private;"#,
+        expect![[r#"
+            SOURCE_FILE@0..38
+              FORWARD_RULE@0..38
+                AT@0..1 "@"
+                IDENT@1..8 "forward"
+                WHITESPACE@8..9 " "
+                QUOTED_STRING@9..14 "\"src\""
+                WHITESPACE@14..15 " "
+                IDENT@15..17 "as"
+                WHITESPACE@17..18 " "
+                IDENT@18..22 "btn-"
+                STAR@22..23 "*"
+                WHITESPACE@23..24 " "
+                IDENT@24..28 "hide"
+                WHITESPACE@28..29 " "
+                IDENT@29..37 "_private"
+                SEMICOLON@37..38 ";"
+        "#]],
+    );
+}

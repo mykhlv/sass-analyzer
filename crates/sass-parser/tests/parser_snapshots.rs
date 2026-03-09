@@ -2304,3 +2304,698 @@ fn error_nested_error_recovery() {
         "#]],
     );
 }
+
+// ── Stress: mid-declaration errors ─────────────────────────────────────
+
+#[test]
+fn error_empty_value_with_continuation() {
+    check(
+        "p { color: ; font-size: 14px; }",
+        expect![[r#"
+            SOURCE_FILE@0..31
+              RULE_SET@0..31
+                SELECTOR_LIST@0..1
+                  SELECTOR@0..1
+                    SIMPLE_SELECTOR@0..1
+                      IDENT@0..1 "p"
+                BLOCK@1..31
+                  WHITESPACE@1..2 " "
+                  LBRACE@2..3 "{"
+                  DECLARATION@3..12
+                    PROPERTY@3..9
+                      WHITESPACE@3..4 " "
+                      IDENT@4..9 "color"
+                    COLON@9..10 ":"
+                    WHITESPACE@10..11 " "
+                    SEMICOLON@11..12 ";"
+                  DECLARATION@12..29
+                    PROPERTY@12..22
+                      WHITESPACE@12..13 " "
+                      IDENT@13..22 "font-size"
+                    COLON@22..23 ":"
+                    VALUE@23..28
+                      DIMENSION@23..28
+                        WHITESPACE@23..24 " "
+                        NUMBER@24..26 "14"
+                        IDENT@26..28 "px"
+                    SEMICOLON@28..29 ";"
+                  WHITESPACE@29..30 " "
+                  RBRACE@30..31 "}"
+        "#]],
+    );
+}
+
+#[test]
+fn error_missing_semicolon_between_decls() {
+    check(
+        "p { color: red font-size: 14px; }",
+        expect![[r#"
+            SOURCE_FILE@0..33
+              RULE_SET@0..33
+                SELECTOR_LIST@0..1
+                  SELECTOR@0..1
+                    SIMPLE_SELECTOR@0..1
+                      IDENT@0..1 "p"
+                BLOCK@1..33
+                  WHITESPACE@1..2 " "
+                  LBRACE@2..3 "{"
+                  DECLARATION@3..31
+                    PROPERTY@3..9
+                      WHITESPACE@3..4 " "
+                      IDENT@4..9 "color"
+                    COLON@9..10 ":"
+                    VALUE@10..30
+                      VALUE@10..14
+                        WHITESPACE@10..11 " "
+                        IDENT@11..14 "red"
+                      VALUE@14..24
+                        WHITESPACE@14..15 " "
+                        IDENT@15..24 "font-size"
+                      COLON@24..25 ":"
+                      DIMENSION@25..30
+                        WHITESPACE@25..26 " "
+                        NUMBER@26..28 "14"
+                        IDENT@28..30 "px"
+                    SEMICOLON@30..31 ";"
+                  WHITESPACE@31..32 " "
+                  RBRACE@32..33 "}"
+        "#]],
+    );
+}
+
+#[test]
+fn error_extra_colon_in_value() {
+    check(
+        "p { color: : red; font-size: 14px; }",
+        expect![[r#"
+            SOURCE_FILE@0..36
+              RULE_SET@0..36
+                SELECTOR_LIST@0..1
+                  SELECTOR@0..1
+                    SIMPLE_SELECTOR@0..1
+                      IDENT@0..1 "p"
+                BLOCK@1..36
+                  WHITESPACE@1..2 " "
+                  LBRACE@2..3 "{"
+                  DECLARATION@3..17
+                    PROPERTY@3..9
+                      WHITESPACE@3..4 " "
+                      IDENT@4..9 "color"
+                    COLON@9..10 ":"
+                    VALUE@10..16
+                      WHITESPACE@10..11 " "
+                      COLON@11..12 ":"
+                      VALUE@12..16
+                        WHITESPACE@12..13 " "
+                        IDENT@13..16 "red"
+                    SEMICOLON@16..17 ";"
+                  DECLARATION@17..34
+                    PROPERTY@17..27
+                      WHITESPACE@17..18 " "
+                      IDENT@18..27 "font-size"
+                    COLON@27..28 ":"
+                    VALUE@28..33
+                      DIMENSION@28..33
+                        WHITESPACE@28..29 " "
+                        NUMBER@29..31 "14"
+                        IDENT@31..33 "px"
+                    SEMICOLON@33..34 ";"
+                  WHITESPACE@34..35 " "
+                  RBRACE@35..36 "}"
+        "#]],
+    );
+}
+
+// ── Stress: malformed at-rules ─────────────────────────────────────────
+
+#[test]
+fn error_mixin_bad_params() {
+    check(
+        "@mixin m($, $b) { } .ok { color: red; }",
+        expect![[r#"
+            SOURCE_FILE@0..39
+              MIXIN_RULE@0..19
+                AT@0..1 "@"
+                IDENT@1..6 "mixin"
+                WHITESPACE@6..7 " "
+                IDENT@7..8 "m"
+                PARAM_LIST@8..15
+                  LPAREN@8..9 "("
+                  PARAM@9..10
+                    DOLLAR@9..10 "$"
+                  COMMA@10..11 ","
+                  PARAM@11..14
+                    WHITESPACE@11..12 " "
+                    DOLLAR@12..13 "$"
+                    IDENT@13..14 "b"
+                  RPAREN@14..15 ")"
+                BLOCK@15..19
+                  WHITESPACE@15..16 " "
+                  LBRACE@16..17 "{"
+                  WHITESPACE@17..18 " "
+                  RBRACE@18..19 "}"
+              RULE_SET@19..39
+                SELECTOR_LIST@19..23
+                  SELECTOR@19..23
+                    SIMPLE_SELECTOR@19..23
+                      WHITESPACE@19..20 " "
+                      DOT@20..21 "."
+                      IDENT@21..23 "ok"
+                BLOCK@23..39
+                  WHITESPACE@23..24 " "
+                  LBRACE@24..25 "{"
+                  DECLARATION@25..37
+                    PROPERTY@25..31
+                      WHITESPACE@25..26 " "
+                      IDENT@26..31 "color"
+                    COLON@31..32 ":"
+                    VALUE@32..36
+                      VALUE@32..36
+                        WHITESPACE@32..33 " "
+                        IDENT@33..36 "red"
+                    SEMICOLON@36..37 ";"
+                  WHITESPACE@37..38 " "
+                  RBRACE@38..39 "}"
+            errors:
+              10..11: expected IDENT
+        "#]],
+    );
+}
+
+#[test]
+fn error_for_missing_variable() {
+    check(
+        "@for from 1 through 10 { } .ok { }",
+        expect![[r#"
+            SOURCE_FILE@0..34
+              FOR_RULE@0..26
+                AT@0..1 "@"
+                IDENT@1..4 "for"
+                WHITESPACE@4..5 " "
+                IDENT@5..9 "from"
+                NUMBER_LITERAL@9..11
+                  WHITESPACE@9..10 " "
+                  NUMBER@10..11 "1"
+                WHITESPACE@11..12 " "
+                IDENT@12..19 "through"
+                NUMBER_LITERAL@19..22
+                  WHITESPACE@19..20 " "
+                  NUMBER@20..22 "10"
+                BLOCK@22..26
+                  WHITESPACE@22..23 " "
+                  LBRACE@23..24 "{"
+                  WHITESPACE@24..25 " "
+                  RBRACE@25..26 "}"
+              RULE_SET@26..34
+                SELECTOR_LIST@26..30
+                  SELECTOR@26..30
+                    SIMPLE_SELECTOR@26..30
+                      WHITESPACE@26..27 " "
+                      DOT@27..28 "."
+                      IDENT@28..30 "ok"
+                BLOCK@30..34
+                  WHITESPACE@30..31 " "
+                  LBRACE@31..32 "{"
+                  WHITESPACE@32..33 " "
+                  RBRACE@33..34 "}"
+            errors:
+              5..9: expected DOLLAR
+              10..11: expected `from`
+        "#]],
+    );
+}
+
+#[test]
+fn error_each_missing_list() {
+    check(
+        "@each $x { } .ok { color: red; }",
+        expect![[r#"
+            SOURCE_FILE@0..32
+              EACH_RULE@0..12
+                AT@0..1 "@"
+                IDENT@1..5 "each"
+                WHITESPACE@5..6 " "
+                DOLLAR@6..7 "$"
+                IDENT@7..8 "x"
+                BLOCK@8..12
+                  WHITESPACE@8..9 " "
+                  LBRACE@9..10 "{"
+                  WHITESPACE@10..11 " "
+                  RBRACE@11..12 "}"
+              RULE_SET@12..32
+                SELECTOR_LIST@12..16
+                  SELECTOR@12..16
+                    SIMPLE_SELECTOR@12..16
+                      WHITESPACE@12..13 " "
+                      DOT@13..14 "."
+                      IDENT@14..16 "ok"
+                BLOCK@16..32
+                  WHITESPACE@16..17 " "
+                  LBRACE@17..18 "{"
+                  DECLARATION@18..30
+                    PROPERTY@18..24
+                      WHITESPACE@18..19 " "
+                      IDENT@19..24 "color"
+                    COLON@24..25 ":"
+                    VALUE@25..29
+                      VALUE@25..29
+                        WHITESPACE@25..26 " "
+                        IDENT@26..29 "red"
+                    SEMICOLON@29..30 ";"
+                  WHITESPACE@30..31 " "
+                  RBRACE@31..32 "}"
+            errors:
+              9..10: expected `in`
+              9..10: expected expression
+        "#]],
+    );
+}
+
+#[test]
+fn error_include_missing_name() {
+    check(
+        ".x { @include; color: red; }",
+        expect![[r#"
+            SOURCE_FILE@0..28
+              RULE_SET@0..28
+                SELECTOR_LIST@0..2
+                  SELECTOR@0..2
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "x"
+                BLOCK@2..28
+                  WHITESPACE@2..3 " "
+                  LBRACE@3..4 "{"
+                  INCLUDE_RULE@4..14
+                    WHITESPACE@4..5 " "
+                    AT@5..6 "@"
+                    IDENT@6..13 "include"
+                    SEMICOLON@13..14 ";"
+                  DECLARATION@14..26
+                    PROPERTY@14..20
+                      WHITESPACE@14..15 " "
+                      IDENT@15..20 "color"
+                    COLON@20..21 ":"
+                    VALUE@21..25
+                      VALUE@21..25
+                        WHITESPACE@21..22 " "
+                        IDENT@22..25 "red"
+                    SEMICOLON@25..26 ";"
+                  WHITESPACE@26..27 " "
+                  RBRACE@27..28 "}"
+            errors:
+              13..14: expected IDENT
+        "#]],
+    );
+}
+
+// ── Stress: nested error recovery ──────────────────────────────────────
+
+#[test]
+fn error_inner_block_no_corruption_of_sibling() {
+    check(
+        "nav { .inner { color; } .sibling { font-size: 14px; } }",
+        expect![[r#"
+            SOURCE_FILE@0..55
+              RULE_SET@0..55
+                SELECTOR_LIST@0..3
+                  SELECTOR@0..3
+                    SIMPLE_SELECTOR@0..3
+                      IDENT@0..3 "nav"
+                BLOCK@3..55
+                  WHITESPACE@3..4 " "
+                  LBRACE@4..5 "{"
+                  RULE_SET@5..23
+                    SELECTOR_LIST@5..12
+                      SELECTOR@5..12
+                        SIMPLE_SELECTOR@5..12
+                          WHITESPACE@5..6 " "
+                          DOT@6..7 "."
+                          IDENT@7..12 "inner"
+                    BLOCK@12..23
+                      WHITESPACE@12..13 " "
+                      LBRACE@13..14 "{"
+                      RULE_SET@14..20
+                        SELECTOR_LIST@14..20
+                          SELECTOR@14..20
+                            SIMPLE_SELECTOR@14..20
+                              WHITESPACE@14..15 " "
+                              IDENT@15..20 "color"
+                      SEMICOLON@20..21 ";"
+                      WHITESPACE@21..22 " "
+                      RBRACE@22..23 "}"
+                  RULE_SET@23..53
+                    SELECTOR_LIST@23..32
+                      SELECTOR@23..32
+                        SIMPLE_SELECTOR@23..32
+                          WHITESPACE@23..24 " "
+                          DOT@24..25 "."
+                          IDENT@25..32 "sibling"
+                    BLOCK@32..53
+                      WHITESPACE@32..33 " "
+                      LBRACE@33..34 "{"
+                      DECLARATION@34..51
+                        PROPERTY@34..44
+                          WHITESPACE@34..35 " "
+                          IDENT@35..44 "font-size"
+                        COLON@44..45 ":"
+                        VALUE@45..50
+                          DIMENSION@45..50
+                            WHITESPACE@45..46 " "
+                            NUMBER@46..48 "14"
+                            IDENT@48..50 "px"
+                        SEMICOLON@50..51 ";"
+                      WHITESPACE@51..52 " "
+                      RBRACE@52..53 "}"
+                  WHITESPACE@53..54 " "
+                  RBRACE@54..55 "}"
+            errors:
+              20..21: expected `{`
+        "#]],
+    );
+}
+
+#[test]
+fn error_three_levels_deep_outer_intact() {
+    check(
+        "a { b { c { color; } font-size: 14px; } margin: 0; }",
+        expect![[r#"
+            SOURCE_FILE@0..52
+              RULE_SET@0..52
+                SELECTOR_LIST@0..1
+                  SELECTOR@0..1
+                    SIMPLE_SELECTOR@0..1
+                      IDENT@0..1 "a"
+                BLOCK@1..52
+                  WHITESPACE@1..2 " "
+                  LBRACE@2..3 "{"
+                  RULE_SET@3..39
+                    SELECTOR_LIST@3..5
+                      SELECTOR@3..5
+                        SIMPLE_SELECTOR@3..5
+                          WHITESPACE@3..4 " "
+                          IDENT@4..5 "b"
+                    BLOCK@5..39
+                      WHITESPACE@5..6 " "
+                      LBRACE@6..7 "{"
+                      RULE_SET@7..20
+                        SELECTOR_LIST@7..9
+                          SELECTOR@7..9
+                            SIMPLE_SELECTOR@7..9
+                              WHITESPACE@7..8 " "
+                              IDENT@8..9 "c"
+                        BLOCK@9..20
+                          WHITESPACE@9..10 " "
+                          LBRACE@10..11 "{"
+                          RULE_SET@11..17
+                            SELECTOR_LIST@11..17
+                              SELECTOR@11..17
+                                SIMPLE_SELECTOR@11..17
+                                  WHITESPACE@11..12 " "
+                                  IDENT@12..17 "color"
+                          SEMICOLON@17..18 ";"
+                          WHITESPACE@18..19 " "
+                          RBRACE@19..20 "}"
+                      DECLARATION@20..37
+                        PROPERTY@20..30
+                          WHITESPACE@20..21 " "
+                          IDENT@21..30 "font-size"
+                        COLON@30..31 ":"
+                        VALUE@31..36
+                          DIMENSION@31..36
+                            WHITESPACE@31..32 " "
+                            NUMBER@32..34 "14"
+                            IDENT@34..36 "px"
+                        SEMICOLON@36..37 ";"
+                      WHITESPACE@37..38 " "
+                      RBRACE@38..39 "}"
+                  DECLARATION@39..50
+                    PROPERTY@39..46
+                      WHITESPACE@39..40 " "
+                      IDENT@40..46 "margin"
+                    COLON@46..47 ":"
+                    VALUE@47..49
+                      NUMBER_LITERAL@47..49
+                        WHITESPACE@47..48 " "
+                        NUMBER@48..49 "0"
+                    SEMICOLON@49..50 ";"
+                  WHITESPACE@50..51 " "
+                  RBRACE@51..52 "}"
+            errors:
+              17..18: expected `{`
+        "#]],
+    );
+}
+
+// ── Stress: multiple sequential errors ─────────────────────────────────
+
+#[test]
+fn error_two_broken_rules_third_correct() {
+    check(
+        "p { color; } q { font; } h1 { margin: 0; }",
+        expect![[r#"
+            SOURCE_FILE@0..42
+              RULE_SET@0..12
+                SELECTOR_LIST@0..1
+                  SELECTOR@0..1
+                    SIMPLE_SELECTOR@0..1
+                      IDENT@0..1 "p"
+                BLOCK@1..12
+                  WHITESPACE@1..2 " "
+                  LBRACE@2..3 "{"
+                  RULE_SET@3..9
+                    SELECTOR_LIST@3..9
+                      SELECTOR@3..9
+                        SIMPLE_SELECTOR@3..9
+                          WHITESPACE@3..4 " "
+                          IDENT@4..9 "color"
+                  SEMICOLON@9..10 ";"
+                  WHITESPACE@10..11 " "
+                  RBRACE@11..12 "}"
+              RULE_SET@12..24
+                SELECTOR_LIST@12..14
+                  SELECTOR@12..14
+                    SIMPLE_SELECTOR@12..14
+                      WHITESPACE@12..13 " "
+                      IDENT@13..14 "q"
+                BLOCK@14..24
+                  WHITESPACE@14..15 " "
+                  LBRACE@15..16 "{"
+                  RULE_SET@16..21
+                    SELECTOR_LIST@16..21
+                      SELECTOR@16..21
+                        SIMPLE_SELECTOR@16..21
+                          WHITESPACE@16..17 " "
+                          IDENT@17..21 "font"
+                  SEMICOLON@21..22 ";"
+                  WHITESPACE@22..23 " "
+                  RBRACE@23..24 "}"
+              RULE_SET@24..42
+                SELECTOR_LIST@24..27
+                  SELECTOR@24..27
+                    SIMPLE_SELECTOR@24..27
+                      WHITESPACE@24..25 " "
+                      IDENT@25..27 "h1"
+                BLOCK@27..42
+                  WHITESPACE@27..28 " "
+                  LBRACE@28..29 "{"
+                  DECLARATION@29..40
+                    PROPERTY@29..36
+                      WHITESPACE@29..30 " "
+                      IDENT@30..36 "margin"
+                    COLON@36..37 ":"
+                    VALUE@37..39
+                      NUMBER_LITERAL@37..39
+                        WHITESPACE@37..38 " "
+                        NUMBER@38..39 "0"
+                    SEMICOLON@39..40 ";"
+                  WHITESPACE@40..41 " "
+                  RBRACE@41..42 "}"
+            errors:
+              9..10: expected `{`
+              21..22: expected `{`
+        "#]],
+    );
+}
+
+#[test]
+fn error_garbage_then_valid_rule() {
+    check(
+        "@@@ { } %%% { } h1 { color: red; }",
+        expect![[r#"
+            SOURCE_FILE@0..34
+              GENERIC_AT_RULE@0..7
+                AT@0..1 "@"
+                AT@1..2 "@"
+                AT@2..3 "@"
+                BLOCK@3..7
+                  WHITESPACE@3..4 " "
+                  LBRACE@4..5 "{"
+                  WHITESPACE@5..6 " "
+                  RBRACE@6..7 "}"
+              RULE_SET@7..15
+                SELECTOR_LIST@7..11
+                  SELECTOR@7..11
+                    SIMPLE_SELECTOR@7..9
+                      WHITESPACE@7..8 " "
+                      PERCENT@8..9 "%"
+                    SIMPLE_SELECTOR@9..10
+                      PERCENT@9..10 "%"
+                    SIMPLE_SELECTOR@10..11
+                      PERCENT@10..11 "%"
+                BLOCK@11..15
+                  WHITESPACE@11..12 " "
+                  LBRACE@12..13 "{"
+                  WHITESPACE@13..14 " "
+                  RBRACE@14..15 "}"
+              RULE_SET@15..34
+                SELECTOR_LIST@15..18
+                  SELECTOR@15..18
+                    SIMPLE_SELECTOR@15..18
+                      WHITESPACE@15..16 " "
+                      IDENT@16..18 "h1"
+                BLOCK@18..34
+                  WHITESPACE@18..19 " "
+                  LBRACE@19..20 "{"
+                  DECLARATION@20..32
+                    PROPERTY@20..26
+                      WHITESPACE@20..21 " "
+                      IDENT@21..26 "color"
+                    COLON@26..27 ":"
+                    VALUE@27..31
+                      VALUE@27..31
+                        WHITESPACE@27..28 " "
+                        IDENT@28..31 "red"
+                    SEMICOLON@31..32 ";"
+                  WHITESPACE@32..33 " "
+                  RBRACE@33..34 "}"
+            errors:
+              9..10: expected IDENT
+              10..11: expected IDENT
+              12..13: expected IDENT
+        "#]],
+    );
+}
+
+// ── Stress: interpolation errors ───────────────────────────────────────
+
+#[test]
+fn error_unclosed_interpolation_selector() {
+    check(
+        "#{$tag { color: red; }",
+        expect![[r##"
+            SOURCE_FILE@0..22
+              RULE_SET@0..22
+                SELECTOR_LIST@0..6
+                  SELECTOR@0..6
+                    INTERPOLATION@0..6
+                      HASH_LBRACE@0..2 "#{"
+                      VARIABLE_REF@2..6
+                        DOLLAR@2..3 "$"
+                        IDENT@3..6 "tag"
+                BLOCK@6..22
+                  WHITESPACE@6..7 " "
+                  LBRACE@7..8 "{"
+                  DECLARATION@8..20
+                    PROPERTY@8..14
+                      WHITESPACE@8..9 " "
+                      IDENT@9..14 "color"
+                    COLON@14..15 ":"
+                    VALUE@15..19
+                      VALUE@15..19
+                        WHITESPACE@15..16 " "
+                        IDENT@16..19 "red"
+                    SEMICOLON@19..20 ";"
+                  WHITESPACE@20..21 " "
+                  RBRACE@21..22 "}"
+            errors:
+              7..8: expected RBRACE
+        "##]],
+    );
+}
+
+#[test]
+fn error_unclosed_interpolation_value() {
+    check(
+        "p { color: #{$c; }",
+        expect![[r##"
+            SOURCE_FILE@0..18
+              RULE_SET@0..18
+                SELECTOR_LIST@0..1
+                  SELECTOR@0..1
+                    SIMPLE_SELECTOR@0..1
+                      IDENT@0..1 "p"
+                BLOCK@1..18
+                  WHITESPACE@1..2 " "
+                  LBRACE@2..3 "{"
+                  DECLARATION@3..16
+                    PROPERTY@3..9
+                      WHITESPACE@3..4 " "
+                      IDENT@4..9 "color"
+                    COLON@9..10 ":"
+                    VALUE@10..15
+                      INTERPOLATION@10..15
+                        WHITESPACE@10..11 " "
+                        HASH_LBRACE@11..13 "#{"
+                        VARIABLE_REF@13..15
+                          DOLLAR@13..14 "$"
+                          IDENT@14..15 "c"
+                    SEMICOLON@15..16 ";"
+                  WHITESPACE@16..17 " "
+                  RBRACE@17..18 "}"
+            errors:
+              15..16: expected RBRACE
+        "##]],
+    );
+}
+
+#[test]
+fn error_bad_expr_inside_interpolation() {
+    check(
+        "p { color: #{$ + }; font-size: 14px; }",
+        expect![[r##"
+            SOURCE_FILE@0..38
+              RULE_SET@0..38
+                SELECTOR_LIST@0..1
+                  SELECTOR@0..1
+                    SIMPLE_SELECTOR@0..1
+                      IDENT@0..1 "p"
+                BLOCK@1..38
+                  WHITESPACE@1..2 " "
+                  LBRACE@2..3 "{"
+                  DECLARATION@3..19
+                    PROPERTY@3..9
+                      WHITESPACE@3..4 " "
+                      IDENT@4..9 "color"
+                    COLON@9..10 ":"
+                    VALUE@10..18
+                      INTERPOLATION@10..18
+                        WHITESPACE@10..11 " "
+                        HASH_LBRACE@11..13 "#{"
+                        BINARY_EXPR@13..16
+                          VARIABLE_REF@13..14
+                            DOLLAR@13..14 "$"
+                          WHITESPACE@14..15 " "
+                          PLUS@15..16 "+"
+                        WHITESPACE@16..17 " "
+                        RBRACE@17..18 "}"
+                    SEMICOLON@18..19 ";"
+                  DECLARATION@19..36
+                    PROPERTY@19..29
+                      WHITESPACE@19..20 " "
+                      IDENT@20..29 "font-size"
+                    COLON@29..30 ":"
+                    VALUE@30..35
+                      DIMENSION@30..35
+                        WHITESPACE@30..31 " "
+                        NUMBER@31..33 "14"
+                        IDENT@33..35 "px"
+                    SEMICOLON@35..36 ";"
+                  WHITESPACE@36..37 " "
+                  RBRACE@37..38 "}"
+            errors:
+              15..16: expected IDENT
+              17..18: expected expression
+        "##]],
+    );
+}

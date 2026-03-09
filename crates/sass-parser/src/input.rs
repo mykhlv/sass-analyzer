@@ -41,9 +41,50 @@ impl Input {
     }
 
     /// Lex source code and build `Input` in one step.
+    ///
+    /// Lexes directly into the `Input` fields, avoiding the intermediate
+    /// `Vec<(SyntaxKind, &str)>` allocation that `tokenize()` + `from_tokens()` would create.
     pub fn from_source(source: &str) -> Self {
-        let tokens = lexer::tokenize(source);
-        Self::from_tokens(&tokens)
+        let mut lexer = lexer::Lexer::new(source);
+        let mut kinds = Vec::new();
+        let mut ranges = Vec::new();
+        let mut all_trivia = Vec::new();
+        let mut trivia_starts = Vec::new();
+        let mut offset = 0u32;
+        let mut pending_trivia_start = 0u32;
+
+        loop {
+            let (kind, text) = lexer.next_token();
+            if kind == SyntaxKind::EOF {
+                break;
+            }
+            #[allow(clippy::cast_possible_truncation)]
+            let len = text.len() as u32;
+            let range = TextRange::new(TextSize::from(offset), TextSize::from(offset + len));
+
+            if kind.is_trivia() {
+                all_trivia.push((kind, range));
+            } else {
+                #[allow(clippy::cast_possible_truncation)]
+                {
+                    trivia_starts.push(pending_trivia_start);
+                    pending_trivia_start = all_trivia.len() as u32;
+                }
+                kinds.push(kind);
+                ranges.push(range);
+            }
+
+            offset += len;
+        }
+
+        trivia_starts.push(pending_trivia_start);
+
+        Self {
+            kinds,
+            ranges,
+            all_trivia,
+            trivia_starts,
+        }
     }
 
     /// Build `Input` from raw lexer tokens.
@@ -96,11 +137,9 @@ impl Input {
         self.kinds.get(pos).copied().unwrap_or(SyntaxKind::EOF)
     }
 
-    /// # Panics
-    /// Panics if `pos >= self.len()`.
     #[inline]
     pub fn range(&self, pos: usize) -> TextRange {
-        assert!(
+        debug_assert!(
             pos < self.len(),
             "Input::range: pos {pos} >= len {}",
             self.len()
@@ -108,17 +147,18 @@ impl Input {
         self.ranges[pos]
     }
 
+    #[inline]
     pub fn len(&self) -> usize {
         self.kinds.len()
     }
 
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.kinds.is_empty()
     }
 
     /// Trivia tokens immediately before significant token at `pos`.
-    ///
-    /// `pos` must be `< self.len()`.
+    #[inline]
     pub fn trivia_before(&self, pos: usize) -> &[(SyntaxKind, TextRange)] {
         debug_assert!(
             pos < self.len(),
@@ -131,16 +171,26 @@ impl Input {
     }
 
     /// Trailing trivia after all significant tokens (attaches to `SOURCE_FILE`).
+    #[inline]
     pub fn trailing_trivia(&self) -> &[(SyntaxKind, TextRange)] {
         let start = *self.trivia_starts.last().unwrap_or(&0) as usize;
         &self.all_trivia[start..]
     }
 
+    /// Raw trivia start index for the bridge's linear walk.
+    #[inline]
+    pub fn trivia_start_index(&self, pos: usize) -> usize {
+        self.trivia_starts[pos] as usize
+    }
+
+    /// The full trivia array, for direct access from the bridge.
+    #[inline]
+    pub fn all_trivia(&self) -> &[(SyntaxKind, TextRange)] {
+        &self.all_trivia
+    }
+
     /// Whether any whitespace trivia exists before the token at `pos`.
-    ///
-    /// `pos` must be `< self.len()`. For the very first token in the file
-    /// this checks leading trivia; the `Parser` wrapper returns `false`
-    /// for `pos == 0` since there is no preceding *significant* token.
+    #[inline]
     pub fn has_whitespace_before(&self, pos: usize) -> bool {
         debug_assert!(
             pos < self.len(),

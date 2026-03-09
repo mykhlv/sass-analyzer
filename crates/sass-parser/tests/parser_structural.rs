@@ -545,3 +545,60 @@ fn golden_scss_has_expected_nodes() {
         "expected >= 2 calculation expressions"
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// Fuzz regression tests
+// ═══════════════════════════════════════════════════════════════════════
+
+#[test]
+fn fuzz_regression_oom_nested_parens_in_calc() {
+    // Regression: unmatched `(` inside calc caused infinite loop in paren_or_map,
+    // generating unbounded error messages and events until OOM.
+    let input = "div { width: calc(050%((((((m); }";
+    let (tree, _) = parse(input);
+    assert_eq!(tree.text().to_string(), input, "round-trip must hold");
+}
+
+#[test]
+fn fuzz_regression_oom_interp_calc_garbled() {
+    let input = "div { width:#{$ calc(min(100%, 50vw) - 2retag} { colm); or: }red; }";
+    let (tree, _) = parse(input);
+    assert_eq!(tree.text().to_string(), input, "round-trip must hold");
+}
+
+#[test]
+fn fuzz_regression_oom_keyframes_bad_selector() {
+    // Regression: garbled tokens inside @keyframes block caused infinite loop
+    // because keyframe_block() could fail to consume any tokens when
+    // keyframe_selector errored on unexpected token and no { followed.
+    let input = "%@keyframes fade { fr m{o opacity: 0; } to \x7f opacity: 1; } }";
+    let (tree, _) = parse(input);
+    assert_eq!(tree.text().to_string(), input, "round-trip must hold");
+}
+
+#[test]
+fn fuzz_regression_panic_has_whitespace_before_at_eof() {
+    // Regression: has_whitespace_before panicked when called at EOF position
+    // because it passed pos == len to Input::has_whitespace_before which
+    // asserts pos < len.
+    let input = "@for $i from 1 through{ .kol-#{$n}{$nw {}di th: 10%; } }&";
+    let (tree, _) = parse(input);
+    assert_eq!(tree.text().to_string(), input, "round-trip must hold");
+}
+
+#[test]
+fn fuzz_regression_timeout_deeply_nested_interp_funcs() {
+    // Regression: deeply nested interpolation + function calls in 384 bytes
+    // caused >30s parse under ASAN. Verify it finishes quickly without sanitizers.
+    let input = std::fs::read_to_string(
+        concat!(env!("CARGO_MANIFEST_DIR"),
+            "/fuzz/artifacts/fuzz_parser_crash/timeout-9478c846eb9d3f00e4abe0a9b4ed79068c475fca")
+    );
+    if let Ok(input) = input {
+        let start = std::time::Instant::now();
+        let (tree, _) = parse(&input);
+        let elapsed = start.elapsed();
+        assert_eq!(tree.text().to_string(), input, "round-trip must hold");
+        assert!(elapsed.as_secs() < 5, "parse took {elapsed:?}, expected < 5s");
+    }
+}

@@ -117,8 +117,10 @@ pub fn keyframes_rule(p: &mut Parser<'_>) {
     while !p.at(RBRACE) && !p.at_end() {
         if p.at(SEMICOLON) {
             p.bump();
-        } else {
+        } else if p.at(IDENT) || p.at(NUMBER) {
             keyframe_block(p);
+        } else {
+            p.err_and_bump("expected keyframe selector");
         }
     }
     p.expect(RBRACE);

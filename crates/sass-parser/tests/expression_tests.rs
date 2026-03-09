@@ -3217,3 +3217,187 @@ fn max_css_calculation() {
         "#]],
     );
 }
+
+// ── Stress: semantic AST accuracy ──────────────────────────────────────
+
+#[test]
+fn deep_nested_string_interpolation() {
+    check(
+        r#"$s: "a #{"b #{$c} d"} e";"#,
+        expect![[r##"
+            SOURCE_FILE@0..25
+              VARIABLE_DECL@0..25
+                DOLLAR@0..1 "$"
+                IDENT@1..2 "s"
+                COLON@2..3 ":"
+                INTERPOLATED_STRING@3..24
+                  WHITESPACE@3..4 " "
+                  STRING_START@4..7 "\"a "
+                  INTERPOLATION@7..21
+                    HASH_LBRACE@7..9 "#{"
+                    INTERPOLATED_STRING@9..20
+                      STRING_START@9..12 "\"b "
+                      INTERPOLATION@12..17
+                        HASH_LBRACE@12..14 "#{"
+                        VARIABLE_REF@14..16
+                          DOLLAR@14..15 "$"
+                          IDENT@15..16 "c"
+                        RBRACE@16..17 "}"
+                      STRING_END@17..20 " d\""
+                    RBRACE@20..21 "}"
+                  STRING_END@21..24 " e\""
+                SEMICOLON@24..25 ";"
+        "##]],
+    );
+}
+
+#[test]
+fn calc_nested_min_subtraction() {
+    check(
+        "div { width: calc(min(100%, 50vw) - 2rem); }",
+        expect![[r#"
+            SOURCE_FILE@0..44
+              RULE_SET@0..44
+                SELECTOR_LIST@0..3
+                  SELECTOR@0..3
+                    SIMPLE_SELECTOR@0..3
+                      IDENT@0..3 "div"
+                BLOCK@3..44
+                  WHITESPACE@3..4 " "
+                  LBRACE@4..5 "{"
+                  DECLARATION@5..42
+                    PROPERTY@5..11
+                      WHITESPACE@5..6 " "
+                      IDENT@6..11 "width"
+                    COLON@11..12 ":"
+                    VALUE@12..41
+                      CALCULATION@12..41
+                        WHITESPACE@12..13 " "
+                        IDENT@13..17 "calc"
+                        LPAREN@17..18 "("
+                        CALC_SUM@18..40
+                          CALCULATION@18..33
+                            IDENT@18..21 "min"
+                            LPAREN@21..22 "("
+                            CALC_VALUE@22..26
+                              DIMENSION@22..26
+                                NUMBER@22..25 "100"
+                                PERCENT@25..26 "%"
+                            COMMA@26..27 ","
+                            CALC_VALUE@27..32
+                              DIMENSION@27..32
+                                WHITESPACE@27..28 " "
+                                NUMBER@28..30 "50"
+                                IDENT@30..32 "vw"
+                            RPAREN@32..33 ")"
+                          WHITESPACE@33..34 " "
+                          MINUS@34..35 "-"
+                          CALC_VALUE@35..40
+                            DIMENSION@35..40
+                              WHITESPACE@35..36 " "
+                              NUMBER@36..37 "2"
+                              IDENT@37..40 "rem"
+                        RPAREN@40..41 ")"
+                    SEMICOLON@41..42 ";"
+                  WHITESPACE@42..43 " "
+                  RBRACE@43..44 "}"
+        "#]],
+    );
+}
+
+#[test]
+fn max_with_calc_inside() {
+    check(
+        "div { width: max(calc(100% - 40px), 300px); }",
+        expect![[r#"
+            SOURCE_FILE@0..45
+              RULE_SET@0..45
+                SELECTOR_LIST@0..3
+                  SELECTOR@0..3
+                    SIMPLE_SELECTOR@0..3
+                      IDENT@0..3 "div"
+                BLOCK@3..45
+                  WHITESPACE@3..4 " "
+                  LBRACE@4..5 "{"
+                  DECLARATION@5..43
+                    PROPERTY@5..11
+                      WHITESPACE@5..6 " "
+                      IDENT@6..11 "width"
+                    COLON@11..12 ":"
+                    VALUE@12..42
+                      CALCULATION@12..42
+                        WHITESPACE@12..13 " "
+                        IDENT@13..16 "max"
+                        LPAREN@16..17 "("
+                        CALCULATION@17..34
+                          IDENT@17..21 "calc"
+                          LPAREN@21..22 "("
+                          CALC_SUM@22..33
+                            CALC_VALUE@22..26
+                              DIMENSION@22..26
+                                NUMBER@22..25 "100"
+                                PERCENT@25..26 "%"
+                            WHITESPACE@26..27 " "
+                            MINUS@27..28 "-"
+                            CALC_VALUE@28..33
+                              DIMENSION@28..33
+                                WHITESPACE@28..29 " "
+                                NUMBER@29..31 "40"
+                                IDENT@31..33 "px"
+                          RPAREN@33..34 ")"
+                        COMMA@34..35 ","
+                        CALC_VALUE@35..41
+                          DIMENSION@35..41
+                            WHITESPACE@35..36 " "
+                            NUMBER@36..39 "300"
+                            IDENT@39..41 "px"
+                        RPAREN@41..42 ")"
+                    SEMICOLON@42..43 ";"
+                  WHITESPACE@43..44 " "
+                  RBRACE@44..45 "}"
+        "#]],
+    );
+}
+
+#[test]
+fn interpolation_in_selector_property_value() {
+    check(
+        "#{$sel} { #{$prop}: #{$val}; }",
+        expect![[r##"
+            SOURCE_FILE@0..30
+              RULE_SET@0..30
+                SELECTOR_LIST@0..7
+                  SELECTOR@0..7
+                    INTERPOLATION@0..7
+                      HASH_LBRACE@0..2 "#{"
+                      VARIABLE_REF@2..6
+                        DOLLAR@2..3 "$"
+                        IDENT@3..6 "sel"
+                      RBRACE@6..7 "}"
+                BLOCK@7..30
+                  WHITESPACE@7..8 " "
+                  LBRACE@8..9 "{"
+                  DECLARATION@9..28
+                    PROPERTY@9..18
+                      INTERPOLATION@9..18
+                        WHITESPACE@9..10 " "
+                        HASH_LBRACE@10..12 "#{"
+                        VARIABLE_REF@12..17
+                          DOLLAR@12..13 "$"
+                          IDENT@13..17 "prop"
+                        RBRACE@17..18 "}"
+                    COLON@18..19 ":"
+                    VALUE@19..27
+                      INTERPOLATION@19..27
+                        WHITESPACE@19..20 " "
+                        HASH_LBRACE@20..22 "#{"
+                        VARIABLE_REF@22..26
+                          DOLLAR@22..23 "$"
+                          IDENT@23..26 "val"
+                        RBRACE@26..27 "}"
+                    SEMICOLON@27..28 ";"
+                  WHITESPACE@28..29 " "
+                  RBRACE@29..30 "}"
+        "##]],
+    );
+}

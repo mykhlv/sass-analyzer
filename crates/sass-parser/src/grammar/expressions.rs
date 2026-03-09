@@ -383,7 +383,9 @@ fn paren_or_map(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
     // Space-separated values inside parens: `(28px 28px 0 0)`, `(small medium large)`
     if !p.at(COMMA) && !p.at(RPAREN) && !p.at_end() {
         while !p.at(COMMA) && !p.at(RPAREN) && !p.at_end() {
-            expr(p, ParseContext::SassScript);
+            if expr(p, ParseContext::SassScript).is_none() {
+                break;
+            }
         }
     }
 
@@ -468,7 +470,13 @@ fn has_sass_signals(p: &Parser<'_>) -> bool {
     let mut offset = 2; // skip function name + LPAREN
     let mut depth = 1u32;
     let mut brace_depth = 0u32;
+    // Limit lookahead to avoid O(n^2) on pathological inputs with many nested calc-name calls.
+    // If we can't decide within 256 tokens, fall back to Sass function (more permissive).
+    let max_offset = offset + 256;
     loop {
+        if offset > max_offset {
+            return true;
+        }
         let kind = p.nth(offset);
         // Track interpolation brace depth — skip signal checks inside #{...}
         if kind == HASH_LBRACE || (kind == LBRACE && brace_depth > 0) {

@@ -17,11 +17,12 @@ pub struct Parser<'src> {
 
 impl<'src> Parser<'src> {
     pub fn new(input: Input, source: &'src str) -> Self {
+        let estimated_events = input.len().saturating_mul(3);
         Self {
             input,
             source,
             pos: 0,
-            events: Vec::new(),
+            events: Vec::with_capacity(estimated_events),
             error_messages: Vec::new(),
             depth: 0,
         }
@@ -58,9 +59,9 @@ impl<'src> Parser<'src> {
         self.pos >= self.input.len()
     }
 
-    /// Returns `false` for pos 0 (no preceding significant token).
+    /// Returns `false` for pos 0 (no preceding significant token) or at EOF.
     pub fn has_whitespace_before(&self) -> bool {
-        if self.pos == 0 {
+        if self.pos == 0 || self.at_end() {
             return false;
         }
         self.input.has_whitespace_before(self.pos)
@@ -97,7 +98,7 @@ impl<'src> Parser<'src> {
     // ── Consuming tokens ─────────────────────────────────────────────
 
     pub fn bump(&mut self) {
-        assert!(!self.at_end(), "bump at end of input");
+        debug_assert!(!self.at_end(), "bump at end of input");
         let kind = self.input.kind(self.pos);
         let range = self.input.range(self.pos);
         self.events.push(Event::Token { kind, range });
