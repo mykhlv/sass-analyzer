@@ -1,3 +1,6 @@
+mod symbols;
+mod workspace;
+
 use std::collections::HashMap;
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
@@ -11,11 +14,12 @@ use tokio::sync::mpsc;
 use tower_lsp_server::jsonrpc::Result;
 use tower_lsp_server::ls_types::{
     Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, InitializeParams, InitializeResult, InitializedParams, Position,
-    Range, SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokens,
-    SemanticTokensFullOptions, SemanticTokensLegend, SemanticTokensOptions, SemanticTokensParams,
-    SemanticTokensResult, SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo,
-    TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
+    DidOpenTextDocumentParams, DocumentSymbolParams, DocumentSymbolResponse, InitializeParams,
+    InitializeResult, InitializedParams, OneOf, Position, Range, SemanticToken,
+    SemanticTokenModifier, SemanticTokenType, SemanticTokens, SemanticTokensFullOptions,
+    SemanticTokensLegend, SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
+    SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo, TextDocumentSyncCapability,
+    TextDocumentSyncKind, Uri,
 };
 use tower_lsp_server::{Client, LanguageServer, LspService, Server};
 
@@ -47,6 +51,7 @@ enum Task {
 struct Backend {
     client: Client,
     documents: Arc<DashMap<Uri, DocumentState>>,
+    module_graph: Arc<workspace::ModuleGraph>,
     task_tx: mpsc::UnboundedSender<Task>,
 }
 
@@ -57,6 +62,8 @@ struct DocumentState {
     #[allow(dead_code)]
     errors: Vec<(String, TextRange)>,
     line_index: sass_parser::line_index::LineIndex,
+    #[allow(dead_code)]
+    symbols: symbols::FileSymbols,
 }
 
 fn parse_document(text: &str) -> Option<(rowan::GreenNode, Vec<(String, TextRange)>)> {
@@ -319,6 +326,7 @@ async fn run_worker(
     mut rx: mpsc::UnboundedReceiver<Task>,
     client: Client,
     documents: Arc<DashMap<Uri, DocumentState>>,
+    module_graph: Arc<workspace::ModuleGraph>,
 ) {
     let mut pending: HashMap<Uri, (i32, String)> = HashMap::new();
     let debounce = Duration::from_millis(DEBOUNCE_MS);
@@ -339,6 +347,7 @@ async fn run_worker(
                     Task::Close { uri } => {
                         pending.remove(&uri);
                         documents.remove(&uri);
+                        module_graph.remove_file(&uri);
                         client.publish_diagnostics(uri, vec![], None).await;
                     }
                 }
@@ -351,14 +360,32 @@ async fn run_worker(
                     };
                     let line_index = sass_parser::line_index::LineIndex::new(&text);
                     let diagnostics = errors_to_diagnostics(&errors, &line_index);
+                    let file_symbols = {
+                        let root = SyntaxNode::new_root(green.clone());
+                        symbols::collect_symbols(&root)
+                    };
 
                     let is_current = documents
                         .get(&uri)
                         .is_none_or(|state| state.version <= version);
 
+                    module_graph.index_file(
+                        &uri,
+                        green.clone(),
+                        file_symbols.clone(),
+                        &text,
+                    );
+
                     documents.insert(
                         uri.clone(),
-                        DocumentState { version, text, green, errors, line_index },
+                        DocumentState {
+                            version,
+                            text,
+                            green,
+                            errors,
+                            line_index,
+                            symbols: file_symbols,
+                        },
                     );
 
                     if is_current {
@@ -405,6 +432,7 @@ impl LanguageServer for Backend {
                         },
                     ),
                 ),
+                document_symbol_provider: Some(OneOf::Left(true)),
                 ..ServerCapabilities::default()
             },
             server_info: Some(ServerInfo {
@@ -473,6 +501,70 @@ impl LanguageServer for Backend {
             data: encoded,
         })))
     }
+
+    async fn document_symbol(
+        &self,
+        params: DocumentSymbolParams,
+    ) -> Result<Option<DocumentSymbolResponse>> {
+        let uri = params.text_document.uri;
+        let Some(doc) = self.documents.get(&uri) else {
+            return Ok(None);
+        };
+        let lsp_symbols = doc
+            .symbols
+            .definitions
+            .iter()
+            .map(|sym| to_lsp_document_symbol(sym, &doc.line_index))
+            .collect();
+        Ok(Some(DocumentSymbolResponse::Nested(lsp_symbols)))
+    }
+}
+
+#[allow(deprecated)]
+fn to_lsp_document_symbol(
+    sym: &symbols::Symbol,
+    line_index: &sass_parser::line_index::LineIndex,
+) -> tower_lsp_server::ls_types::DocumentSymbol {
+    let range = text_range_to_lsp(sym.range, line_index);
+    let selection_range = text_range_to_lsp(sym.selection_range, line_index);
+    let (kind, detail) = match sym.kind {
+        symbols::SymbolKind::Variable => (tower_lsp_server::ls_types::SymbolKind::VARIABLE, None),
+        symbols::SymbolKind::Function => (
+            tower_lsp_server::ls_types::SymbolKind::FUNCTION,
+            sym.params.clone(),
+        ),
+        symbols::SymbolKind::Mixin => (
+            tower_lsp_server::ls_types::SymbolKind::FUNCTION,
+            Some(
+                sym.params
+                    .as_ref()
+                    .map_or_else(|| "@mixin".to_owned(), |p| format!("@mixin{p}")),
+            ),
+        ),
+        symbols::SymbolKind::Placeholder => (tower_lsp_server::ls_types::SymbolKind::CLASS, None),
+    };
+    tower_lsp_server::ls_types::DocumentSymbol {
+        name: sym.name.clone(),
+        detail,
+        kind,
+        tags: None,
+        deprecated: None,
+        range,
+        selection_range,
+        children: None,
+    }
+}
+
+fn text_range_to_lsp(
+    range: sass_parser::text_range::TextRange,
+    line_index: &sass_parser::line_index::LineIndex,
+) -> Range {
+    let start = line_index.line_col(range.start());
+    let end = line_index.line_col(range.end());
+    Range::new(
+        Position::new(start.line - 1, start.col - 1),
+        Position::new(end.line - 1, end.col - 1),
+    )
 }
 
 // ── Tests ───────────────────────────────────────────────────────────
@@ -524,11 +616,18 @@ mod tests {
 
         let (service, socket) = LspService::new(|client| {
             let documents = Arc::new(DashMap::new());
+            let module_graph = Arc::new(workspace::ModuleGraph::new());
             let (task_tx, task_rx) = mpsc::unbounded_channel();
-            tokio::spawn(run_worker(task_rx, client.clone(), Arc::clone(&documents)));
+            tokio::spawn(run_worker(
+                task_rx,
+                client.clone(),
+                Arc::clone(&documents),
+                Arc::clone(&module_graph),
+            ));
             Backend {
                 client,
                 documents,
+                module_graph,
                 task_tx,
             }
         });
@@ -808,6 +907,56 @@ mod tests {
         // Version should be the latest (6)
         assert_eq!(notif["params"]["version"], 6);
     }
+
+    #[tokio::test]
+    async fn document_symbols_for_scss() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "$primary: blue;\n@mixin btn($size) { font-size: $size; }\n";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///symbols.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+
+        let _diag = recv_msg(&mut reader).await;
+
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "textDocument/documentSymbol",
+                "params": {
+                    "textDocument": { "uri": "file:///symbols.scss" }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader).await;
+        let result = resp["result"].as_array().unwrap();
+        assert_eq!(result.len(), 2, "expected 2 symbols: $primary and btn");
+
+        assert_eq!(result[0]["name"], "primary");
+        assert_eq!(result[0]["kind"], 13); // SymbolKind::VARIABLE = 13
+
+        assert_eq!(result[1]["name"], "btn");
+        assert_eq!(result[1]["kind"], 12); // SymbolKind::FUNCTION = 12
+        assert!(result[1]["detail"].as_str().unwrap().contains("@mixin"));
+    }
 }
 
 // ── Main ────────────────────────────────────────────────────────────
@@ -827,11 +976,18 @@ async fn main() {
 
     let (service, socket) = LspService::new(|client| {
         let documents = Arc::new(DashMap::new());
+        let module_graph = Arc::new(workspace::ModuleGraph::new());
         let (task_tx, task_rx) = mpsc::unbounded_channel();
-        tokio::spawn(run_worker(task_rx, client.clone(), Arc::clone(&documents)));
+        tokio::spawn(run_worker(
+            task_rx,
+            client.clone(),
+            Arc::clone(&documents),
+            Arc::clone(&module_graph),
+        ));
         Backend {
             client,
             documents,
+            module_graph,
             task_tx,
         }
     });
