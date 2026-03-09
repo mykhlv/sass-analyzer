@@ -47,6 +47,15 @@ fn extract_module_path(syntax: &SyntaxNode) -> Option<String> {
     Some(text[1..text.len() - 1].to_owned())
 }
 
+/// Extract the first IDENT token text from a syntax node.
+fn first_ident_text(syntax: &SyntaxNode) -> Option<String> {
+    syntax
+        .children_with_tokens()
+        .filter_map(rowan::NodeOrToken::into_token)
+        .find(|t| t.kind() == SyntaxKind::IDENT)
+        .map(|t| t.text().to_owned())
+}
+
 impl UseRule {
     pub fn module_path(&self) -> Option<String> {
         extract_module_path(&self.syntax)
@@ -56,5 +65,32 @@ impl UseRule {
 impl ForwardRule {
     pub fn module_path(&self) -> Option<String> {
         extract_module_path(&self.syntax)
+    }
+}
+
+impl NamespaceRef {
+    /// The namespace prefix (e.g. `meta` in `meta.load-css()`).
+    pub fn namespace(&self) -> Option<String> {
+        first_ident_text(&self.syntax)
+    }
+}
+
+impl FunctionCall {
+    /// The function name token text (e.g. `load-css` in `meta.load-css()`).
+    pub fn name_text(&self) -> Option<String> {
+        first_ident_text(&self.syntax)
+    }
+
+    /// The first positional argument as a quoted string value (unquoted).
+    /// Returns `None` if no arguments or if the first arg is not a string literal.
+    pub fn first_string_arg(&self) -> Option<String> {
+        let args = self.args()?;
+        let first_token = args
+            .syntax()
+            .descendants_with_tokens()
+            .filter_map(rowan::NodeOrToken::into_token)
+            .find(|t| t.kind() == SyntaxKind::QUOTED_STRING)?;
+        let text = first_token.text();
+        Some(text[1..text.len() - 1].to_owned())
     }
 }

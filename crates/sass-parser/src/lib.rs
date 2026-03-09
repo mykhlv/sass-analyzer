@@ -10,6 +10,7 @@ pub mod syntax;
 
 pub mod ast;
 pub mod grammar;
+pub mod imports;
 pub mod line_index;
 pub mod resolver;
 pub mod vfs;
