@@ -12,8 +12,7 @@ use std::path::{Path, PathBuf};
 use sass_parser::syntax::SyntaxNode;
 
 fn corpus_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../test-corpus")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test-corpus")
 }
 
 fn collect_scss_files(dir: &Path) -> Vec<PathBuf> {
@@ -50,7 +49,11 @@ struct FileResult {
 
 fn parse_corpus_dir(dir: &Path) -> Vec<FileResult> {
     let files = collect_scss_files(dir);
-    assert!(!files.is_empty(), "no .scss files found in {}", dir.display());
+    assert!(
+        !files.is_empty(),
+        "no .scss files found in {}",
+        dir.display()
+    );
 
     files
         .into_iter()
@@ -88,7 +91,12 @@ fn print_corpus_report(corpus_name: &str, results: &[FileResult], corpus_dir: &P
     let mut report = String::new();
     writeln!(report, "\n=== {corpus_name} corpus report ===").unwrap();
     writeln!(report, "  files parsed: {total}").unwrap();
-    writeln!(report, "  round-trip OK: {}", total - round_trip_failures.len()).unwrap();
+    writeln!(
+        report,
+        "  round-trip OK: {}",
+        total - round_trip_failures.len()
+    )
+    .unwrap();
     writeln!(report, "  files with errors: {}", files_with_errors.len()).unwrap();
     writeln!(report, "  total errors: {total_errors}").unwrap();
 

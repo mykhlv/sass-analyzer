@@ -590,15 +590,18 @@ fn fuzz_regression_panic_has_whitespace_before_at_eof() {
 fn fuzz_regression_timeout_deeply_nested_interp_funcs() {
     // Regression: deeply nested interpolation + function calls in 384 bytes
     // caused >30s parse under ASAN. Verify it finishes quickly without sanitizers.
-    let input = std::fs::read_to_string(
-        concat!(env!("CARGO_MANIFEST_DIR"),
-            "/fuzz/artifacts/fuzz_parser_crash/timeout-9478c846eb9d3f00e4abe0a9b4ed79068c475fca")
-    );
+    let input = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/fuzz/artifacts/fuzz_parser_crash/timeout-9478c846eb9d3f00e4abe0a9b4ed79068c475fca"
+    ));
     if let Ok(input) = input {
         let start = std::time::Instant::now();
         let (tree, _) = parse(&input);
         let elapsed = start.elapsed();
         assert_eq!(tree.text().to_string(), input, "round-trip must hold");
-        assert!(elapsed.as_secs() < 5, "parse took {elapsed:?}, expected < 5s");
+        assert!(
+            elapsed.as_secs() < 5,
+            "parse took {elapsed:?}, expected < 5s"
+        );
     }
 }

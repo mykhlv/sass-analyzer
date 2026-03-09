@@ -10,8 +10,8 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 static NORMALIZE_CSS: &str = include_str!("../tests/fixtures/normalize.css");
 
 static ANGULAR_MATERIAL: LazyLock<String> = LazyLock::new(|| {
-    let corpus_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../test-corpus/angular-material/scss");
+    let corpus_dir =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test-corpus/angular-material/scss");
     if !corpus_dir.exists() {
         return String::new();
     }

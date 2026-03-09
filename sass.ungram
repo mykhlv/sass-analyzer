@@ -1,0 +1,343 @@
+// Sass/SCSS Un-Grammar
+//
+// Describes the concrete syntax tree shape for the SCSS parser.
+// Does not specify parsing rules — only the structure of emitted CST nodes.
+//
+// Legend:
+//   Name =        -- node definition
+//   'token'       -- keyword or punctuation token
+//   A B           -- sequence
+//   A | B         -- alternation
+//   A*            -- zero or more
+//   A?            -- zero or one
+//   label:A       -- labeled field (generates accessor)
+
+//*************************//
+//       Top-level         //
+//*************************//
+
+SourceFile =
+  items:Item*
+
+Item =
+  RuleSet
+| Declaration
+| CustomPropertyDecl
+| NestedProperty
+| VariableDecl
+| MixinRule
+| IncludeRule
+| ContentRule
+| FunctionRule
+| ReturnRule
+| IfRule
+| ForRule
+| EachRule
+| WhileRule
+| ExtendRule
+| ErrorRule
+| WarnRule
+| DebugRule
+| AtRootRule
+| MediaRule
+| SupportsRule
+| KeyframesRule
+| LayerRule
+| ContainerRule
+| ScopeRule
+| PropertyRule
+| NamespaceRule
+| CharsetRule
+| PageRule
+| FontFaceRule
+| UseRule
+| ForwardRule
+| ImportRule
+| GenericAtRule
+
+Block =
+  '{' items:Item* '}'
+
+//*************************//
+//       Selectors         //
+//*************************//
+
+RuleSet =
+  selectors:SelectorList body:Block
+
+SelectorList =
+  selectors:Selector*
+
+Selector =
+  parts:SimpleSelector*
+
+SimpleSelector =
+  Interpolation?
+
+PseudoSelector =
+  args:SelectorList?
+
+AttrSelector =
+  'ident'?
+
+Combinator =
+  '>'
+
+//*************************//
+//     Declarations        //
+//*************************//
+
+Declaration =
+  name:Property value:Value? body:Block?
+
+CustomPropertyDecl =
+  name:Property value:Value?
+
+NestedProperty =
+  name:Property value:Value? body:Block
+
+Property =
+  Interpolation*
+
+Value =
+  Expr*
+
+Important =
+  '!' 'ident'
+
+SassFlag =
+  '!' 'ident'
+
+//*************************//
+//     Interpolation       //
+//*************************//
+
+Interpolation =
+  expr:Expr?
+
+//*************************//
+//     Expressions         //
+//*************************//
+
+Expr =
+  BinaryExpr
+| UnaryExpr
+| ParenExpr
+| NumberLiteral
+| Dimension
+| StringLiteral
+| InterpolatedString
+| ColorLiteral
+| BoolLiteral
+| NullLiteral
+| ListExpr
+| BracketedList
+| MapExpr
+| FunctionCall
+| Calculation
+| SpecialFunctionCall
+| VariableRef
+| NamespaceRef
+| StandalonePercent
+
+VariableDecl =
+  value:Expr flags:SassFlag*
+
+VariableRef =
+  '$' 'ident'
+
+BinaryExpr =
+  lhs:Expr rhs:Expr
+
+UnaryExpr =
+  operand:Expr
+
+ParenExpr =
+  inner:Expr?
+
+NumberLiteral =
+  'number'
+
+Dimension =
+  'number' 'ident'
+
+StringLiteral =
+  'quoted_string'
+
+InterpolatedString =
+  Interpolation*
+
+ColorLiteral =
+  '#'
+
+BoolLiteral =
+  'ident'
+
+NullLiteral =
+  'ident'
+
+ListExpr =
+  items:Expr*
+
+BracketedList =
+  '[' items:Expr* ']'
+
+MapExpr =
+  entries:MapEntry*
+
+MapEntry =
+  key:Expr value:Expr
+
+FunctionCall =
+  args:ArgList?
+
+ArgList =
+  args:Arg*
+
+Arg =
+  value:Expr
+
+Calculation =
+  args:CalcSum*
+
+CalcSum =
+  CalcProduct*
+
+CalcProduct =
+  CalcValue*
+
+CalcValue =
+  Expr?
+
+SpecialFunctionCall =
+  Interpolation*
+
+StandalonePercent =
+  '%'
+
+NamespaceRef =
+  member:FunctionCall?
+
+//*************************//
+//    Sass At-Rules        //
+//*************************//
+
+MixinRule =
+  params:ParamList? body:Block
+
+IncludeRule =
+  name:NamespaceRef? args:ArgList? using:ParamList? body:Block?
+
+ContentRule =
+  args:ArgList?
+
+FunctionRule =
+  params:ParamList? body:Block
+
+ReturnRule =
+  value:Expr?
+
+IfRule =
+  condition:Expr body:Block else_clauses:ElseClause*
+
+ElseClause =
+  condition:Expr? body:Block
+
+ForRule =
+  from:Expr to:Expr body:Block
+
+EachRule =
+  iterable:Expr body:Block
+
+WhileRule =
+  condition:Expr body:Block
+
+ExtendRule =
+  flag:SassFlag?
+
+ErrorRule =
+  value:Expr?
+
+WarnRule =
+  value:Expr?
+
+DebugRule =
+  value:Expr?
+
+AtRootRule =
+  query:AtRootQuery? selectors:SelectorList? body:Block?
+
+AtRootQuery =
+  'ident'*
+
+//*************************//
+//    CSS At-Rules         //
+//*************************//
+
+MediaRule =
+  queries:MediaQuery* body:Block
+
+MediaQuery =
+  Interpolation*
+
+SupportsRule =
+  condition:SupportsCondition body:Block
+
+SupportsCondition =
+  Interpolation*
+
+KeyframesRule =
+  selectors:KeyframeSelector*
+
+KeyframeSelector =
+  body:Block
+
+LayerRule =
+  body:Block?
+
+ContainerRule =
+  body:Block
+
+ScopeRule =
+  body:Block
+
+PropertyRule =
+  body:Block
+
+NamespaceRule =
+  'ident'?
+
+CharsetRule =
+  'quoted_string'
+
+PageRule =
+  body:Block
+
+FontFaceRule =
+  body:Block
+
+//*************************//
+//    Module Rules         //
+//*************************//
+
+UseRule =
+  ArgList?
+
+ForwardRule =
+  'quoted_string'
+
+ImportRule =
+  Expr*
+
+GenericAtRule =
+  body:Block?
+
+//*************************//
+//     Parameters          //
+//*************************//
+
+ParamList =
+  params:Param*
+
+Param =
+  default:Expr?

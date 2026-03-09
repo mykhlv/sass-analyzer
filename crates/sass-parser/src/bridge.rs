@@ -63,11 +63,7 @@ impl DirectBuilder {
     }
 
     #[inline]
-    fn cached_whitespace(
-        &mut self,
-        kind: rowan::SyntaxKind,
-        text: &str,
-    ) -> rowan::GreenToken {
+    fn cached_whitespace(&mut self, kind: rowan::SyntaxKind, text: &str) -> rowan::GreenToken {
         for (cached_text, cached_token) in &self.whitespace_cache {
             if **cached_text == *text {
                 return cached_token.clone();
@@ -167,8 +163,7 @@ pub fn build_tree(
                 if token_idx < input.len() {
                     let trivia_end = input.trivia_start_index(token_idx + 1);
                     for &(tk, tr) in &all_trivia[trivia_pos..trivia_end] {
-                        let text =
-                            &source[usize::from(tr.start())..usize::from(tr.end())];
+                        let text = &source[usize::from(tr.start())..usize::from(tr.end())];
                         builder.token(rowan::SyntaxKind(tk as u16), text);
                     }
                     trivia_pos = trivia_end;
@@ -183,8 +178,7 @@ pub fn build_tree(
                 // Before closing the root node, emit trailing trivia
                 if depth == 0 {
                     for &(tk, tr) in &all_trivia[trivia_pos..] {
-                        let text =
-                            &source[usize::from(tr.start())..usize::from(tr.end())];
+                        let text = &source[usize::from(tr.start())..usize::from(tr.end())];
                         builder.token(rowan::SyntaxKind(tk as u16), text);
                     }
                 }

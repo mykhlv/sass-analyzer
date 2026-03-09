@@ -509,9 +509,7 @@ fn has_sass_signals(p: &Parser<'_>) -> bool {
             // Strings — not valid CSS calc atoms
             STRING_START | QUOTED_STRING => return true,
             // Namespace member access: ns.func(), ns.$var — not valid in CSS calc
-            IDENT if p.nth(offset + 1) == DOT
-                && !p.nth_has_whitespace_before(offset + 1) =>
-            {
+            IDENT if p.nth(offset + 1) == DOT && !p.nth_has_whitespace_before(offset + 1) => {
                 let after_dot = p.nth(offset + 2);
                 if after_dot == IDENT || after_dot == DOLLAR {
                     return true;

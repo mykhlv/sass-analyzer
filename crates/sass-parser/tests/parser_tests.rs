@@ -1,4 +1,5 @@
 use expect_test::{Expect, expect};
+use sass_parser::ast::AstNode;
 use sass_parser::input::Input;
 use sass_parser::parser::Parser;
 use sass_parser::syntax::SassLanguage;
