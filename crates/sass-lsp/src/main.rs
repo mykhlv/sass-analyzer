@@ -13,6 +13,7 @@ use sass_parser::text_range::TextRange;
 use tokio::sync::mpsc;
 use tower_lsp_server::jsonrpc::Result;
 use tower_lsp_server::ls_types::{
+    CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
     Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
     DidOpenTextDocumentParams, DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams,
     GotoDefinitionResponse, InitializeParams, InitializeResult, InitializedParams, Location, OneOf,
@@ -434,6 +435,10 @@ impl LanguageServer for Backend {
                 ),
                 document_symbol_provider: Some(OneOf::Left(true)),
                 definition_provider: Some(OneOf::Left(true)),
+                completion_provider: Some(CompletionOptions {
+                    trigger_characters: Some(vec!["$".into(), ".".into()]),
+                    ..CompletionOptions::default()
+                }),
                 ..ServerCapabilities::default()
             },
             server_info: Some(ServerInfo {
@@ -563,6 +568,76 @@ impl LanguageServer for Backend {
             uri: target_uri,
             range,
         })))
+    }
+
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        let uri = params.text_document_position.text_document.uri;
+
+        let visible = self.module_graph.visible_symbols(&uri);
+        if visible.is_empty() {
+            return Ok(None);
+        }
+
+        let items: Vec<CompletionItem> = visible
+            .into_iter()
+            .map(|(prefix, _sym_uri, sym)| symbol_to_completion_item(prefix.as_deref(), &sym))
+            .collect();
+
+        Ok(Some(CompletionResponse::Array(items)))
+    }
+}
+
+fn symbol_to_completion_item(prefix: Option<&str>, sym: &symbols::Symbol) -> CompletionItem {
+    let (label, insert_text, kind, detail) = match sym.kind {
+        symbols::SymbolKind::Variable => {
+            let label = if let Some(ns) = prefix {
+                format!("{ns}.${}", sym.name)
+            } else {
+                format!("${}", sym.name)
+            };
+            (label, None, CompletionItemKind::VARIABLE, None)
+        }
+        symbols::SymbolKind::Function => {
+            let label = if let Some(ns) = prefix {
+                format!("{ns}.{}", sym.name)
+            } else {
+                sym.name.clone()
+            };
+            let detail = sym.params.clone();
+            (label, None, CompletionItemKind::FUNCTION, detail)
+        }
+        symbols::SymbolKind::Mixin => {
+            let label = if let Some(ns) = prefix {
+                format!("{ns}.{}", sym.name)
+            } else {
+                sym.name.clone()
+            };
+            let detail = Some(
+                sym.params
+                    .as_ref()
+                    .map_or_else(|| "@mixin".to_owned(), |p| format!("@mixin{p}")),
+            );
+            (label, None, CompletionItemKind::METHOD, detail)
+        }
+        symbols::SymbolKind::Placeholder => {
+            let label = format!("%{}", sym.name);
+            (label, None, CompletionItemKind::CLASS, None)
+        }
+    };
+
+    let sort_text = Some(format!(
+        "{}{}",
+        if prefix.is_some() { "1" } else { "0" },
+        &label,
+    ));
+
+    CompletionItem {
+        label,
+        kind: Some(kind),
+        detail,
+        insert_text,
+        sort_text,
+        ..CompletionItem::default()
     }
 }
 
@@ -1400,6 +1475,146 @@ mod tests {
             resp["result"].is_null(),
             "definition on a decl should be null"
         );
+    }
+
+    #[tokio::test]
+    async fn completion_returns_local_symbols() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "$color: red;\n@mixin btn { }\n@function double($n) { @return $n * 2; }\n";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///comp.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader).await;
+
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 20,
+                "method": "textDocument/completion",
+                "params": {
+                    "textDocument": { "uri": "file:///comp.scss" },
+                    "position": { "line": 2, "character": 0 }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader).await;
+        let items = resp["result"].as_array().unwrap();
+        assert_eq!(
+            items.len(),
+            3,
+            "expected 3 completions: $color, btn, double"
+        );
+
+        let labels: Vec<&str> = items.iter().map(|i| i["label"].as_str().unwrap()).collect();
+        assert!(labels.contains(&"$color"), "should contain $color");
+        assert!(labels.contains(&"btn"), "should contain btn (mixin)");
+        assert!(
+            labels.contains(&"double"),
+            "should contain double (function)"
+        );
+    }
+
+    #[tokio::test]
+    async fn completion_returns_none_for_unknown_uri() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 21,
+                "method": "textDocument/completion",
+                "params": {
+                    "textDocument": { "uri": "file:///unknown.scss" },
+                    "position": { "line": 0, "character": 0 }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader).await;
+        assert!(
+            resp["result"].is_null(),
+            "completion for unknown file should be null"
+        );
+    }
+
+    #[tokio::test]
+    async fn completion_item_kinds() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "$v: 1;\n@mixin m { }\n@function f() { @return 1; }\n%ph { }\n";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///kinds.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader).await;
+
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 22,
+                "method": "textDocument/completion",
+                "params": {
+                    "textDocument": { "uri": "file:///kinds.scss" },
+                    "position": { "line": 3, "character": 0 }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader).await;
+        let items = resp["result"].as_array().unwrap();
+        assert_eq!(items.len(), 4, "expected 4 completions");
+
+        let var = items.iter().find(|i| i["label"] == "$v").unwrap();
+        assert_eq!(var["kind"], 6, "variable kind = 6");
+
+        let mixin = items.iter().find(|i| i["label"] == "m").unwrap();
+        assert_eq!(mixin["kind"], 2, "mixin kind = METHOD = 2");
+        assert!(
+            mixin["detail"].as_str().unwrap().contains("@mixin"),
+            "mixin detail should contain @mixin"
+        );
+
+        let func = items.iter().find(|i| i["label"] == "f").unwrap();
+        assert_eq!(func["kind"], 3, "function kind = 3");
+
+        let placeholder = items.iter().find(|i| i["label"] == "%ph").unwrap();
+        assert_eq!(placeholder["kind"], 7, "placeholder kind = CLASS = 7");
     }
 }
 

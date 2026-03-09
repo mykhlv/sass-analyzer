@@ -186,7 +186,6 @@ impl ModuleGraph {
 
     /// Collect all symbols visible from a given file (for completions).
     /// Returns `(namespace_prefix, uri, symbol)` triples.
-    #[allow(dead_code)]
     pub fn visible_symbols(&self, from: &Uri) -> Vec<(Option<String>, Uri, symbols::Symbol)> {
         let mut result = Vec::new();
 
