@@ -33,8 +33,14 @@ const TOK_TYPE: u32 = 5;
 const MOD_DECLARATION: u32 = 1 << 0;
 
 enum Task {
-    Parse { uri: Uri, version: i32, text: String },
-    Close { uri: Uri },
+    Parse {
+        uri: Uri,
+        version: i32,
+        text: String,
+    },
+    Close {
+        uri: Uri,
+    },
 }
 
 #[allow(dead_code)]
@@ -283,8 +289,11 @@ fn delta_encode(
     let mut prev_col: u32 = 0;
 
     for tok in raw {
-        let (line, col) =
-            byte_to_lsp_pos(source, line_index, sass_parser::text_range::TextSize::from(tok.start));
+        let (line, col) = byte_to_lsp_pos(
+            source,
+            line_index,
+            sass_parser::text_range::TextSize::from(tok.start),
+        );
 
         let delta_line = line - prev_line;
         let delta_start = if delta_line == 0 { col - prev_col } else { col };
@@ -466,6 +475,341 @@ impl LanguageServer for Backend {
     }
 }
 
+// ── Tests ───────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::Value;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// Send a JSON-RPC message with Content-Length framing.
+    async fn send_msg(writer: &mut (impl AsyncWriteExt + Unpin), msg: &Value) {
+        let body = serde_json::to_string(msg).unwrap();
+        let header = format!("Content-Length: {}\r\n\r\n", body.len());
+        writer.write_all(header.as_bytes()).await.unwrap();
+        writer.write_all(body.as_bytes()).await.unwrap();
+        writer.flush().await.unwrap();
+    }
+
+    /// Read one JSON-RPC message from the stream (blocking).
+    async fn recv_msg(reader: &mut (impl AsyncReadExt + Unpin)) -> Value {
+        let mut header_buf = Vec::new();
+        // Read until we find \r\n\r\n
+        loop {
+            let mut byte = [0u8; 1];
+            reader.read_exact(&mut byte).await.unwrap();
+            header_buf.push(byte[0]);
+            if header_buf.ends_with(b"\r\n\r\n") {
+                break;
+            }
+        }
+        let header = String::from_utf8(header_buf).unwrap();
+        let len: usize = header
+            .lines()
+            .find_map(|line| line.strip_prefix("Content-Length: "))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        let mut body = vec![0u8; len];
+        reader.read_exact(&mut body).await.unwrap();
+        serde_json::from_slice(&body).unwrap()
+    }
+
+    /// Spawn the LSP server on in-memory duplex streams, return client-side handles.
+    fn spawn_server() -> (tokio::io::DuplexStream, tokio::io::DuplexStream) {
+        let (client_read, server_write) = tokio::io::duplex(1024 * 64);
+        let (server_read, client_write) = tokio::io::duplex(1024 * 64);
+
+        let (service, socket) = LspService::new(|client| {
+            let documents = Arc::new(DashMap::new());
+            let (task_tx, task_rx) = mpsc::unbounded_channel();
+            tokio::spawn(run_worker(task_rx, client.clone(), Arc::clone(&documents)));
+            Backend {
+                client,
+                documents,
+                task_tx,
+            }
+        });
+        tokio::spawn(Server::new(server_read, server_write, socket).serve(service));
+
+        (client_read, client_write)
+    }
+
+    async fn do_initialize(
+        reader: &mut (impl AsyncReadExt + Unpin),
+        writer: &mut (impl AsyncWriteExt + Unpin),
+    ) -> Value {
+        send_msg(
+            writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": { "capabilities": {}, "rootUri": null }
+            }),
+        )
+        .await;
+        let resp = recv_msg(reader).await;
+
+        send_msg(
+            writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "initialized",
+                "params": {}
+            }),
+        )
+        .await;
+
+        resp
+    }
+
+    #[tokio::test]
+    async fn initialize_returns_capabilities() {
+        let (mut reader, mut writer) = spawn_server();
+        let resp = do_initialize(&mut reader, &mut writer).await;
+
+        let caps = &resp["result"]["capabilities"];
+        assert_eq!(caps["textDocumentSync"], 1);
+
+        let legend = &caps["semanticTokensProvider"]["legend"];
+        let types: Vec<&str> = legend["tokenTypes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(
+            types,
+            [
+                "variable",
+                "function",
+                "macro",
+                "parameter",
+                "property",
+                "type"
+            ]
+        );
+
+        let info = &resp["result"]["serverInfo"];
+        assert_eq!(info["name"], "sass-analyzer");
+    }
+
+    #[tokio::test]
+    async fn did_open_publishes_diagnostics() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///test.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": ".btn { color: red; }"
+                    }
+                }
+            }),
+        )
+        .await;
+
+        // Worker debounce fires, publishes diagnostics
+        let notif = recv_msg(&mut reader).await;
+        assert_eq!(notif["method"], "textDocument/publishDiagnostics");
+        let diags = notif["params"]["diagnostics"].as_array().unwrap();
+        assert!(diags.is_empty(), "valid SCSS should have 0 diagnostics");
+    }
+
+    #[tokio::test]
+    async fn did_open_with_errors_publishes_diagnostics() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///bad.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": "{{ invalid"
+                    }
+                }
+            }),
+        )
+        .await;
+
+        let notif = recv_msg(&mut reader).await;
+        assert_eq!(notif["method"], "textDocument/publishDiagnostics");
+        let diags = notif["params"]["diagnostics"].as_array().unwrap();
+        assert!(!diags.is_empty(), "invalid SCSS should have diagnostics");
+    }
+
+    #[tokio::test]
+    async fn semantic_tokens_for_scss() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "$color: red;\n.btn { color: $color; }\n";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///tokens.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+
+        // Wait for diagnostics (means parse is done)
+        let _diag = recv_msg(&mut reader).await;
+
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "textDocument/semanticTokens/full",
+                "params": {
+                    "textDocument": { "uri": "file:///tokens.scss" }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader).await;
+        let data = resp["result"]["data"].as_array().unwrap();
+        // Each token is 5 u32s; expect: $color(decl), color(prop), $color(ref)
+        assert_eq!(data.len() % 5, 0, "data length must be multiple of 5");
+        let token_count = data.len() / 5;
+        assert_eq!(
+            token_count, 3,
+            "expected 3 tokens: $color decl, color prop, $color ref"
+        );
+
+        // First token: $color declaration at line 0, col 0
+        assert_eq!(data[0], 0, "delta_line");
+        assert_eq!(data[1], 0, "delta_start");
+        assert_eq!(data[2], 6, "length of $color");
+        assert_eq!(data[3], TOK_VARIABLE, "token_type = VARIABLE");
+        assert_eq!(data[4], MOD_DECLARATION, "modifier = DECLARATION");
+    }
+
+    #[tokio::test]
+    async fn did_close_clears_diagnostics() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///close.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": ".a { color: red; }"
+                    }
+                }
+            }),
+        )
+        .await;
+        let _ = recv_msg(&mut reader).await; // open diagnostics
+
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didClose",
+                "params": {
+                    "textDocument": { "uri": "file:///close.scss" }
+                }
+            }),
+        )
+        .await;
+
+        let notif = recv_msg(&mut reader).await;
+        assert_eq!(notif["method"], "textDocument/publishDiagnostics");
+        let diags = notif["params"]["diagnostics"].as_array().unwrap();
+        assert!(diags.is_empty(), "close should clear diagnostics");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn debounce_coalesces_rapid_changes() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        // Open document
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///debounce.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": ".a {}"
+                    }
+                }
+            }),
+        )
+        .await;
+
+        // Advance past debounce to get initial diagnostics
+        tokio::time::advance(Duration::from_millis(100)).await;
+        tokio::task::yield_now().await;
+        let _ = recv_msg(&mut reader).await;
+
+        // Send 5 rapid changes within 20ms (well under 50ms debounce)
+        for v in 2..=6 {
+            send_msg(
+                &mut writer,
+                &serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "method": "textDocument/didChange",
+                    "params": {
+                        "textDocument": { "uri": "file:///debounce.scss", "version": v },
+                        "contentChanges": [{ "text": format!(".v{v} {{}}") }]
+                    }
+                }),
+            )
+            .await;
+            tokio::time::advance(Duration::from_millis(4)).await;
+            tokio::task::yield_now().await;
+        }
+
+        // Advance past debounce deadline
+        tokio::time::advance(Duration::from_millis(100)).await;
+        tokio::task::yield_now().await;
+
+        // Should get exactly one diagnostics notification (coalesced)
+        let notif = recv_msg(&mut reader).await;
+        assert_eq!(notif["method"], "textDocument/publishDiagnostics");
+        // Version should be the latest (6)
+        assert_eq!(notif["params"]["version"], 6);
+    }
+}
+
 // ── Main ────────────────────────────────────────────────────────────
 
 #[tokio::main]
@@ -485,7 +829,11 @@ async fn main() {
         let documents = Arc::new(DashMap::new());
         let (task_tx, task_rx) = mpsc::unbounded_channel();
         tokio::spawn(run_worker(task_rx, client.clone(), Arc::clone(&documents)));
-        Backend { client, documents, task_tx }
+        Backend {
+            client,
+            documents,
+            task_tx,
+        }
     });
     Server::new(stdin, stdout, socket).serve(service).await;
 }
