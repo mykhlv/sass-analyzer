@@ -10,6 +10,8 @@ pub fn function_rule(p: &mut Parser<'_>) {
     p.expect(IDENT); // name
     if p.at(LPAREN) {
         super::param_list(p);
+    } else {
+        p.error("expected `(`");
     }
     if p.at(LBRACE) {
         super::block(p);

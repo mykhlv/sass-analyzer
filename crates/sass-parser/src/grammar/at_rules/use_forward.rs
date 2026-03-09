@@ -73,17 +73,21 @@ pub fn forward_rule(p: &mut Parser<'_>) {
                     p.eat(MINUS);
                     if p.at(STAR) {
                         p.bump();
+                    } else {
+                        p.error("expected `*`");
                     }
                 }
             }
             "hide" | "show" => {
                 p.bump(); // hide/show
-                // List of names: identifiers and $variables
+                // List of names: identifiers and $variables (at least one required)
                 if p.at(IDENT) || p.at(DOLLAR) {
                     visibility_member(p);
                     while p.eat(COMMA) {
                         visibility_member(p);
                     }
+                } else {
+                    p.error("expected member name");
                 }
             }
             "with" => {
@@ -121,7 +125,9 @@ fn with_config(p: &mut Parser<'_>) {
     }
     p.bump(); // (
 
-    if !p.at(RPAREN) && !p.at_end() {
+    if p.at(RPAREN) {
+        p.error("expected `$`");
+    } else if !p.at_end() {
         with_config_entry(p);
         while p.eat(COMMA) {
             if !p.at(RPAREN) && !p.at_end() {
@@ -138,7 +144,7 @@ fn with_config_entry(p: &mut Parser<'_>) {
     p.expect(DOLLAR);
     p.expect(IDENT);
     p.expect(COLON);
-    super::expressions::expr(p, super::ParseContext::SassScript);
+    super::expressions::sass_value(p, super::ParseContext::SassScript);
 
     // Optional !default flag (valid in @forward with(), not @use with())
     if p.at(BANG) && p.nth(1) == IDENT && p.nth_text(1) == "default" {
@@ -167,7 +173,8 @@ pub fn import_rule(p: &mut Parser<'_>) {
     let _ = m.complete(p, IMPORT_RULE);
 }
 
-/// Parse a single import argument: string path or `url()`
+/// Parse a single import argument: string path or `url()`, optionally followed
+/// by `supports(...)` and/or media query conditions.
 fn import_argument(p: &mut Parser<'_>) {
     if p.at(QUOTED_STRING) {
         p.bump();
@@ -182,5 +189,33 @@ fn import_argument(p: &mut Parser<'_>) {
         }
     } else {
         p.error("expected import path");
+        return;
+    }
+
+    // CSS import conditions: `supports(...)`, media queries, unknown idents/functions.
+    // Consume as opaque content until `;`, `,`, `{`, or EOF.
+    import_conditions(p);
+}
+
+/// Consume optional import conditions (everything between the URL and `;`/`,`).
+fn import_conditions(p: &mut Parser<'_>) {
+    let mut depth: u32 = 0;
+    while !p.at_end() {
+        match p.current() {
+            SEMICOLON | RBRACE if depth == 0 => break,
+            COMMA if depth == 0 => break,
+            LPAREN => {
+                depth += 1;
+                p.bump();
+            }
+            RPAREN => {
+                depth = depth.saturating_sub(1);
+                p.bump();
+            }
+            HASH_LBRACE => {
+                let _ = super::selectors::interpolation(p);
+            }
+            _ => p.bump(),
+        }
     }
 }

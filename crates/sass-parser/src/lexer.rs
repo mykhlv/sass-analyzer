@@ -194,6 +194,12 @@ impl<'src> Lexer<'src> {
             b'$' => SyntaxKind::DOLLAR,
             b'#' => SyntaxKind::HASH,
 
+            // ── CSS escape: \X starts an identifier ─────────────────
+            b'\\' if matches!(self.peek(), Some(b) if b != b'\n' && b != b'\r' && b != b'\x0C') => {
+                self.skip_escape_char();
+                self.lex_ident()
+            }
+
             // ── Non-ASCII: identifier or unknown ───────────────────
             _ if b >= 0x80 => {
                 // Rewind: bump() advanced 1 byte, but we need a full char
@@ -361,7 +367,22 @@ impl<'src> Lexer<'src> {
 
     fn skip_escape_char(&mut self) {
         match self.peek() {
-            None => {}
+            None | Some(b'\n' | b'\r' | b'\x0C') => {}
+            Some(b) if b.is_ascii_hexdigit() => {
+                // CSS hex escape: 1-6 hex digits, optional trailing whitespace.
+                self.pos += 1;
+                for _ in 0..5 {
+                    if matches!(self.peek(), Some(b) if b.is_ascii_hexdigit()) {
+                        self.pos += 1;
+                    } else {
+                        break;
+                    }
+                }
+                // Optional single whitespace after hex escape (consumed, not part of value).
+                if matches!(self.peek(), Some(b' ' | b'\t' | b'\n' | b'\r' | b'\x0C')) {
+                    self.pos += 1;
+                }
+            }
             Some(b) if b >= 0x80 => self.pos += self.current_char().len_utf8(),
             Some(_) => self.pos += 1,
         }
@@ -389,6 +410,11 @@ impl<'src> Lexer<'src> {
                     } else {
                         break;
                     }
+                }
+                Some(b'\\') => {
+                    // CSS escape continuation in identifier
+                    self.pos += 1;
+                    self.skip_escape_char();
                 }
                 _ => break,
             }

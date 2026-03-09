@@ -7,7 +7,7 @@ use crate::token_set::TokenSet;
 #[rustfmt::skip]
 pub const SELECTOR_START: TokenSet = TokenSet::new(&[
     IDENT, DOT, HASH, COLON, COLON_COLON, LBRACKET, AMP, PERCENT, STAR,
-    HASH_LBRACE,
+    HASH_LBRACE, PIPE,
 ]);
 
 /// Combinator tokens (explicit combinators between compound selectors).
@@ -89,6 +89,22 @@ fn simple_selector(p: &mut Parser<'_>) {
         IDENT | STAR => {
             let m = p.start();
             p.bump();
+            // Namespace selector: `ns|element`, `*|*`, `ns|*`
+            if p.at(PIPE) && !p.has_whitespace_before() {
+                p.bump(); // |
+                if p.at(IDENT) || p.at(STAR) {
+                    p.bump();
+                }
+            }
+            let _ = m.complete(p, SIMPLE_SELECTOR);
+        }
+        PIPE => {
+            // `|element` — no namespace
+            let m = p.start();
+            p.bump(); // |
+            if p.at(IDENT) || p.at(STAR) {
+                p.bump();
+            }
             let _ = m.complete(p, SIMPLE_SELECTOR);
         }
         DOT => {

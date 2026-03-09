@@ -94,3 +94,20 @@ else
     rm -rf "$TMPDIR"
     echo "angular material scss extracted to $ANGULAR_DIR/scss"
 fi
+
+# ── sass-spec ──────────────────────────────────────────────────────
+SASS_SPEC_COMMIT="63a0becd13d3639a60669d8b710e75b282415047"
+SASS_SPEC_DIR="$SCRIPT_DIR/sass-spec"
+
+if [ -d "$SASS_SPEC_DIR/spec" ]; then
+    echo "sass-spec already downloaded at $SASS_SPEC_DIR/spec"
+else
+    echo "downloading sass-spec (commit ${SASS_SPEC_COMMIT:0:8})..."
+    TMPDIR=$(mktemp -d)
+    curl -sL "https://github.com/sass/sass-spec/archive/${SASS_SPEC_COMMIT}.tar.gz" \
+        | tar xz -C "$TMPDIR"
+    mkdir -p "$SASS_SPEC_DIR"
+    mv "$TMPDIR/sass-spec-${SASS_SPEC_COMMIT}/spec" "$SASS_SPEC_DIR/spec"
+    rm -rf "$TMPDIR"
+    echo "sass-spec extracted to $SASS_SPEC_DIR/spec"
+fi

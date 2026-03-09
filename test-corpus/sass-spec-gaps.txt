@@ -1,0 +1,316 @@
+core_functions/color/alpha/css_overloads/alpha/multi_arg	1
+  38..39: expected RPAREN
+core_functions/color/alpha/css_overloads/alpha/one_arg	1
+  38..39: expected RPAREN
+core_functions/list/zip/one_list/bracketed	7
+  165..166: expected IDENT
+  165..166: expected `{`
+  174..175: expected COLON
+core_functions/list/zip/one_list/comma	7
+  167..168: expected IDENT
+  167..168: expected `{`
+  176..177: expected COLON
+core_functions/list/zip/one_list/space	7
+  163..164: expected IDENT
+  163..164: expected `{`
+  172..173: expected COLON
+core_functions/meta/inspect/map/list/key/space	10
+  44..45: expected expression
+  44..45: expected RPAREN
+  44..45: expected RPAREN
+core_functions/modules/color/css_overloads/alpha/multi_arg	1
+  38..39: expected RPAREN
+core_functions/modules/color/css_overloads/alpha/one_arg	1
+  38..39: expected RPAREN
+css/custom_properties/name_interpolation/non_conformant	1
+  307..308: expected declaration or nested rule
+css/function/interpolated/result/sass_script	9
+  11..12: expected rule
+  16..17: expected `{`
+  16..17: expected rule
+css/function/lowercase/interpolation	6
+  12..14: expected `(`
+  12..14: expected `{`
+  16..17: expected `{`
+css/function/lowercase/parameter	8
+  14..17: expected DOLLAR
+  18..19: expected RPAREN
+  18..19: expected `{`
+css/function/lowercase/result/characters	3
+  31..32: expected identifier after `#`
+  33..34: expected IDENT
+  35..36: expected `{`
+css/function/lowercase/returns	3
+  16..23: expected `{`
+  24..25: expected `{`
+  24..25: expected rule
+css/function/result/uppercase/characters	3
+  31..32: expected identifier after `#`
+  33..34: expected IDENT
+  35..36: expected `{`
+css/function/uppercase/result/characters	3
+  31..32: expected identifier after `#`
+  33..34: expected IDENT
+  35..36: expected `{`
+css/functions/special/prefixed/calc/punctuation	19
+  14..15: expected expression
+  14..15: expected RPAREN
+  17..18: expected IDENT
+css/functions/special/unprefixed/type/punctuation	19
+  11..12: expected expression
+  11..12: expected RPAREN
+  14..15: expected IDENT
+css/keyframes/bubble/empty	1
+  60..61: expected keyframes name
+css/keyframes/name/variable_like	7
+  18..19: expected keyframes name
+  18..19: expected `{`
+  21..22: expected COLON
+css/keyframes/selector/interpolated	12
+  17..18: expected keyframe selector
+  18..19: expected `from`, `to`, or percentage
+  19..20: expected `{`
+css/keyframes/selector/percentage/scientific/double	11
+  20..22: expected `{`
+  20..22: expected `from`, `to`, or percentage
+  22..23: expected `{`
+css/keyframes/selector/percentage/scientific/int	11
+  18..20: expected `{`
+  18..20: expected `from`, `to`, or percentage
+  20..21: expected `{`
+css/keyframes/selector/percentage/scientific/negative_exponent	11
+  20..23: expected `{`
+  20..23: expected `from`, `to`, or percentage
+  23..24: expected `{`
+css/keyframes/selector/percentage/scientific/positive_exponent	4
+  19..20: expected `{`
+  19..20: expected `from`, `to`, or percentage
+  20..21: expected `{`
+css/ms_long_filter_syntax	2
+  71..72: expected RPAREN
+  189..190: expected RPAREN
+css/plain/import/conditions/media/list/after_feature	10
+  20..21: expected import path
+  20..21: expected SEMICOLON
+  20..21: expected rule
+css/plain/import/conditions/media/list/after_ident	10
+  15..16: expected import path
+  15..16: expected SEMICOLON
+  15..16: expected rule
+css/plain/import/conditions/media/list/and_without_space	3
+  25..26: expected import path
+  25..26: expected SEMICOLON
+  26..27: expected `{`
+css/plain/import/conditions/multiple/many	5
+  57..58: expected import path
+  57..58: expected SEMICOLON
+  57..58: expected rule
+css/unknown_directive/name_interpolation	24
+  235..236: expected rule
+  246..247: expected `{`
+  269..270: expected rule
+css/unknown_directive/value_interpolation	5
+  114..115: expected rule
+  134..135: expected rule
+  138..139: expected `{`
+directives/at_root/keyframes/all	13
+  17..18: expected keyframe selector
+  18..25: expected `from`, `to`, or percentage
+  26..27: expected `{`
+directives/extend/after_target/multiple_recursive	3
+  98..99: `@extend` does not support descendant combinators
+  137..138: `@extend` does not support descendant combinators
+  176..177: `@extend` does not support descendant combinators
+libsass/at-root/with_without	116
+  2051..2058: expected RPAREN
+  2051..2058: expected selector
+  2051..2058: expected `{`
+libsass/at-stuff	1
+  571..572: expected rule
+libsass/keyframes	5
+  258..262: expected `from`, `to`, or percentage
+  262..263: expected `{`
+  262..263: expected keyframe selector
+libsass/list-evaluation	12
+  336..337: expected `{`
+  336..337: expected declaration or nested rule
+  338..339: expected declaration or nested rule
+libsass/selectors/simple	1
+  141..142: expected keyframes name
+libsass-closed-issues/issue_1060	1
+  73..74: `@else` without preceding `@if`
+libsass-closed-issues/issue_1102	6
+  46..47: expected expression
+  46..47: expected RPAREN
+  46..47: expected RPAREN
+libsass-closed-issues/issue_1107	1
+  82..83: expected RPAREN
+libsass-closed-issues/issue_1169/interpolated	9
+  156..157: expected expression
+  156..157: expected RPAREN
+  156..157: expected SEMICOLON
+libsass-closed-issues/issue_1188	1
+  257..258: expected `{`
+libsass-closed-issues/issue_1210/with_without	116
+  2051..2058: expected RPAREN
+  2051..2058: expected selector
+  2051..2058: expected `{`
+libsass-closed-issues/issue_1233	4
+  44..48: expected `{`
+  49..52: expected `{`
+  49..52: expected rule
+libsass-closed-issues/issue_1263	7
+  17..18: expected `{`
+  68..69: expected rule
+  73..74: expected `{`
+libsass-closed-issues/issue_1283	10
+  56..57: expected expression
+  56..57: expected RPAREN
+  56..57: expected RPAREN
+libsass-closed-issues/issue_1301	1
+  21..22: expected IDENT
+libsass-closed-issues/issue_143	2
+  153..154: expected SEMICOLON
+  153..154: expected declaration or nested rule
+libsass-closed-issues/issue_1647/directives	2
+  18..19: expected rule
+  67..68: expected rule
+libsass-closed-issues/issue_1648	2
+  174..175: `@else` without preceding `@if`
+  268..269: `@else` without preceding `@if`
+libsass-closed-issues/issue_1672	1
+  25..26: expected IDENT
+libsass-closed-issues/issue_201	1
+  6..7: expected selector after `,`
+libsass-closed-issues/issue_2246	1
+  213..215: expected IDENT
+libsass-closed-issues/issue_2349	4
+  51..52: expected expression
+  51..52: expected SEMICOLON
+  51..52: expected rule
+libsass-closed-issues/issue_239	1
+  687..689: expected IDENT
+libsass-closed-issues/issue_274	1
+  86..87: expected RPAREN
+libsass-closed-issues/issue_439	1
+  141..143: expected IDENT
+libsass-closed-issues/issue_509	20
+  108..115: expected COLON
+  123..124: expected RPAREN
+  123..124: expected SEMICOLON
+libsass-closed-issues/issue_549	1
+  40..41: expected RPAREN
+libsass-closed-issues/issue_615	1
+  14..16: expected IDENT
+libsass-closed-issues/issue_683	1
+  72..73: expected RPAREN
+libsass-closed-issues/issue_72	1
+  74..75: expected RPAREN
+libsass-todo-issues/issue_1694/quoted-right-dbl-paren	1
+  64..65: expected RPAREN
+libsass-todo-issues/issue_221262	5
+  0..1: expected rule
+  4..6: expected IDENT
+  6..7: expected `{`
+libsass-todo-issues/issue_221292	3
+  4..5: expected rule
+  8..9: expected IDENT
+  664..664: expected `{`
+non_conformant/basic/36_extra_commas_in_selectors	5
+  4..5: expected selector after `,`
+  6..7: expected selector after `,`
+  14..15: expected selector after `,`
+non_conformant/basic/53_escaped_quotes	6
+  322..324: expected expression
+  322..324: expected SEMICOLON
+  322..324: expected rule
+non_conformant/extend-tests/091_test_redundant_selector_elimination	2
+  38..39: `@extend` does not support descendant combinators
+  62..63: `@extend` does not support descendant combinators
+non_conformant/extend-tests/192_test_placeholder_interpolation	1
+  13..15: expected IDENT
+non_conformant/extend-tests/selector_list	2
+  117..118: `@extend` does not support descendant combinators
+  222..223: `@extend` does not support descendant combinators
+non_conformant/misc/directive_interpolation	1
+  24..25: expected rule
+non_conformant/misc/trailing_comma_in_selector	6
+  10..11: expected selector after `,`
+  12..13: expected selector after `,`
+  25..26: expected selector after `,`
+non_conformant/mixin/content/arguments/weird_syntax	13
+  719..724: expected SEMICOLON
+  725..726: expected `{`
+  725..726: expected declaration or nested rule
+non_conformant/parser/operations/binary-and-unary	2
+  287..288: expected expression
+  287..288: expected RPAREN
+non_conformant/sass_4_0/interpolation/function_name	2
+  264..267: expected expression
+  264..267: expected RPAREN
+non_conformant/scss/each_directive	6
+  27..28: expected `{`
+  27..28: expected declaration or nested rule
+  31..32: expected `{`
+non_conformant/scss/ie-functions	25
+  222..223: expected RPAREN
+  261..262: expected RPAREN
+  329..330: expected RPAREN
+non_conformant/scss/important-in-arglist	7
+  84..85: expected RPAREN
+  84..85: expected SEMICOLON
+  84..85: expected declaration or nested rule
+non_conformant/scss/prop_name_interpolation_after_hyphen	1
+  4..5: expected declaration or nested rule
+non_conformant/scss/selector_interpolation_at_id_begininng	1
+  12..14: expected identifier after `#`
+non_conformant/scss-tests/017_test_each_directive	6
+  27..28: expected `{`
+  27..28: expected declaration or nested rule
+  31..32: expected `{`
+non_conformant/scss-tests/044_test_trailing_comma_in_selector	6
+  10..11: expected selector after `,`
+  12..13: expected selector after `,`
+  25..26: expected selector after `,`
+non_conformant/scss-tests/112_test_selector_interpolation_at_id_begininng	1
+  12..14: expected identifier after `#`
+non_conformant/scss-tests/122_test_directive_interpolation	1
+  24..25: expected rule
+non_conformant/scss-tests/130_test_random_directive_interpolation	3
+  79..80: expected rule
+  104..108: expected `{`
+  104..108: expected rule
+non_conformant/scss-tests/177_test_prop_name_interpolation_after_hyphen	1
+  4..5: expected declaration or nested rule
+values/calculation/abs/sass_script	1
+  17..18: expected RPAREN
+values/calculation/calc/no_operator/function/max	2
+  17..18: expected RPAREN
+  17..18: expected RPAREN
+values/calculation/calc/no_operator/function/min	2
+  17..18: expected RPAREN
+  17..18: expected RPAREN
+values/calculation/calc/space/interpolation/after	1
+  13..15: expected RPAREN
+values/calculation/calc/space/interpolation/before	1
+  20..21: expected RPAREN
+values/calculation/calc/space/interpolation/between	1
+  13..15: expected RPAREN
+values/calculation/calc/space/var/after	1
+  13..16: expected RPAREN
+values/calculation/calc/space/var/before	1
+  20..21: expected RPAREN
+values/calculation/calc/space/var/between	1
+  13..16: expected RPAREN
+values/calculation/calc/space/variable/after	1
+  60..61: expected RPAREN
+values/calculation/calc/space/variable/before	1
+  61..62: expected RPAREN
+values/calculation/calc/space/variable/between	1
+  62..63: expected RPAREN
+values/calculation/round/one_argument/sass_script	1
+  19..20: expected RPAREN
+values/identifiers/escape/normalize	3
+  229..232: expected expression
+  229..232: expected expression
+  229..232: expected RPAREN

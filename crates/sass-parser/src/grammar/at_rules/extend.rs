@@ -10,6 +10,9 @@ pub fn extend_rule(p: &mut Parser<'_>) {
 
     // Parse selector — consume tokens until `;`, `!`, `}` or EOF
     // @extend only allows simple/compound selectors (no descendant combinators)
+    if p.at(SEMICOLON) || p.at(RBRACE) || p.at_end() {
+        p.error("expected selector");
+    }
     let mut has_selector_token = false;
     let mut has_combinator = false;
     while !p.at(SEMICOLON) && !p.at(BANG) && !p.at(RBRACE) && !p.at_end() {

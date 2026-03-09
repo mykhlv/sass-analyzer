@@ -81,7 +81,7 @@ pub fn expr_list(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarke
 /// Extra values become siblings (no wrapper node).
 pub(crate) fn sass_value(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarker> {
     let cm = expr(p, ctx)?;
-    while !at_value_end(p) && !p.at(COMMA) && !p.at(RPAREN) {
+    while !at_value_end(p) && !p.at(COMMA) && !p.at(RPAREN) && !p.at(RBRACKET) {
         if p.at(SLASH) {
             // CSS separator: `11px/1.5`, `font: 12px/1.4 sans-serif`
             p.bump();
@@ -443,10 +443,10 @@ fn bracketed_list(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
     let m = p.start();
     p.bump(); // [
     if !p.at(RBRACKET) && !p.at_end() {
-        expr(p, ctx);
+        sass_value(p, ctx);
         while p.eat(COMMA) {
             if !p.at(RBRACKET) && !p.at_end() {
-                expr(p, ctx);
+                sass_value(p, ctx);
             }
         }
     }
@@ -543,6 +543,17 @@ fn function_dispatch(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
         return special_function_call(p);
     }
 
+    // CSS if() function: `if(condition: value; else: alternate)`.
+    // Distinguished from Sass if() by `:` (not after $ident) before any `,` at depth 1.
+    if name == "if" && is_css_if(p) {
+        return special_function_call(p);
+    }
+
+    // Legacy MS filter syntax: `alpha(opacity=50)` — contains `=` at depth 1.
+    if name.eq_ignore_ascii_case("alpha") && has_eq_in_args(p) {
+        return special_function_call(p);
+    }
+
     // Calculation functions
     if CALC_NAMES.iter().any(|n| name.eq_ignore_ascii_case(n)) {
         // Calc function with SassScript-only features → Sass function call
@@ -553,6 +564,66 @@ fn function_dispatch(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
     }
 
     function_call(p, ctx)
+}
+
+/// Check if `if(...)` uses CSS conditional syntax (colon-separated) rather than
+/// Sass syntax (comma-separated). Scans ahead from current position (at IDENT "if").
+fn is_css_if(p: &Parser<'_>) -> bool {
+    // p.nth(0) = IDENT "if", p.nth(1) = LPAREN
+    if p.nth(1) != LPAREN {
+        return false;
+    }
+    let mut offset: usize = 2;
+    let mut depth: u32 = 1;
+    loop {
+        let kind = p.nth(offset);
+        match kind {
+            LPAREN => depth += 1,
+            RPAREN => {
+                depth -= 1;
+                if depth == 0 {
+                    return false;
+                }
+            }
+            EOF => return false,
+            COLON if depth == 1 => {
+                // Keyword arg `$name:` — not CSS if()
+                if offset >= 2 && p.nth(offset - 1) == IDENT && p.nth(offset - 2) == DOLLAR {
+                    offset += 1;
+                    continue;
+                }
+                return true;
+            }
+            COMMA if depth == 1 => return false,
+            _ => {}
+        }
+        offset += 1;
+    }
+}
+
+/// Check if function args contain bare `=` at depth 1 (MS filter syntax: `alpha(opacity=50)`).
+fn has_eq_in_args(p: &Parser<'_>) -> bool {
+    if p.nth(1) != LPAREN {
+        return false;
+    }
+    let mut offset: usize = 2;
+    let mut depth: u32 = 1;
+    loop {
+        let kind = p.nth(offset);
+        match kind {
+            LPAREN => depth += 1,
+            RPAREN => {
+                depth -= 1;
+                if depth == 0 {
+                    return false;
+                }
+            }
+            EOF => return false,
+            EQ if depth == 1 => return true,
+            _ => {}
+        }
+        offset += 1;
+    }
 }
 
 /// Parse `name(args)` normal Sass/CSS function call.
@@ -792,7 +863,9 @@ pub fn interpolation(p: &mut Parser<'_>) -> CompletedMarker {
     assert!(p.at(HASH_LBRACE));
     let m = p.start();
     p.bump(); // #{
-    if !p.at(RBRACE) && !p.at_end() {
+    if p.at(RBRACE) {
+        p.error("expected expression");
+    } else if !p.at_end() {
         sass_value_list(p, ParseContext::SassScript);
     }
     p.expect(RBRACE);
