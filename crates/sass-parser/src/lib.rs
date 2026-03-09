@@ -11,6 +11,8 @@ pub mod syntax;
 pub mod ast;
 pub mod grammar;
 pub mod line_index;
+pub mod resolver;
+pub mod vfs;
 
 mod bridge;
 pub use bridge::build_tree;
