@@ -1,16 +1,36 @@
 use crate::event::Event;
 use crate::input::Input;
+use crate::syntax_kind::SyntaxKind;
 
-/// Stack-based green tree builder that bypasses rowan's `NodeCache`.
+/// Maximum `SyntaxKind` value eligible for fixed-text token caching.
+/// Kinds `0..=MAX_CACHED_KIND` are punctuation/operators whose text is fully
+/// determined by kind, so one cached Arc serves all occurrences.
+const MAX_CACHED_KIND: u16 = SyntaxKind::STAR_EQ as u16;
+
+const WHITESPACE_KIND: u16 = SyntaxKind::WHITESPACE as u16;
+
+/// Stack-based green tree builder with selective token caching.
 ///
 /// rowan's `GreenNodeBuilder` hashes every token (`FxHash` of kind + full text)
 /// and does a `HashMap` lookup for deduplication. For SCSS, most tokens are
 /// unique identifiers/values, so the cache hit rate is low and the hash
-/// overhead is pure waste. This builder constructs `GreenToken`/`GreenNode`
-/// directly, eliminating ~40-80 ns per token of hash + lookup overhead.
+/// overhead is pure waste.
+///
+/// This builder uses two caching strategies:
+/// 1. Fixed-text tokens (punctuation/operators, kinds 0..=36): indexed by kind,
+///    one Arc per kind.
+/// 2. Whitespace tokens: linear-scan cache by text content. Formatted SCSS
+///    typically has only 5-15 unique whitespace patterns (`" "`, `"\n"`,
+///    `"\n    "`, etc.) but thousands of occurrences, so deduplication saves
+///    significant memory.
+///
+/// Variable-text tokens (IDENT, NUMBER, STRING, etc.) are created directly
+/// without any hash or cache overhead.
 struct DirectBuilder {
     children: Vec<rowan::NodeOrToken<rowan::GreenNode, rowan::GreenToken>>,
     parents: Vec<(rowan::SyntaxKind, usize)>,
+    token_cache: Vec<Option<rowan::GreenToken>>,
+    whitespace_cache: Vec<(Box<str>, rowan::GreenToken)>,
 }
 
 impl DirectBuilder {
@@ -18,13 +38,44 @@ impl DirectBuilder {
         Self {
             children: Vec::new(),
             parents: Vec::new(),
+            token_cache: vec![None; MAX_CACHED_KIND as usize + 1],
+            whitespace_cache: Vec::new(),
         }
     }
 
     #[inline]
     fn token(&mut self, kind: rowan::SyntaxKind, text: &str) {
-        self.children
-            .push(rowan::NodeOrToken::Token(rowan::GreenToken::new(kind, text)));
+        let token = if kind.0 <= MAX_CACHED_KIND {
+            let idx = kind.0 as usize;
+            if let Some(cached) = &self.token_cache[idx] {
+                cached.clone()
+            } else {
+                let t = rowan::GreenToken::new(kind, text);
+                self.token_cache[idx] = Some(t.clone());
+                t
+            }
+        } else if kind.0 == WHITESPACE_KIND {
+            self.cached_whitespace(kind, text)
+        } else {
+            rowan::GreenToken::new(kind, text)
+        };
+        self.children.push(rowan::NodeOrToken::Token(token));
+    }
+
+    #[inline]
+    fn cached_whitespace(
+        &mut self,
+        kind: rowan::SyntaxKind,
+        text: &str,
+    ) -> rowan::GreenToken {
+        for (cached_text, cached_token) in &self.whitespace_cache {
+            if **cached_text == *text {
+                return cached_token.clone();
+            }
+        }
+        let t = rowan::GreenToken::new(kind, text);
+        self.whitespace_cache.push((text.into(), t.clone()));
+        t
     }
 
     #[inline]
