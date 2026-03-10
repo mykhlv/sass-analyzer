@@ -1437,6 +1437,12 @@ fn find_reference_at_offset(
                 });
             }
             SyntaxKind::FUNCTION_CALL => {
+                if node
+                    .parent()
+                    .is_some_and(|p| p.kind() == SyntaxKind::NAMESPACE_REF)
+                {
+                    continue;
+                }
                 let (name, range) = ident_text_range_of(&node)?;
                 return Some(ReferenceInfo {
                     namespace: None,
@@ -1659,7 +1665,15 @@ fn format_hover_markdown(sym: &symbols::Symbol, source_uri: Option<&Uri>) -> Str
 
     if let Some(uri) = source_uri {
         if let Some(module) = builtins::builtin_name_from_uri(uri.as_str()) {
-            parts.push(format!("Sass built-in (`sass:{module}`)"));
+            let anchor = match sym.kind {
+                symbols::SymbolKind::Variable => format!("%24{}", sym.name),
+                _ => sym.name.clone(),
+            };
+            let url =
+                format!("https://sass-lang.com/documentation/modules/{module}/#{anchor}");
+            parts.push(format!(
+                "[Sass built-in `sass:{module}`]({url})"
+            ));
         } else if let Some(path) = uri.to_file_path() {
             if let Some(name) = path.file_name() {
                 parts.push(format!("Defined in `{}`", name.to_string_lossy()));
@@ -3223,6 +3237,108 @@ mod tests {
         assert!(
             content.contains("primary color"),
             "hover should show doc comment"
+        );
+    }
+
+    #[tokio::test]
+    async fn hover_builtin_function_shows_doc_url() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "@use \"sass:math\";\n.a { width: math.ceil(1.5); }\n";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///hover_builtin.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
+
+        // Hover on "ceil" (line 1, character 17 = inside "ceil")
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 35,
+                "method": "textDocument/hover",
+                "params": {
+                    "textDocument": { "uri": "file:///hover_builtin.scss" },
+                    "position": { "line": 1, "character": 17 }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader, &mut writer).await;
+        let content = resp["result"]["contents"]["value"].as_str().unwrap();
+        assert!(
+            content.contains("@function ceil"),
+            "hover should show function signature"
+        );
+        assert!(
+            content.contains("sass-lang.com/documentation/modules/math/#ceil"),
+            "hover should contain doc URL: {content}"
+        );
+    }
+
+    #[tokio::test]
+    async fn hover_builtin_variable_shows_doc_url() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "@use \"sass:math\";\n.a { content: math.$pi; }\n";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///hover_builtin_var.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
+
+        // Hover on "pi" (line 1, character 20 = inside "$pi")
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 36,
+                "method": "textDocument/hover",
+                "params": {
+                    "textDocument": { "uri": "file:///hover_builtin_var.scss" },
+                    "position": { "line": 1, "character": 20 }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader, &mut writer).await;
+        let content = resp["result"]["contents"]["value"].as_str().unwrap();
+        assert!(
+            content.contains("$pi"),
+            "hover should show variable name"
+        );
+        assert!(
+            content.contains("sass-lang.com/documentation/modules/math/#%24pi"),
+            "hover should contain doc URL with $ anchor: {content}"
         );
     }
 
