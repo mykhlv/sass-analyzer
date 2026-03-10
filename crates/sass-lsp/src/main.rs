@@ -17,16 +17,17 @@ use tower_lsp_server::jsonrpc::Result;
 use tower_lsp_server::ls_types::{
     CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
     Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams,
-    GotoDefinitionResponse, Hover, HoverContents, HoverParams, InitializeParams, InitializeResult,
-    InitializedParams, Location, MarkupContent, MarkupKind, OneOf, ParameterInformation,
-    ParameterLabel, Position, PrepareRenameResponse, Range, ReferenceParams,
-    RenameOptions, RenameParams, SemanticToken, SemanticTokenModifier, SemanticTokenType,
-    SemanticTokens, SemanticTokensFullOptions, SemanticTokensLegend, SemanticTokensOptions,
-    SemanticTokensParams, SemanticTokensResult, SemanticTokensServerCapabilities,
-    ServerCapabilities, ServerInfo, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
-    SignatureInformation, TextDocumentPositionParams, TextDocumentSyncCapability,
-    TextDocumentSyncKind, TextEdit, Uri, WorkDoneProgressOptions, WorkspaceEdit,
+    DidOpenTextDocumentParams, DocumentLink, DocumentLinkOptions, DocumentLinkParams,
+    DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse,
+    Hover, HoverContents, HoverParams, InitializeParams, InitializeResult, InitializedParams,
+    Location, MarkupContent, MarkupKind, OneOf, ParameterInformation, ParameterLabel, Position,
+    PrepareRenameResponse, Range, ReferenceParams, RenameOptions, RenameParams, SemanticToken,
+    SemanticTokenModifier, SemanticTokenType, SemanticTokens, SemanticTokensFullOptions,
+    SemanticTokensLegend, SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
+    SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo, SignatureHelp,
+    SignatureHelpOptions, SignatureHelpParams, SignatureInformation, SymbolInformation,
+    TextDocumentPositionParams, TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Uri,
+    WorkDoneProgressOptions, WorkspaceEdit, WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
 use tower_lsp_server::{Client, LanguageServer, LspService, Server};
 
@@ -487,6 +488,11 @@ impl LanguageServer for Backend {
                     retrigger_characters: None,
                     work_done_progress_options: WorkDoneProgressOptions::default(),
                 }),
+                document_link_provider: Some(DocumentLinkOptions {
+                    resolve_provider: Some(false),
+                    work_done_progress_options: WorkDoneProgressOptions::default(),
+                }),
+                workspace_symbol_provider: Some(OneOf::Left(true)),
                 ..ServerCapabilities::default()
             },
             server_info: Some(ServerInfo {
@@ -616,6 +622,59 @@ impl LanguageServer for Backend {
             uri: target_uri,
             range,
         })))
+    }
+
+    async fn document_link(&self, params: DocumentLinkParams) -> Result<Option<Vec<DocumentLink>>> {
+        let uri = params.text_document.uri;
+        let Some(doc) = self.documents.get(&uri) else {
+            return Ok(None);
+        };
+
+        let root = SyntaxNode::new_root(doc.green.clone());
+        let line_index = &doc.line_index;
+        let mut links = Vec::new();
+
+        for node in root.descendants() {
+            let kind = node.kind();
+            if kind != SyntaxKind::USE_RULE
+                && kind != SyntaxKind::FORWARD_RULE
+                && kind != SyntaxKind::IMPORT_RULE
+            {
+                continue;
+            }
+
+            let Some(string_token) = node
+                .children_with_tokens()
+                .filter_map(rowan::NodeOrToken::into_token)
+                .find(|t| t.kind() == SyntaxKind::QUOTED_STRING)
+            else {
+                continue;
+            };
+
+            let text = string_token.text();
+            if text.len() < 2 {
+                continue;
+            }
+            let spec = &text[1..text.len() - 1];
+
+            let Some(target_uri) = self.module_graph.resolve_import(&uri, spec) else {
+                continue;
+            };
+
+            let range = text_range_to_lsp(string_token.text_range(), line_index);
+            links.push(DocumentLink {
+                range,
+                target: Some(target_uri),
+                tooltip: Some(spec.to_owned()),
+                data: None,
+            });
+        }
+
+        if links.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(links))
+        }
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
@@ -907,6 +966,52 @@ impl LanguageServer for Backend {
             active_signature: Some(0),
             active_parameter: Some(active_param),
         }))
+    }
+
+    #[allow(deprecated)]
+    async fn symbol(
+        &self,
+        params: WorkspaceSymbolParams,
+    ) -> Result<Option<WorkspaceSymbolResponse>> {
+        let query = params.query.to_lowercase();
+        let all = self.module_graph.all_symbols();
+
+        let mut matches: Vec<SymbolInformation> = all
+            .into_iter()
+            .filter(|(_, sym)| fuzzy_match(&sym.name, &query))
+            .filter_map(|(uri, sym)| {
+                let li = self.module_graph.line_index(&uri)?;
+                let range = text_range_to_lsp(sym.selection_range, &li);
+                let kind = match sym.kind {
+                    symbols::SymbolKind::Variable => {
+                        tower_lsp_server::ls_types::SymbolKind::VARIABLE
+                    }
+                    symbols::SymbolKind::Function => {
+                        tower_lsp_server::ls_types::SymbolKind::FUNCTION
+                    }
+                    symbols::SymbolKind::Mixin => tower_lsp_server::ls_types::SymbolKind::FUNCTION,
+                    symbols::SymbolKind::Placeholder => {
+                        tower_lsp_server::ls_types::SymbolKind::CLASS
+                    }
+                };
+                Some(SymbolInformation {
+                    name: sym.name,
+                    kind,
+                    tags: None,
+                    deprecated: None,
+                    location: Location { uri, range },
+                    container_name: None,
+                })
+            })
+            .collect();
+
+        matches.sort_by(|a, b| a.name.cmp(&b.name));
+
+        if matches.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(WorkspaceSymbolResponse::Flat(matches)))
+        }
     }
 }
 
@@ -1530,6 +1635,22 @@ fn parse_param_labels(signature: &str, params_text: &str) -> Vec<ParameterInform
     }
 
     result
+}
+
+// ── Workspace symbol search ─────────────────────────────────────────
+
+fn fuzzy_match(name: &str, query: &str) -> bool {
+    if query.is_empty() {
+        return true;
+    }
+    let name_lower = name.to_lowercase();
+    let mut name_chars = name_lower.chars();
+    for qch in query.chars() {
+        if name_chars.find(|&c| c == qch).is_none() {
+            return false;
+        }
+    }
+    true
 }
 
 // ── Tests ───────────────────────────────────────────────────────────
@@ -3167,6 +3288,188 @@ mod tests {
         } else {
             panic!("expected LabelOffsets");
         }
+    }
+
+    // ── Workspace symbol tests ──────────────────────────────────────
+
+    #[tokio::test]
+    async fn initialize_reports_workspace_symbol_capability() {
+        let (mut reader, mut writer) = spawn_server();
+        let resp = do_initialize(&mut reader, &mut writer).await;
+        let caps = &resp["result"]["capabilities"];
+        assert_eq!(caps["workspaceSymbolProvider"], true);
+    }
+
+    #[tokio::test]
+    async fn workspace_symbol_returns_matching_symbols() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "$primary: blue;\n@mixin btn($size) { }\n@function scale($n) { @return $n; }";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///ws.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader).await;
+
+        // Search for "btn"
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 70,
+                "method": "workspace/symbol",
+                "params": { "query": "btn" }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader).await;
+        let result = resp["result"].as_array().unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0]["name"], "btn");
+    }
+
+    #[tokio::test]
+    async fn workspace_symbol_empty_query_returns_all() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "$a: 1;\n$b: 2;";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///ws_all.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader).await;
+
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 71,
+                "method": "workspace/symbol",
+                "params": { "query": "" }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader).await;
+        let result = resp["result"].as_array().unwrap();
+        assert_eq!(result.len(), 2, "empty query should return all symbols");
+    }
+
+    #[tokio::test]
+    async fn workspace_symbol_fuzzy_matching() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "@mixin responsive-grid { }\n@mixin simple { }";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///ws_fuzz.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader).await;
+
+        // "rg" should fuzzy-match "responsive-grid" but not "simple"
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 72,
+                "method": "workspace/symbol",
+                "params": { "query": "rg" }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader).await;
+        let result = resp["result"].as_array().unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0]["name"], "responsive-grid");
+    }
+
+    #[tokio::test]
+    async fn workspace_symbol_no_match_returns_null() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "$x: 1;";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///ws_none.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader).await;
+
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 73,
+                "method": "workspace/symbol",
+                "params": { "query": "zzz" }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader).await;
+        assert!(resp["result"].is_null(), "no match should return null");
+    }
+
+    #[test]
+    fn fuzzy_match_basics() {
+        assert!(super::fuzzy_match("responsive-grid", "rg"));
+        assert!(super::fuzzy_match("primary", "pry"));
+        assert!(super::fuzzy_match("Button", "btn"));
+        assert!(!super::fuzzy_match("simple", "rg"));
+        assert!(super::fuzzy_match("anything", ""));
     }
 
     async fn do_initialize_with(
