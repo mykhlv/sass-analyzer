@@ -19,11 +19,13 @@ use tower_lsp_server::ls_types::{
     Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
     DidOpenTextDocumentParams, DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams,
     GotoDefinitionResponse, Hover, HoverContents, HoverParams, InitializeParams, InitializeResult,
-    InitializedParams, Location, MarkupContent, MarkupKind, OneOf, Position, Range, SemanticToken,
+    InitializedParams, Location, MarkupContent, MarkupKind, OneOf, Position,
+    PrepareRenameResponse, Range, ReferenceParams, RenameOptions, RenameParams, SemanticToken,
     SemanticTokenModifier, SemanticTokenType, SemanticTokens, SemanticTokensFullOptions,
     SemanticTokensLegend, SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
-    SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo, TextDocumentSyncCapability,
-    TextDocumentSyncKind, Uri,
+    SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo,
+    TextDocumentPositionParams, TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Uri,
+    WorkDoneProgressOptions, WorkspaceEdit,
 };
 use tower_lsp_server::{Client, LanguageServer, LspService, Server};
 
@@ -474,6 +476,11 @@ impl LanguageServer for Backend {
                 hover_provider: Some(tower_lsp_server::ls_types::HoverProviderCapability::Simple(
                     true,
                 )),
+                references_provider: Some(OneOf::Left(true)),
+                rename_provider: Some(OneOf::Right(RenameOptions {
+                    prepare_provider: Some(true),
+                    work_done_progress_options: WorkDoneProgressOptions::default(),
+                })),
                 ..ServerCapabilities::default()
             },
             server_info: Some(ServerInfo {
@@ -665,6 +672,189 @@ impl LanguageServer for Backend {
 
         Ok(None)
     }
+
+    async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+
+        let (green, offset, file_symbols) = {
+            let Some(doc) = self.documents.get(&uri) else {
+                return Ok(None);
+            };
+            let Some(offset) = lsp_position_to_offset(&doc.text, &doc.line_index, position) else {
+                return Ok(None);
+            };
+            (doc.green.clone(), offset, doc.symbols.clone())
+        };
+
+        let root = SyntaxNode::new_root(green);
+
+        let (target_uri, target_name, target_kind) = if let Some(ref_info) =
+            find_reference_at_offset(&root, offset)
+        {
+            let resolved = if let Some(namespace) = &ref_info.namespace {
+                self.module_graph
+                    .resolve_qualified(&uri, namespace, &ref_info.name, ref_info.kind)
+            } else {
+                self.module_graph
+                    .resolve_unqualified(&uri, &ref_info.name, ref_info.kind)
+            };
+            let Some((target_uri, sym)) = resolved else {
+                return Ok(None);
+            };
+            (target_uri, sym.name, sym.kind)
+        } else if let Some(sym) = find_definition_at_offset(&file_symbols, offset) {
+            (uri.clone(), sym.name.clone(), sym.kind)
+        } else {
+            return Ok(None);
+        };
+
+        let refs = self.module_graph.find_all_references(
+            &target_uri,
+            &target_name,
+            target_kind,
+            params.context.include_declaration,
+        );
+
+        if refs.is_empty() {
+            return Ok(None);
+        }
+
+        let locations: Vec<Location> = refs
+            .into_iter()
+            .filter_map(|(ref_uri, range)| {
+                let li = self.module_graph.line_index(&ref_uri)?;
+                Some(Location {
+                    uri: ref_uri,
+                    range: text_range_to_lsp(range, &li),
+                })
+            })
+            .collect();
+
+        Ok(Some(locations))
+    }
+
+    async fn prepare_rename(
+        &self,
+        params: TextDocumentPositionParams,
+    ) -> Result<Option<PrepareRenameResponse>> {
+        let uri = params.text_document.uri;
+        let position = params.position;
+
+        let (green, offset, file_symbols) = {
+            let Some(doc) = self.documents.get(&uri) else {
+                return Ok(None);
+            };
+            let Some(offset) = lsp_position_to_offset(&doc.text, &doc.line_index, position) else {
+                return Ok(None);
+            };
+            (doc.green.clone(), offset, doc.symbols.clone())
+        };
+
+        let root = SyntaxNode::new_root(green);
+
+        // Check if cursor is on a reference or definition
+        if let Some(ref_info) = find_reference_at_offset(&root, offset) {
+            let resolved = if let Some(namespace) = &ref_info.namespace {
+                self.module_graph
+                    .resolve_qualified(&uri, namespace, &ref_info.name, ref_info.kind)
+            } else {
+                self.module_graph
+                    .resolve_unqualified(&uri, &ref_info.name, ref_info.kind)
+            };
+            let Some((_, sym)) = resolved else {
+                return Ok(None);
+            };
+            let Some(li) = self.module_graph.line_index(&uri) else {
+                return Ok(None);
+            };
+            let name_range = name_only_range(ref_info.kind, ref_info.range);
+            return Ok(Some(PrepareRenameResponse::RangeWithPlaceholder {
+                range: text_range_to_lsp(name_range, &li),
+                placeholder: sym.name,
+            }));
+        }
+
+        if let Some(sym) = find_definition_at_offset(&file_symbols, offset) {
+            let Some(li) = self.module_graph.line_index(&uri) else {
+                return Ok(None);
+            };
+            let name_range = name_only_range(sym.kind, sym.selection_range);
+            return Ok(Some(PrepareRenameResponse::RangeWithPlaceholder {
+                range: text_range_to_lsp(name_range, &li),
+                placeholder: sym.name.clone(),
+            }));
+        }
+
+        Ok(None)
+    }
+
+    async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+        let new_name = params.new_name;
+
+        let (green, offset, file_symbols) = {
+            let Some(doc) = self.documents.get(&uri) else {
+                return Ok(None);
+            };
+            let Some(offset) = lsp_position_to_offset(&doc.text, &doc.line_index, position) else {
+                return Ok(None);
+            };
+            (doc.green.clone(), offset, doc.symbols.clone())
+        };
+
+        let root = SyntaxNode::new_root(green);
+
+        let (target_uri, target_name, target_kind) = if let Some(ref_info) =
+            find_reference_at_offset(&root, offset)
+        {
+            let resolved = if let Some(namespace) = &ref_info.namespace {
+                self.module_graph
+                    .resolve_qualified(&uri, namespace, &ref_info.name, ref_info.kind)
+            } else {
+                self.module_graph
+                    .resolve_unqualified(&uri, &ref_info.name, ref_info.kind)
+            };
+            let Some((target_uri, sym)) = resolved else {
+                return Ok(None);
+            };
+            (target_uri, sym.name, sym.kind)
+        } else if let Some(sym) = find_definition_at_offset(&file_symbols, offset) {
+            (uri.clone(), sym.name.clone(), sym.kind)
+        } else {
+            return Ok(None);
+        };
+
+        // Find all references + declaration
+        let refs = self.module_graph.find_all_references(
+            &target_uri,
+            &target_name,
+            target_kind,
+            true, // always include declaration for rename
+        );
+
+        if refs.is_empty() {
+            return Ok(None);
+        }
+
+        let mut changes: HashMap<Uri, Vec<TextEdit>> = HashMap::new();
+        for (ref_uri, range) in refs {
+            let Some(li) = self.module_graph.line_index(&ref_uri) else {
+                continue;
+            };
+            let edit_range = name_only_range(target_kind, range);
+            changes.entry(ref_uri).or_default().push(TextEdit {
+                range: text_range_to_lsp(edit_range, &li),
+                new_text: new_name.clone(),
+            });
+        }
+
+        Ok(Some(WorkspaceEdit {
+            changes: Some(changes),
+            ..WorkspaceEdit::default()
+        }))
+    }
 }
 
 fn symbol_to_completion_item(prefix: Option<&str>, sym: &symbols::Symbol) -> CompletionItem {
@@ -802,6 +992,7 @@ struct ReferenceInfo {
     namespace: Option<String>,
     name: String,
     kind: symbols::SymbolKind,
+    range: TextRange,
 }
 
 fn find_reference_at_offset(
@@ -822,19 +1013,21 @@ fn find_reference_at_offset(
                 {
                     return None;
                 }
-                let name = dollar_ident_name(&node)?;
+                let (name, range) = dollar_ident_name_range(&node)?;
                 return Some(ReferenceInfo {
                     namespace: None,
                     name,
                     kind: symbols::SymbolKind::Variable,
+                    range,
                 });
             }
             SyntaxKind::FUNCTION_CALL => {
-                let name = ident_text_of(&node)?;
+                let (name, range) = ident_text_range_of(&node)?;
                 return Some(ReferenceInfo {
                     namespace: None,
                     name,
                     kind: symbols::SymbolKind::Function,
+                    range,
                 });
             }
             SyntaxKind::INCLUDE_RULE => {
@@ -844,19 +1037,21 @@ fn find_reference_at_offset(
                 {
                     return None;
                 }
-                let name = nth_ident_text_of(&node, 1)?;
+                let (name, range) = nth_ident_text_range_of(&node, 1)?;
                 return Some(ReferenceInfo {
                     namespace: None,
                     name,
                     kind: symbols::SymbolKind::Mixin,
+                    range,
                 });
             }
             SyntaxKind::EXTEND_RULE => {
-                let name = percent_ident_name(&node)?;
+                let (name, range) = percent_ident_name_range(&node)?;
                 return Some(ReferenceInfo {
                     namespace: None,
                     name,
                     kind: symbols::SymbolKind::Placeholder,
+                    range,
                 });
             }
             _ => {}
@@ -878,17 +1073,17 @@ fn extract_namespace_ref_info(node: &SyntaxNode) -> Option<ReferenceInfo> {
         .to_string();
 
     // ns.$var pattern: IDENT DOT DOLLAR IDENT
-    if tokens.iter().any(|t| t.kind() == SyntaxKind::DOLLAR) {
-        let name = tokens
+    if let Some(dollar) = tokens.iter().find(|t| t.kind() == SyntaxKind::DOLLAR) {
+        let ident = tokens
             .iter()
             .skip_while(|t| t.kind() != SyntaxKind::DOLLAR)
-            .find(|t| t.kind() == SyntaxKind::IDENT)?
-            .text()
-            .to_string();
+            .find(|t| t.kind() == SyntaxKind::IDENT)?;
+        let range = TextRange::new(dollar.text_range().start(), ident.text_range().end());
         return Some(ReferenceInfo {
             namespace: Some(namespace),
-            name,
+            name: ident.text().to_string(),
             kind: symbols::SymbolKind::Variable,
+            range,
         });
     }
 
@@ -897,21 +1092,20 @@ fn extract_namespace_ref_info(node: &SyntaxNode) -> Option<ReferenceInfo> {
         .children()
         .find(|c| c.kind() == SyntaxKind::FUNCTION_CALL)
     {
-        let name = ident_text_of(&func_call)?;
+        let (name, range) = ident_text_range_of(&func_call)?;
         return Some(ReferenceInfo {
             namespace: Some(namespace),
             name,
             kind: symbols::SymbolKind::Function,
+            range,
         });
     }
 
     // ns.mixin pattern: IDENT DOT IDENT (inside @include)
     let dot_pos = tokens.iter().position(|t| t.kind() == SyntaxKind::DOT)?;
-    let name = tokens[dot_pos + 1..]
+    let ident = tokens[dot_pos + 1..]
         .iter()
-        .find(|t| t.kind() == SyntaxKind::IDENT)?
-        .text()
-        .to_string();
+        .find(|t| t.kind() == SyntaxKind::IDENT)?;
 
     let is_mixin = node
         .parent()
@@ -919,22 +1113,27 @@ fn extract_namespace_ref_info(node: &SyntaxNode) -> Option<ReferenceInfo> {
 
     Some(ReferenceInfo {
         namespace: Some(namespace),
-        name,
+        name: ident.text().to_string(),
         kind: if is_mixin {
             symbols::SymbolKind::Mixin
         } else {
             symbols::SymbolKind::Function
         },
+        range: ident.text_range(),
     })
 }
 
-fn dollar_ident_name(node: &SyntaxNode) -> Option<String> {
-    let mut found_dollar = false;
+/// Extract `$name` → (name, DOLLAR..IDENT range) from direct children.
+fn dollar_ident_name_range(node: &SyntaxNode) -> Option<(String, TextRange)> {
+    let mut dollar_start = None;
     for element in node.children_with_tokens() {
         if let Some(token) = element.into_token() {
             match token.kind() {
-                SyntaxKind::DOLLAR => found_dollar = true,
-                SyntaxKind::IDENT if found_dollar => return Some(token.text().to_string()),
+                SyntaxKind::DOLLAR => dollar_start = Some(token.text_range().start()),
+                SyntaxKind::IDENT if dollar_start.is_some() => {
+                    let range = TextRange::new(dollar_start.unwrap(), token.text_range().end());
+                    return Some((token.text().to_string(), range));
+                }
                 _ => {}
             }
         }
@@ -942,33 +1141,57 @@ fn dollar_ident_name(node: &SyntaxNode) -> Option<String> {
     None
 }
 
-fn ident_text_of(node: &SyntaxNode) -> Option<String> {
+/// Extract first IDENT → (text, range).
+fn ident_text_range_of(node: &SyntaxNode) -> Option<(String, TextRange)> {
     node.children_with_tokens()
         .filter_map(rowan::NodeOrToken::into_token)
         .find(|t| t.kind() == SyntaxKind::IDENT)
-        .map(|t| t.text().to_string())
+        .map(|t| (t.text().to_string(), t.text_range()))
 }
 
-fn nth_ident_text_of(node: &SyntaxNode, n: usize) -> Option<String> {
+/// Extract nth IDENT → (text, range).
+fn nth_ident_text_range_of(node: &SyntaxNode, n: usize) -> Option<(String, TextRange)> {
     node.children_with_tokens()
         .filter_map(rowan::NodeOrToken::into_token)
         .filter(|t| t.kind() == SyntaxKind::IDENT)
         .nth(n)
-        .map(|t| t.text().to_string())
+        .map(|t| (t.text().to_string(), t.text_range()))
 }
 
-fn percent_ident_name(node: &SyntaxNode) -> Option<String> {
-    let mut found_pct = false;
+/// Extract `%name` → (name, PERCENT..IDENT range) from direct children.
+fn percent_ident_name_range(node: &SyntaxNode) -> Option<(String, TextRange)> {
+    let mut pct_start = None;
     for element in node.children_with_tokens() {
         if let Some(token) = element.into_token() {
             match token.kind() {
-                SyntaxKind::PERCENT => found_pct = true,
-                SyntaxKind::IDENT if found_pct => return Some(token.text().to_string()),
+                SyntaxKind::PERCENT => pct_start = Some(token.text_range().start()),
+                SyntaxKind::IDENT if pct_start.is_some() => {
+                    let range = TextRange::new(pct_start.unwrap(), token.text_range().end());
+                    return Some((token.text().to_string(), range));
+                }
                 _ => {}
             }
         }
     }
     None
+}
+
+/// For variables (`$name`) and placeholders (`%name`), strip the sigil
+/// to get just the IDENT range. For functions/mixins, the range is already
+/// just the IDENT.
+fn name_only_range(kind: symbols::SymbolKind, range: TextRange) -> TextRange {
+    match kind {
+        symbols::SymbolKind::Variable | symbols::SymbolKind::Placeholder => {
+            // Skip 1-byte sigil ($ or %)
+            let start = range.start() + sass_parser::text_range::TextSize::from(1u32);
+            if start < range.end() {
+                TextRange::new(start, range.end())
+            } else {
+                range
+            }
+        }
+        symbols::SymbolKind::Function | symbols::SymbolKind::Mixin => range,
+    }
 }
 
 // ── Hover ───────────────────────────────────────────────────────────
@@ -1984,6 +2207,417 @@ mod tests {
         let resp = do_initialize(&mut reader, &mut writer).await;
         let caps = &resp["result"]["capabilities"];
         assert_eq!(caps["hoverProvider"], true);
+    }
+
+    #[tokio::test]
+    async fn initialize_reports_references_and_rename_capabilities() {
+        let (mut reader, mut writer) = spawn_server();
+        let resp = do_initialize(&mut reader, &mut writer).await;
+        let caps = &resp["result"]["capabilities"];
+        assert_eq!(caps["referencesProvider"], true);
+        assert!(caps["renameProvider"].is_object());
+    }
+
+    #[tokio::test]
+    async fn references_variable_same_file() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "$color: red;\n.a { color: $color; }\n.b { border-color: $color; }\n";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///refs.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader).await;
+
+        // References on $color usage at line 1
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 40,
+                "method": "textDocument/references",
+                "params": {
+                    "textDocument": { "uri": "file:///refs.scss" },
+                    "position": { "line": 1, "character": 15 },
+                    "context": { "includeDeclaration": false }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader).await;
+        let locs = resp["result"].as_array().unwrap();
+        // Should find 2 references (not including declaration)
+        assert_eq!(locs.len(), 2, "expected 2 references");
+    }
+
+    #[tokio::test]
+    async fn references_include_declaration() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "$x: 1;\n.a { width: $x; }\n";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///refs_decl.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader).await;
+
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 41,
+                "method": "textDocument/references",
+                "params": {
+                    "textDocument": { "uri": "file:///refs_decl.scss" },
+                    "position": { "line": 1, "character": 13 },
+                    "context": { "includeDeclaration": true }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader).await;
+        let locs = resp["result"].as_array().unwrap();
+        assert_eq!(locs.len(), 2, "expected 2: declaration + 1 ref");
+    }
+
+    #[tokio::test]
+    async fn references_mixin() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "@mixin btn { }\n.a { @include btn; }\n.b { @include btn; }\n";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///refs_mixin.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader).await;
+
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 42,
+                "method": "textDocument/references",
+                "params": {
+                    "textDocument": { "uri": "file:///refs_mixin.scss" },
+                    "position": { "line": 1, "character": 17 },
+                    "context": { "includeDeclaration": false }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader).await;
+        let locs = resp["result"].as_array().unwrap();
+        assert_eq!(locs.len(), 2, "expected 2 mixin references");
+    }
+
+    #[tokio::test]
+    async fn references_returns_null_on_empty() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = ".a { color: red; }\n";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///refs_null.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader).await;
+
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 43,
+                "method": "textDocument/references",
+                "params": {
+                    "textDocument": { "uri": "file:///refs_null.scss" },
+                    "position": { "line": 0, "character": 5 },
+                    "context": { "includeDeclaration": true }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader).await;
+        assert!(resp["result"].is_null());
+    }
+
+    #[tokio::test]
+    async fn prepare_rename_variable() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "$color: red;\n.a { color: $color; }\n";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///prep_rename.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader).await;
+
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 44,
+                "method": "textDocument/prepareRename",
+                "params": {
+                    "textDocument": { "uri": "file:///prep_rename.scss" },
+                    "position": { "line": 1, "character": 15 }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader).await;
+        let result = &resp["result"];
+        assert_eq!(result["placeholder"], "color");
+    }
+
+    #[tokio::test]
+    async fn prepare_rename_on_definition() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "$color: red;\n";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///prep_rename_def.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader).await;
+
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 45,
+                "method": "textDocument/prepareRename",
+                "params": {
+                    "textDocument": { "uri": "file:///prep_rename_def.scss" },
+                    "position": { "line": 0, "character": 1 }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader).await;
+        let result = &resp["result"];
+        assert_eq!(result["placeholder"], "color");
+    }
+
+    #[tokio::test]
+    async fn rename_variable_single_file() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "$color: red;\n.a { color: $color; }\n";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///rename.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader).await;
+
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 46,
+                "method": "textDocument/rename",
+                "params": {
+                    "textDocument": { "uri": "file:///rename.scss" },
+                    "position": { "line": 1, "character": 15 },
+                    "newName": "primary"
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader).await;
+        let changes = &resp["result"]["changes"]["file:///rename.scss"];
+        let edits = changes.as_array().unwrap();
+        assert!(edits.len() >= 2, "expected at least 2 edits (decl + ref)");
+        for edit in edits {
+            assert_eq!(edit["newText"], "primary");
+        }
+    }
+
+    #[tokio::test]
+    async fn rename_mixin() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "@mixin btn { }\n.a { @include btn; }\n";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///rename_mixin.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader).await;
+
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 47,
+                "method": "textDocument/rename",
+                "params": {
+                    "textDocument": { "uri": "file:///rename_mixin.scss" },
+                    "position": { "line": 1, "character": 17 },
+                    "newName": "button"
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader).await;
+        let changes = &resp["result"]["changes"]["file:///rename_mixin.scss"];
+        let edits = changes.as_array().unwrap();
+        assert!(edits.len() >= 2, "expected at least 2 edits");
+        for edit in edits {
+            assert_eq!(edit["newText"], "button");
+        }
+    }
+
+    #[tokio::test]
+    async fn rename_returns_null_on_empty_space() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = ".a { color: red; }\n";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///rename_null.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader).await;
+
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 48,
+                "method": "textDocument/rename",
+                "params": {
+                    "textDocument": { "uri": "file:///rename_null.scss" },
+                    "position": { "line": 0, "character": 5 },
+                    "newName": "x"
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader).await;
+        assert!(resp["result"].is_null());
     }
 
     async fn do_initialize_with(
