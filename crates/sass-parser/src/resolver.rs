@@ -113,6 +113,10 @@ impl<V: Vfs> ModuleResolver<V> {
         self.load_paths.push(path.into());
     }
 
+    pub fn load_paths(&self) -> &[PathBuf] {
+        &self.load_paths
+    }
+
     /// Register an import alias. `targets` must be absolute paths.
     /// For monorepos, multiple targets can map to the same prefix;
     /// the resolver picks the target closest to the importing file.

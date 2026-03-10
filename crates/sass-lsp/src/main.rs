@@ -1,5 +1,6 @@
 mod builtins;
 mod config;
+mod css_properties;
 mod symbols;
 mod workspace;
 
@@ -480,7 +481,13 @@ impl LanguageServer for Backend {
                 document_symbol_provider: Some(OneOf::Left(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 completion_provider: Some(CompletionOptions {
-                    trigger_characters: Some(vec!["$".into(), ".".into()]),
+                    trigger_characters: Some(vec![
+                        "$".into(),
+                        ".".into(),
+                        "@".into(),
+                        "\"".into(),
+                        ":".into(),
+                    ]),
                     ..CompletionOptions::default()
                 }),
                 hover_provider: Some(tower_lsp_server::ls_types::HoverProviderCapability::Simple(
@@ -687,6 +694,43 @@ impl LanguageServer for Backend {
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+
+        let text = {
+            let Some(doc) = self.documents.get(&uri) else {
+                return Ok(None);
+            };
+            doc.text.clone()
+        };
+
+        let ctx = detect_completion_context(&text, position);
+
+        match ctx {
+            CompletionContext::UseModulePath(partial) => {
+                let items = self.module_graph.complete_use_paths(&uri, &partial);
+                if items.is_empty() {
+                    return Ok(None);
+                }
+                return Ok(Some(CompletionResponse::Array(items)));
+            }
+            CompletionContext::PropertyName(partial) => {
+                let items: Vec<CompletionItem> = css_properties::CSS_PROPERTIES
+                    .iter()
+                    .filter(|p| partial.is_empty() || p.starts_with(&*partial))
+                    .map(|p| CompletionItem {
+                        label: (*p).to_owned(),
+                        kind: Some(CompletionItemKind::PROPERTY),
+                        sort_text: Some(format!("0_{p}")),
+                        ..CompletionItem::default()
+                    })
+                    .collect();
+                if items.is_empty() {
+                    return Ok(None);
+                }
+                return Ok(Some(CompletionResponse::Array(items)));
+            }
+            _ => {}
+        }
 
         let visible = self.module_graph.visible_symbols(&uri);
         if visible.is_empty() {
@@ -695,9 +739,25 @@ impl LanguageServer for Backend {
 
         let items: Vec<CompletionItem> = visible
             .into_iter()
-            .map(|(prefix, _sym_uri, sym)| symbol_to_completion_item(prefix.as_deref(), &sym))
+            .filter(|(prefix, _, sym)| match &ctx {
+                CompletionContext::Variable => sym.kind == symbols::SymbolKind::Variable,
+                CompletionContext::IncludeMixin => sym.kind == symbols::SymbolKind::Mixin,
+                CompletionContext::Namespace(ns) => {
+                    prefix.as_ref().is_some_and(|p| p == ns)
+                }
+                CompletionContext::Extend => sym.kind == symbols::SymbolKind::Placeholder,
+                CompletionContext::General | CompletionContext::PropertyValue => true,
+                CompletionContext::PropertyName(_) | CompletionContext::UseModulePath(_) => false,
+            })
+            .map(|(prefix, sym_uri, sym)| {
+                let is_builtin = builtins::is_builtin_uri(sym_uri.as_str());
+                symbol_to_completion_item(prefix.as_deref(), &sym, is_builtin)
+            })
             .collect();
 
+        if items.is_empty() {
+            return Ok(None);
+        }
         Ok(Some(CompletionResponse::Array(items)))
     }
 
@@ -1077,7 +1137,129 @@ impl LanguageServer for Backend {
     }
 }
 
-fn symbol_to_completion_item(prefix: Option<&str>, sym: &symbols::Symbol) -> CompletionItem {
+// ── Completion context detection ─────────────────────────────────
+
+enum CompletionContext {
+    /// After `$` — only variables
+    Variable,
+    /// After `@include ` — only mixins
+    IncludeMixin,
+    /// After `@extend %` — only placeholders
+    Extend,
+    /// After `ns.` — only symbols from that namespace
+    Namespace(String),
+    /// After `@use "` or `@forward "` — module path completions
+    UseModulePath(String),
+    /// In property-name position (start of line or after `;`/`{`)
+    PropertyName(String),
+    /// After `:` in a declaration — property value context (variables + functions)
+    PropertyValue,
+    /// Default — show all symbols
+    General,
+}
+
+fn detect_completion_context(text: &str, position: Position) -> CompletionContext {
+    let line_idx = position.line as usize;
+    let Some(line) = text.lines().nth(line_idx) else {
+        return CompletionContext::General;
+    };
+
+    // Get text before cursor on this line
+    let col = position.character as usize;
+    let before: String = line.chars().take(col).collect();
+    let trimmed = before.trim_start();
+
+    // @use "path" or @forward "path" → module path completion
+    if let Some(rest) = trimmed
+        .strip_prefix("@use")
+        .or_else(|| trimmed.strip_prefix("@forward"))
+    {
+        let rest = rest.trim_start();
+        if let Some(partial) = rest.strip_prefix('"') {
+            return CompletionContext::UseModulePath(partial.to_owned());
+        }
+        if let Some(partial) = rest.strip_prefix('\'') {
+            return CompletionContext::UseModulePath(partial.to_owned());
+        }
+    }
+
+    // @include name — mixin completion
+    if let Some(rest) = trimmed.strip_prefix("@include") {
+        let partial = rest.trim_start();
+        // Only if we haven't started the argument list
+        if !partial.contains('(') {
+            return CompletionContext::IncludeMixin;
+        }
+    }
+
+    // @extend % — placeholder completion
+    if trimmed.starts_with("@extend") {
+        return CompletionContext::Extend;
+    }
+
+    // namespace.member — after `ns.`
+    if let Some(dot_pos) = before.rfind('.') {
+        let before_dot = &before[..dot_pos];
+        // Extract the namespace identifier (last word before dot)
+        let ns: String = before_dot
+            .chars()
+            .rev()
+            .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        if !ns.is_empty() {
+            return CompletionContext::Namespace(ns);
+        }
+    }
+
+    // After `$` — variable completion
+    if before.ends_with('$') || before.contains('$') && !before.ends_with(' ') {
+        if let Some(dollar_pos) = before.rfind('$') {
+            let after_dollar = &before[dollar_pos + 1..];
+            if after_dollar.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
+                return CompletionContext::Variable;
+            }
+        }
+    }
+
+    // Property value position: after `property:` (with possible whitespace)
+    if trimmed.contains(':') && !trimmed.starts_with('@') && !trimmed.starts_with('$') {
+        return CompletionContext::PropertyValue;
+    }
+
+    // Property name position: line starts with a letter/hyphen (typical for properties)
+    // or after `{` or `;`
+    if !trimmed.is_empty()
+        && !trimmed.starts_with('$')
+        && !trimmed.starts_with('@')
+        && !trimmed.starts_with('.')
+        && !trimmed.starts_with('#')
+        && !trimmed.starts_with('&')
+        && !trimmed.starts_with('%')
+        && !trimmed.starts_with('>')
+        && !trimmed.starts_with('+')
+        && !trimmed.starts_with('~')
+        && !trimmed.starts_with('/')
+        && !trimmed.starts_with('*')
+        && !trimmed.contains(':')
+    {
+        // Could be a property name if we're inside a block
+        // Simple heuristic: if the line starts with a lowercase letter or hyphen
+        if trimmed.starts_with(|c: char| c.is_ascii_lowercase() || c == '-') {
+            return CompletionContext::PropertyName(trimmed.to_owned());
+        }
+    }
+
+    CompletionContext::General
+}
+
+fn symbol_to_completion_item(
+    prefix: Option<&str>,
+    sym: &symbols::Symbol,
+    is_builtin: bool,
+) -> CompletionItem {
     let (label, insert_text, kind, detail) = match sym.kind {
         symbols::SymbolKind::Variable => {
             let label = if let Some(ns) = prefix {
@@ -1085,7 +1267,8 @@ fn symbol_to_completion_item(prefix: Option<&str>, sym: &symbols::Symbol) -> Com
             } else {
                 format!("${}", sym.name)
             };
-            (label, None, CompletionItemKind::VARIABLE, None)
+            let detail = sym.value.clone();
+            (label, None, CompletionItemKind::VARIABLE, detail)
         }
         symbols::SymbolKind::Function => {
             let label = if let Some(ns) = prefix {
@@ -1115,11 +1298,22 @@ fn symbol_to_completion_item(prefix: Option<&str>, sym: &symbols::Symbol) -> Com
         }
     };
 
-    let sort_text = Some(format!(
-        "{}{}",
-        if prefix.is_some() { "1" } else { "0" },
-        &label,
-    ));
+    // 3-tier sort: 0_ local, 1_ imported, 2_ builtin
+    let tier = if is_builtin {
+        "2"
+    } else if prefix.is_some() {
+        "1"
+    } else {
+        "0"
+    };
+    let sort_text = Some(format!("{tier}_{label}"));
+
+    let documentation = sym.doc.as_ref().map(|doc| {
+        tower_lsp_server::ls_types::Documentation::MarkupContent(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: doc.clone(),
+        })
+    });
 
     CompletionItem {
         label,
@@ -1127,6 +1321,7 @@ fn symbol_to_completion_item(prefix: Option<&str>, sym: &symbols::Symbol) -> Com
         detail,
         insert_text,
         sort_text,
+        documentation,
         ..CompletionItem::default()
     }
 }
@@ -2503,6 +2698,303 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn completion_after_dollar_only_variables() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "$color: red;\n@mixin btn { }\n@function double($n) { @return $n * 2; }\n.a { color: $";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///comp_dollar.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
+
+        // Cursor after "$" on line 3
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 30,
+                "method": "textDocument/completion",
+                "params": {
+                    "textDocument": { "uri": "file:///comp_dollar.scss" },
+                    "position": { "line": 3, "character": 13 }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader, &mut writer).await;
+        let items = resp["result"].as_array().unwrap();
+        // Should only contain variables, not mixins or functions
+        for item in items {
+            assert_eq!(
+                item["kind"], 6,
+                "after $ only variable items (kind=6), got: {}",
+                item["label"]
+            );
+        }
+        assert!(
+            items.iter().any(|i| i["label"] == "$color"),
+            "should contain $color"
+        );
+    }
+
+    #[tokio::test]
+    async fn completion_after_include_only_mixins() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "$color: red;\n@mixin btn { }\n@function double($n) { @return $n * 2; }\n.a {\n  @include \n}\n";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///comp_include.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
+
+        // Cursor on line 4: "  @include " (char 11 = end of "@include ")
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 31,
+                "method": "textDocument/completion",
+                "params": {
+                    "textDocument": { "uri": "file:///comp_include.scss" },
+                    "position": { "line": 4, "character": 11 }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader, &mut writer).await;
+        let items = resp["result"].as_array().unwrap();
+        assert_eq!(items.len(), 1, "only mixins after @include");
+        assert_eq!(items[0]["label"], "btn");
+        assert_eq!(items[0]["kind"], 2, "mixin kind = METHOD = 2");
+    }
+
+    #[tokio::test]
+    async fn completion_sort_text_tiers() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "$local: 1;\n";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///comp_sort.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
+
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 32,
+                "method": "textDocument/completion",
+                "params": {
+                    "textDocument": { "uri": "file:///comp_sort.scss" },
+                    "position": { "line": 0, "character": 0 }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader, &mut writer).await;
+        let items = resp["result"].as_array().unwrap();
+        // Local symbols should have sortText starting with "0_"
+        let local = items.iter().find(|i| i["label"] == "$local").unwrap();
+        assert!(
+            local["sortText"].as_str().unwrap().starts_with("0_"),
+            "local symbol sortText should start with 0_"
+        );
+    }
+
+    #[tokio::test]
+    async fn completion_property_name_context() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = ".a {\n  col\n}\n";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///comp_prop.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
+
+        // Cursor on "col" at line 1, character 5
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 33,
+                "method": "textDocument/completion",
+                "params": {
+                    "textDocument": { "uri": "file:///comp_prop.scss" },
+                    "position": { "line": 1, "character": 5 }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader, &mut writer).await;
+        let items = resp["result"].as_array().unwrap();
+        assert!(!items.is_empty(), "should have CSS property completions");
+        // All items should have kind = PROPERTY (10)
+        for item in items {
+            assert_eq!(item["kind"], 10, "property completion kind should be 10");
+        }
+        let labels: Vec<&str> = items.iter().map(|i| i["label"].as_str().unwrap()).collect();
+        assert!(labels.contains(&"color"), "should contain 'color'");
+        assert!(
+            labels.contains(&"column-count"),
+            "should contain 'column-count'"
+        );
+    }
+
+    #[tokio::test]
+    async fn completion_use_path_builtins() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "@use \"sass:";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///comp_use.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
+
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 34,
+                "method": "textDocument/completion",
+                "params": {
+                    "textDocument": { "uri": "file:///comp_use.scss" },
+                    "position": { "line": 0, "character": 11 }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader, &mut writer).await;
+        let items = resp["result"].as_array().unwrap();
+        let labels: Vec<&str> = items.iter().map(|i| i["label"].as_str().unwrap()).collect();
+        assert!(labels.contains(&"sass:math"), "should contain sass:math");
+        assert!(labels.contains(&"sass:color"), "should contain sass:color");
+        assert!(labels.contains(&"sass:list"), "should contain sass:list");
+    }
+
+    #[tokio::test]
+    async fn completion_variable_shows_value_detail() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "$primary: #3498db;\n.a { color: $";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///comp_detail.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
+
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 35,
+                "method": "textDocument/completion",
+                "params": {
+                    "textDocument": { "uri": "file:///comp_detail.scss" },
+                    "position": { "line": 1, "character": 14 }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader, &mut writer).await;
+        let items = resp["result"].as_array().unwrap();
+        let primary = items.iter().find(|i| i["label"] == "$primary").unwrap();
+        assert_eq!(
+            primary["detail"].as_str().unwrap(),
+            "#3498db",
+            "variable detail should show its value"
+        );
+    }
+
+    #[tokio::test]
     async fn hover_on_variable_reference() {
         let (mut reader, mut writer) = spawn_server();
         do_initialize(&mut reader, &mut writer).await;
@@ -3706,6 +4198,40 @@ mod tests {
         assert!(super::fuzzy_match("Button", "btn"));
         assert!(!super::fuzzy_match("simple", "rg"));
         assert!(super::fuzzy_match("anything", ""));
+    }
+
+    #[test]
+    fn completion_context_detection() {
+        use super::{detect_completion_context, CompletionContext, Position};
+
+        //                         0123456789...
+        let text = ".a {\n  color: $\n  @include \n  @use \"\n  bor\n}\n";
+        // Line 0: ".a {"
+        // Line 1: "  color: $"       (len=10)
+        // Line 2: "  @include "      (len=11)
+        // Line 3: "  @use \""        (len=8)
+        // Line 4: "  bor"            (len=5)
+        // Line 5: "}"
+
+        // After `$` → Variable (line 1, char 10 = end of "  color: $")
+        let ctx = detect_completion_context(text, Position { line: 1, character: 10 });
+        assert!(matches!(ctx, CompletionContext::Variable));
+
+        // After `@include ` → IncludeMixin (line 2, char 11 = end of "  @include ")
+        let ctx = detect_completion_context(text, Position { line: 2, character: 11 });
+        assert!(matches!(ctx, CompletionContext::IncludeMixin));
+
+        // After `@use "` → UseModulePath (line 3, char 8 = after the quote)
+        let ctx = detect_completion_context(text, Position { line: 3, character: 8 });
+        assert!(matches!(ctx, CompletionContext::UseModulePath(_)));
+
+        // On `bor` → PropertyName (line 4, char 5 = end of "  bor")
+        let ctx = detect_completion_context(text, Position { line: 4, character: 5 });
+        assert!(matches!(ctx, CompletionContext::PropertyName(_)));
+
+        // After `color:` → PropertyValue (line 1, char 8 = "  color: ")
+        let ctx = detect_completion_context(text, Position { line: 1, character: 8 });
+        assert!(matches!(ctx, CompletionContext::PropertyValue));
     }
 
     async fn do_initialize_with(

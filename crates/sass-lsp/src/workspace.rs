@@ -469,6 +469,125 @@ impl ModuleGraph {
         }
     }
 
+    /// Provide completion items for `@use "` / `@forward "` import paths.
+    /// Returns built-in module names and relative SCSS files from the same directory.
+    pub fn complete_use_paths(
+        &self,
+        from: &Uri,
+        partial: &str,
+    ) -> Vec<tower_lsp_server::ls_types::CompletionItem> {
+        use tower_lsp_server::ls_types::{CompletionItem, CompletionItemKind};
+
+        let mut items = Vec::new();
+
+        // Built-in modules: sass:math, sass:color, etc.
+        let builtins = ["math", "color", "list", "map", "selector", "string", "meta"];
+        for name in &builtins {
+            let label = format!("sass:{name}");
+            if partial.is_empty() || label.starts_with(partial) {
+                items.push(CompletionItem {
+                    label,
+                    kind: Some(CompletionItemKind::MODULE),
+                    sort_text: Some(format!("1_{name}")),
+                    ..CompletionItem::default()
+                });
+            }
+        }
+
+        // Relative SCSS files from the same directory
+        let Some(base_path) = uri_to_path(from) else {
+            return items;
+        };
+        let Some(dir) = base_path.parent() else {
+            return items;
+        };
+
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path == base_path {
+                    continue;
+                }
+                let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                    continue;
+                };
+
+                if path.is_dir() {
+                    // Directory — could be an index import
+                    if partial.is_empty() || name.starts_with(partial) {
+                        items.push(CompletionItem {
+                            label: name.to_owned(),
+                            kind: Some(CompletionItemKind::FOLDER),
+                            sort_text: Some(format!("0_{name}")),
+                            ..CompletionItem::default()
+                        });
+                    }
+                } else if is_scss_or_css(name) {
+                    // Normalize: strip leading _, strip .scss extension
+                    let stem = name.strip_prefix('_').unwrap_or(name);
+                    let stem = stem
+                        .strip_suffix(".scss")
+                        .or_else(|| stem.strip_suffix(".css"))
+                        .unwrap_or(stem);
+                    if partial.is_empty() || stem.starts_with(partial) {
+                        items.push(CompletionItem {
+                            label: stem.to_owned(),
+                            kind: Some(CompletionItemKind::FILE),
+                            sort_text: Some(format!("0_{stem}")),
+                            ..CompletionItem::default()
+                        });
+                    }
+                }
+            }
+        }
+
+        // Also scan load_paths
+        let resolver = self
+            .resolver
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for load_path in resolver.load_paths() {
+            if let Ok(entries) = std::fs::read_dir(load_path) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                        continue;
+                    };
+
+                    if path.is_dir() {
+                        if partial.is_empty() || name.starts_with(partial) {
+                            items.push(CompletionItem {
+                                label: name.to_owned(),
+                                kind: Some(CompletionItemKind::FOLDER),
+                                sort_text: Some(format!("0_{name}")),
+                                ..CompletionItem::default()
+                            });
+                        }
+                    } else if is_scss_or_css(name) {
+                        let stem = name.strip_prefix('_').unwrap_or(name);
+                        let stem = stem
+                            .strip_suffix(".scss")
+                            .or_else(|| stem.strip_suffix(".css"))
+                            .unwrap_or(stem);
+                        if partial.is_empty() || stem.starts_with(partial) {
+                            items.push(CompletionItem {
+                                label: stem.to_owned(),
+                                kind: Some(CompletionItemKind::FILE),
+                                sort_text: Some(format!("0_{stem}")),
+                                ..CompletionItem::default()
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Deduplicate by label
+        items.sort_by(|a, b| a.label.cmp(&b.label));
+        items.dedup_by(|a, b| a.label == b.label);
+        items
+    }
+
     /// Find all references to a symbol across the entire workspace.
     /// Walks each file's CST to correctly resolve both unqualified and namespace-qualified refs.
     pub fn find_all_references(
@@ -878,6 +997,12 @@ fn find_name_in_forward_clauses(
     }
 
     results
+}
+
+fn is_scss_or_css(name: &str) -> bool {
+    Path::new(name)
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("scss") || ext.eq_ignore_ascii_case("css"))
 }
 
 fn is_visible(vis: &ForwardVisibility, name: &str) -> bool {
