@@ -1672,7 +1672,7 @@ fn format_hover_markdown(sym: &symbols::Symbol, source_uri: Option<&Uri>) -> Str
             let url =
                 format!("https://sass-lang.com/documentation/modules/{module}/#{anchor}");
             parts.push(format!(
-                "[Sass built-in `sass:{module}`]({url})"
+                "`sass:{module}` · [docs]({url})"
             ));
         } else if let Some(path) = uri.to_file_path() {
             if let Some(name) = path.file_name() {
