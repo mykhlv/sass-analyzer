@@ -445,6 +445,7 @@ impl ModuleGraph {
         self.files.get(uri).map(|info| info.line_index.clone())
     }
 
+    #[allow(dead_code)] // used by workspace/symbol handler (next step)
     pub fn all_symbols(&self) -> Vec<(Uri, symbols::Symbol)> {
         let mut result = Vec::new();
         for entry in &self.files {
@@ -457,6 +458,7 @@ impl ModuleGraph {
 
     /// Resolve an import specifier from a given file URI.
     /// Returns the target file URI if resolution succeeds.
+    #[allow(dead_code)] // used by document link handler (next step)
     pub fn resolve_import(&self, from: &Uri, spec: &str) -> Option<Uri> {
         let base = uri_to_path(from)?;
         let resolver = self

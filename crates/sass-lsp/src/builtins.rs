@@ -54,6 +54,7 @@ pub fn builtin_uri(module: &str) -> String {
     format!("sass-builtin:///{module}")
 }
 
+#[allow(dead_code)] // future use
 pub fn is_builtin_uri(uri: &str) -> bool {
     uri.starts_with("sass-builtin:///")
 }

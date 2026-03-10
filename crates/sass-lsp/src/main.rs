@@ -19,13 +19,14 @@ use tower_lsp_server::ls_types::{
     Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
     DidOpenTextDocumentParams, DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams,
     GotoDefinitionResponse, Hover, HoverContents, HoverParams, InitializeParams, InitializeResult,
-    InitializedParams, Location, MarkupContent, MarkupKind, OneOf, Position,
-    PrepareRenameResponse, Range, ReferenceParams, RenameOptions, RenameParams, SemanticToken,
-    SemanticTokenModifier, SemanticTokenType, SemanticTokens, SemanticTokensFullOptions,
-    SemanticTokensLegend, SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
-    SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo,
-    TextDocumentPositionParams, TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Uri,
-    WorkDoneProgressOptions, WorkspaceEdit,
+    InitializedParams, Location, MarkupContent, MarkupKind, OneOf, ParameterInformation,
+    ParameterLabel, Position, PrepareRenameResponse, Range, ReferenceParams,
+    RenameOptions, RenameParams, SemanticToken, SemanticTokenModifier, SemanticTokenType,
+    SemanticTokens, SemanticTokensFullOptions, SemanticTokensLegend, SemanticTokensOptions,
+    SemanticTokensParams, SemanticTokensResult, SemanticTokensServerCapabilities,
+    ServerCapabilities, ServerInfo, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
+    SignatureInformation, TextDocumentPositionParams, TextDocumentSyncCapability,
+    TextDocumentSyncKind, TextEdit, Uri, WorkDoneProgressOptions, WorkspaceEdit,
 };
 use tower_lsp_server::{Client, LanguageServer, LspService, Server};
 
@@ -481,6 +482,11 @@ impl LanguageServer for Backend {
                     prepare_provider: Some(true),
                     work_done_progress_options: WorkDoneProgressOptions::default(),
                 })),
+                signature_help_provider: Some(SignatureHelpOptions {
+                    trigger_characters: Some(vec!["(".into(), ",".into()]),
+                    retrigger_characters: None,
+                    work_done_progress_options: WorkDoneProgressOptions::default(),
+                }),
                 ..ServerCapabilities::default()
             },
             server_info: Some(ServerInfo {
@@ -853,6 +859,53 @@ impl LanguageServer for Backend {
         Ok(Some(WorkspaceEdit {
             changes: Some(changes),
             ..WorkspaceEdit::default()
+        }))
+    }
+
+    async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        let (green, text, offset) = {
+            let Some(doc) = self.documents.get(&uri) else {
+                return Ok(None);
+            };
+            let Some(offset) = lsp_position_to_offset(&doc.text, &doc.line_index, position) else {
+                return Ok(None);
+            };
+            (doc.green.clone(), doc.text.clone(), offset)
+        };
+
+        let root = SyntaxNode::new_root(green);
+
+        let Some(call_info) = find_call_at_offset(&root, offset) else {
+            return Ok(None);
+        };
+
+        let resolved = if let Some(namespace) = &call_info.namespace {
+            self.module_graph
+                .resolve_qualified(&uri, namespace, &call_info.name, call_info.kind)
+        } else {
+            self.module_graph
+                .resolve_unqualified(&uri, &call_info.name, call_info.kind)
+        };
+
+        let Some((_target_uri, symbol)) = resolved else {
+            return Ok(None);
+        };
+
+        let Some(params_text) = &symbol.params else {
+            return Ok(None);
+        };
+
+        let active_param = count_active_parameter(&text, &call_info, offset);
+
+        let sig_info = build_signature_info(&symbol, params_text);
+
+        Ok(Some(SignatureHelp {
+            signatures: vec![sig_info],
+            active_signature: Some(0),
+            active_parameter: Some(active_param),
         }))
     }
 }
@@ -1253,6 +1306,230 @@ fn format_hover_markdown(sym: &symbols::Symbol, source_uri: Option<&Uri>) -> Str
     }
 
     parts.join("\n\n")
+}
+
+// ── Signature help ──────────────────────────────────────────────────
+
+struct CallInfo {
+    namespace: Option<String>,
+    name: String,
+    kind: symbols::SymbolKind,
+    arg_list_start: sass_parser::text_range::TextSize,
+}
+
+fn find_call_at_offset(
+    root: &SyntaxNode,
+    offset: sass_parser::text_range::TextSize,
+) -> Option<CallInfo> {
+    let token = root.token_at_offset(offset).left_biased()?;
+
+    for node in token.parent()?.ancestors() {
+        match node.kind() {
+            SyntaxKind::FUNCTION_CALL => {
+                let arg_list = node.children().find(|c| c.kind() == SyntaxKind::ARG_LIST)?;
+                if !arg_list.text_range().contains(offset) {
+                    continue;
+                }
+
+                // Check if inside a NAMESPACE_REF parent
+                if let Some(ns_ref) = node
+                    .parent()
+                    .filter(|p| p.kind() == SyntaxKind::NAMESPACE_REF)
+                {
+                    let ns_name = ns_ref
+                        .children_with_tokens()
+                        .filter_map(rowan::NodeOrToken::into_token)
+                        .find(|t| t.kind() == SyntaxKind::IDENT)?
+                        .text()
+                        .to_string();
+                    let func_name = ident_text_range_of(&node)?.0;
+                    return Some(CallInfo {
+                        namespace: Some(ns_name),
+                        name: func_name,
+                        kind: symbols::SymbolKind::Function,
+                        arg_list_start: arg_list.text_range().start(),
+                    });
+                }
+
+                let func_name = ident_text_range_of(&node)?.0;
+                return Some(CallInfo {
+                    namespace: None,
+                    name: func_name,
+                    kind: symbols::SymbolKind::Function,
+                    arg_list_start: arg_list.text_range().start(),
+                });
+            }
+            SyntaxKind::INCLUDE_RULE => {
+                let arg_list = node.children().find(|c| c.kind() == SyntaxKind::ARG_LIST)?;
+                if !arg_list.text_range().contains(offset) {
+                    continue;
+                }
+
+                // Check if has a NAMESPACE_REF child
+                if let Some(ns_ref) = node
+                    .children()
+                    .find(|c| c.kind() == SyntaxKind::NAMESPACE_REF)
+                {
+                    let tokens: Vec<_> = ns_ref
+                        .children_with_tokens()
+                        .filter_map(rowan::NodeOrToken::into_token)
+                        .collect();
+                    let ns_name = tokens
+                        .iter()
+                        .find(|t| t.kind() == SyntaxKind::IDENT)?
+                        .text()
+                        .to_string();
+                    let dot_pos = tokens.iter().position(|t| t.kind() == SyntaxKind::DOT)?;
+                    let mixin_name = tokens[dot_pos + 1..]
+                        .iter()
+                        .find(|t| t.kind() == SyntaxKind::IDENT)?
+                        .text()
+                        .to_string();
+                    return Some(CallInfo {
+                        namespace: Some(ns_name),
+                        name: mixin_name,
+                        kind: symbols::SymbolKind::Mixin,
+                        arg_list_start: arg_list.text_range().start(),
+                    });
+                }
+
+                let mixin_name = nth_ident_text_range_of(&node, 1)?.0;
+                return Some(CallInfo {
+                    namespace: None,
+                    name: mixin_name,
+                    kind: symbols::SymbolKind::Mixin,
+                    arg_list_start: arg_list.text_range().start(),
+                });
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+#[allow(clippy::cast_possible_truncation)]
+fn count_active_parameter(
+    source: &str,
+    call_info: &CallInfo,
+    cursor: sass_parser::text_range::TextSize,
+) -> u32 {
+    let start = u32::from(call_info.arg_list_start) as usize;
+    let cursor_pos = u32::from(cursor) as usize;
+    if cursor_pos <= start {
+        return 0;
+    }
+
+    let slice = &source[start..cursor_pos];
+
+    // Count commas that are not inside nested parens/brackets
+    let mut depth = 0u32;
+    let mut commas = 0u32;
+    for ch in slice.chars() {
+        match ch {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth = depth.saturating_sub(1),
+            ',' if depth == 1 => commas += 1,
+            _ => {}
+        }
+    }
+    commas
+}
+
+fn build_signature_info(sym: &symbols::Symbol, params_text: &str) -> SignatureInformation {
+    let label = match sym.kind {
+        symbols::SymbolKind::Function => format!("@function {}{params_text}", sym.name),
+        symbols::SymbolKind::Mixin => format!("@mixin {}{params_text}", sym.name),
+        _ => {
+            return SignatureInformation {
+                label: sym.name.clone(),
+                documentation: None,
+                parameters: None,
+                active_parameter: None,
+            };
+        }
+    };
+
+    let parameters = parse_param_labels(&label, params_text);
+
+    let documentation = sym.doc.as_ref().map(|d| {
+        tower_lsp_server::ls_types::Documentation::MarkupContent(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: d.clone(),
+        })
+    });
+
+    SignatureInformation {
+        label,
+        documentation,
+        parameters: Some(parameters),
+        active_parameter: None,
+    }
+}
+
+#[allow(clippy::cast_possible_truncation)]
+fn parse_param_labels(signature: &str, params_text: &str) -> Vec<ParameterInformation> {
+    // Find the offset of params_text within the signature
+    let Some(params_offset) = signature.find(params_text) else {
+        return Vec::new();
+    };
+
+    // Strip outer parens
+    let inner = params_text
+        .strip_prefix('(')
+        .and_then(|s| s.strip_suffix(')'))
+        .unwrap_or(params_text);
+
+    if inner.is_empty() {
+        return Vec::new();
+    }
+
+    let mut result = Vec::new();
+    // +1 for the opening paren
+    let content_offset = params_offset + 1;
+
+    // Split by commas at depth 0 (handle nested parens in defaults)
+    let mut depth = 0u32;
+    let mut segment_start = 0;
+
+    for (i, ch) in inner.char_indices() {
+        match ch {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                let param = inner[segment_start..i].trim();
+                if !param.is_empty() {
+                    let abs_start = content_offset + segment_start;
+                    let abs_end = content_offset + segment_start + param.len();
+                    result.push(ParameterInformation {
+                        label: ParameterLabel::LabelOffsets([abs_start as u32, abs_end as u32]),
+                        documentation: None,
+                    });
+                }
+                segment_start = i + 1;
+                // Skip whitespace after comma
+                for (j, c) in inner[segment_start..].char_indices() {
+                    if c != ' ' {
+                        segment_start += j;
+                        break;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Last segment
+    let param = inner[segment_start..].trim();
+    if !param.is_empty() {
+        let abs_start = content_offset + segment_start;
+        let abs_end = content_offset + segment_start + param.len();
+        result.push(ParameterInformation {
+            label: ParameterLabel::LabelOffsets([abs_start as u32, abs_end as u32]),
+            documentation: None,
+        });
+    }
+
+    result
 }
 
 // ── Tests ───────────────────────────────────────────────────────────
@@ -2618,6 +2895,278 @@ mod tests {
 
         let resp = recv_msg(&mut reader).await;
         assert!(resp["result"].is_null());
+    }
+
+    // ── Signature help tests ────────────────────────────────────────
+
+    #[tokio::test]
+    async fn initialize_reports_signature_help_capability() {
+        let (mut reader, mut writer) = spawn_server();
+        let resp = do_initialize(&mut reader, &mut writer).await;
+
+        let sig_help = &resp["result"]["capabilities"]["signatureHelpProvider"];
+        assert!(!sig_help.is_null(), "should have signatureHelpProvider");
+        let triggers: Vec<&str> = sig_help["triggerCharacters"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(triggers, ["(", ","]);
+    }
+
+    #[tokio::test]
+    async fn signature_help_function_call() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "@function add($a, $b) { @return $a + $b; }\n.x { width: add(1px, ); }";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///sig_func.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader).await;
+
+        // Cursor after "add(1px, " → active param = 1
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 60,
+                "method": "textDocument/signatureHelp",
+                "params": {
+                    "textDocument": { "uri": "file:///sig_func.scss" },
+                    "position": { "line": 1, "character": 21 }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader).await;
+        let result = &resp["result"];
+        assert!(!result.is_null(), "should return signature help");
+        let sigs = result["signatures"].as_array().unwrap();
+        assert_eq!(sigs.len(), 1);
+        assert_eq!(sigs[0]["label"], "@function add($a, $b)");
+        assert_eq!(result["activeParameter"], 1);
+        let params = sigs[0]["parameters"].as_array().unwrap();
+        assert_eq!(params.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn signature_help_mixin_include() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss =
+            "@mixin btn($size, $color: red) { font-size: $size; }\n.a { @include btn(16px); }";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///sig_mixin.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader).await;
+
+        // Cursor after "@include btn(" → active param = 0
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 61,
+                "method": "textDocument/signatureHelp",
+                "params": {
+                    "textDocument": { "uri": "file:///sig_mixin.scss" },
+                    "position": { "line": 1, "character": 18 }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader).await;
+        let result = &resp["result"];
+        assert!(!result.is_null(), "should return signature help for mixin");
+        let sigs = result["signatures"].as_array().unwrap();
+        assert_eq!(sigs[0]["label"], "@mixin btn($size, $color: red)");
+        assert_eq!(result["activeParameter"], 0);
+        let params = sigs[0]["parameters"].as_array().unwrap();
+        assert_eq!(params.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn signature_help_active_parameter_tracking() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "@function f($a, $b, $c) { @return 0; }\n.x { width: f(1, 2, ); }";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///sig_active.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader).await;
+
+        // Cursor after "f(1, 2, " → active param = 2
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 62,
+                "method": "textDocument/signatureHelp",
+                "params": {
+                    "textDocument": { "uri": "file:///sig_active.scss" },
+                    "position": { "line": 1, "character": 20 }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader).await;
+        assert_eq!(resp["result"]["activeParameter"], 2);
+    }
+
+    #[tokio::test]
+    async fn signature_help_returns_null_outside_call() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "$color: red;";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///sig_null.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader).await;
+
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 63,
+                "method": "textDocument/signatureHelp",
+                "params": {
+                    "textDocument": { "uri": "file:///sig_null.scss" },
+                    "position": { "line": 0, "character": 5 }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader).await;
+        assert!(
+            resp["result"].is_null(),
+            "should be null outside function call"
+        );
+    }
+
+    #[tokio::test]
+    async fn signature_help_with_doc_comment() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "/// Scales a value\n@function scale($value, $factor: 2) { @return $value * $factor; }\n.x { width: scale(10px); }";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///sig_doc.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader).await;
+
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 64,
+                "method": "textDocument/signatureHelp",
+                "params": {
+                    "textDocument": { "uri": "file:///sig_doc.scss" },
+                    "position": { "line": 2, "character": 18 }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader).await;
+        let result = &resp["result"];
+        let sig = &result["signatures"][0];
+        assert_eq!(sig["label"], "@function scale($value, $factor: 2)");
+        let doc = &sig["documentation"];
+        assert_eq!(doc["value"], "Scales a value");
+    }
+
+    #[test]
+    fn parse_param_labels_offsets() {
+        let params = "($a, $b: 1px)";
+        let sig = format!("@function f{params}");
+        let result = super::parse_param_labels(&sig, params);
+        assert_eq!(result.len(), 2);
+        // "$a" starts at offset 12 (after "@function f("), ends at 14
+        if let ParameterLabel::LabelOffsets([s, e]) = &result[0].label {
+            assert_eq!(&sig[*s as usize..*e as usize], "$a");
+        } else {
+            panic!("expected LabelOffsets");
+        }
+        // "$b: 1px" starts at 16 (after "$a, "), ends at 23
+        if let ParameterLabel::LabelOffsets([s, e]) = &result[1].label {
+            assert_eq!(&sig[*s as usize..*e as usize], "$b: 1px");
+        } else {
+            panic!("expected LabelOffsets");
+        }
     }
 
     async fn do_initialize_with(
