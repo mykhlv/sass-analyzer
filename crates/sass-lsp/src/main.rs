@@ -493,7 +493,7 @@ impl LanguageServer for Backend {
                 })),
                 signature_help_provider: Some(SignatureHelpOptions {
                     trigger_characters: Some(vec!["(".into(), ",".into()]),
-                    retrigger_characters: None,
+                    retrigger_characters: Some(vec![")".into()]),
                     work_done_progress_options: WorkDoneProgressOptions::default(),
                 }),
                 document_link_provider: Some(DocumentLinkOptions {
@@ -705,14 +705,19 @@ impl LanguageServer for Backend {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
-        let (green, offset, file_symbols) = {
+        let (green, offset, file_symbols, line_index) = {
             let Some(doc) = self.documents.get(&uri) else {
                 return Ok(None);
             };
             let Some(offset) = lsp_position_to_offset(&doc.text, &doc.line_index, position) else {
                 return Ok(None);
             };
-            (doc.green.clone(), offset, doc.symbols.clone())
+            (
+                doc.green.clone(),
+                offset,
+                doc.symbols.clone(),
+                doc.line_index.clone(),
+            )
         };
 
         let root = SyntaxNode::new_root(green);
@@ -733,14 +738,16 @@ impl LanguageServer for Backend {
                 } else {
                     Some(&target_uri)
                 };
-                return Ok(Some(make_hover(&symbol, source)));
+                let range = Some(text_range_to_lsp(ref_info.range, &line_index));
+                return Ok(Some(make_hover(&symbol, source, range)));
             }
             return Ok(None);
         }
 
         // 2. Try definition at cursor (hovering on a declaration name)
         if let Some(symbol) = find_definition_at_offset(&file_symbols, offset) {
-            return Ok(Some(make_hover(symbol, None)));
+            let range = Some(text_range_to_lsp(symbol.selection_range, &line_index));
+            return Ok(Some(make_hover(symbol, None, range)));
         }
 
         Ok(None)
@@ -1002,13 +1009,16 @@ impl LanguageServer for Backend {
                         tower_lsp_server::ls_types::SymbolKind::CLASS
                     }
                 };
+                let container_name = uri.to_file_path().and_then(|p| {
+                    p.file_name().map(|n| n.to_string_lossy().into_owned())
+                });
                 Some(SymbolInformation {
                     name: sym.name,
                     kind,
                     tags: None,
                     deprecated: None,
                     location: Location { uri, range },
-                    container_name: None,
+                    container_name,
                 })
             })
             .collect();
@@ -1372,13 +1382,13 @@ fn find_definition_at_offset(
         .find(|s| s.selection_range.contains(offset))
 }
 
-fn make_hover(sym: &symbols::Symbol, source_uri: Option<&Uri>) -> Hover {
+fn make_hover(sym: &symbols::Symbol, source_uri: Option<&Uri>, range: Option<Range>) -> Hover {
     Hover {
         contents: HoverContents::Markup(MarkupContent {
             kind: MarkupKind::Markdown,
             value: format_hover_markdown(sym, source_uri),
         }),
-        range: None,
+        range,
     }
 }
 
