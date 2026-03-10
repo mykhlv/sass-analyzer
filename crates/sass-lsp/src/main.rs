@@ -405,6 +405,14 @@ async fn run_worker(
                             .await;
                     }
                 }
+                // Tell VS Code to re-request semantic tokens for all open editors.
+                // Without this, tokens requested before parsing finishes get a null
+                // response and are never refreshed.  Fire-and-forget so the
+                // worker loop is never blocked by a slow or absent client.
+                {
+                    let c = client.clone();
+                    tokio::spawn(async move { let _ = c.semantic_tokens_refresh().await; });
+                }
                 has_pending = false;
             }
         }
@@ -1670,8 +1678,8 @@ mod tests {
         writer.flush().await.unwrap();
     }
 
-    /// Read one JSON-RPC message from the stream (blocking).
-    async fn recv_msg(reader: &mut (impl AsyncReadExt + Unpin)) -> Value {
+    /// Read one raw JSON-RPC message from the stream.
+    async fn recv_msg_raw(reader: &mut (impl AsyncReadExt + Unpin)) -> Value {
         let mut header_buf = Vec::new();
         // Read until we find \r\n\r\n
         loop {
@@ -1693,6 +1701,32 @@ mod tests {
         let mut body = vec![0u8; len];
         reader.read_exact(&mut body).await.unwrap();
         serde_json::from_slice(&body).unwrap()
+    }
+
+    /// Read the next client-facing message, auto-responding to any
+    /// server→client requests (e.g. `workspace/semanticTokens/refresh`).
+    async fn recv_msg(
+        reader: &mut (impl AsyncReadExt + Unpin),
+        writer: &mut (impl AsyncWriteExt + Unpin),
+    ) -> Value {
+        loop {
+            let msg = recv_msg_raw(reader).await;
+            // Server→client request: has both "id" and "method"
+            if msg.get("method").is_some() && msg.get("id").is_some() {
+                // Auto-respond with null result
+                send_msg(
+                    writer,
+                    &serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": msg["id"],
+                        "result": null
+                    }),
+                )
+                .await;
+                continue;
+            }
+            return msg;
+        }
     }
 
     /// Spawn the LSP server on in-memory duplex streams, return client-side handles.
@@ -1736,7 +1770,7 @@ mod tests {
             }),
         )
         .await;
-        let resp = recv_msg(reader).await;
+        let resp = recv_msg(reader, writer).await;
 
         send_msg(
             writer,
@@ -1805,7 +1839,7 @@ mod tests {
         .await;
 
         // Worker debounce fires, publishes diagnostics
-        let notif = recv_msg(&mut reader).await;
+        let notif = recv_msg(&mut reader, &mut writer).await;
         assert_eq!(notif["method"], "textDocument/publishDiagnostics");
         let diags = notif["params"]["diagnostics"].as_array().unwrap();
         assert!(diags.is_empty(), "valid SCSS should have 0 diagnostics");
@@ -1833,7 +1867,7 @@ mod tests {
         )
         .await;
 
-        let notif = recv_msg(&mut reader).await;
+        let notif = recv_msg(&mut reader, &mut writer).await;
         assert_eq!(notif["method"], "textDocument/publishDiagnostics");
         let diags = notif["params"]["diagnostics"].as_array().unwrap();
         assert!(!diags.is_empty(), "invalid SCSS should have diagnostics");
@@ -1863,7 +1897,7 @@ mod tests {
         .await;
 
         // Wait for diagnostics (means parse is done)
-        let _diag = recv_msg(&mut reader).await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
 
         send_msg(
             &mut writer,
@@ -1878,7 +1912,7 @@ mod tests {
         )
         .await;
 
-        let resp = recv_msg(&mut reader).await;
+        let resp = recv_msg(&mut reader, &mut writer).await;
         let data = resp["result"]["data"].as_array().unwrap();
         // Each token is 5 u32s; expect: $color(decl), color(prop), $color(ref)
         assert_eq!(data.len() % 5, 0, "data length must be multiple of 5");
@@ -1917,7 +1951,7 @@ mod tests {
             }),
         )
         .await;
-        let _ = recv_msg(&mut reader).await; // open diagnostics
+        let _ = recv_msg(&mut reader, &mut writer).await; // open diagnostics
 
         send_msg(
             &mut writer,
@@ -1931,7 +1965,7 @@ mod tests {
         )
         .await;
 
-        let notif = recv_msg(&mut reader).await;
+        let notif = recv_msg(&mut reader, &mut writer).await;
         assert_eq!(notif["method"], "textDocument/publishDiagnostics");
         let diags = notif["params"]["diagnostics"].as_array().unwrap();
         assert!(diags.is_empty(), "close should clear diagnostics");
@@ -1963,7 +1997,7 @@ mod tests {
         // Advance past debounce to get initial diagnostics
         tokio::time::advance(Duration::from_millis(100)).await;
         tokio::task::yield_now().await;
-        let _ = recv_msg(&mut reader).await;
+        let _ = recv_msg(&mut reader, &mut writer).await;
 
         // Send 5 rapid changes within 20ms (well under 50ms debounce)
         for v in 2..=6 {
@@ -1988,7 +2022,7 @@ mod tests {
         tokio::task::yield_now().await;
 
         // Should get exactly one diagnostics notification (coalesced)
-        let notif = recv_msg(&mut reader).await;
+        let notif = recv_msg(&mut reader, &mut writer).await;
         assert_eq!(notif["method"], "textDocument/publishDiagnostics");
         // Version should be the latest (6)
         assert_eq!(notif["params"]["version"], 6);
@@ -2017,7 +2051,7 @@ mod tests {
         )
         .await;
 
-        let _diag = recv_msg(&mut reader).await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
 
         send_msg(
             &mut writer,
@@ -2032,7 +2066,7 @@ mod tests {
         )
         .await;
 
-        let resp = recv_msg(&mut reader).await;
+        let resp = recv_msg(&mut reader, &mut writer).await;
         let result = resp["result"].as_array().unwrap();
         assert_eq!(result.len(), 2, "expected 2 symbols: $primary and btn");
 
@@ -2066,7 +2100,7 @@ mod tests {
             }),
         )
         .await;
-        let _diag = recv_msg(&mut reader).await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
 
         // Cursor on $color reference at line 1, character 15
         // Line 1: ".btn { color: $color; }"
@@ -2085,7 +2119,7 @@ mod tests {
         )
         .await;
 
-        let resp = recv_msg(&mut reader).await;
+        let resp = recv_msg(&mut reader, &mut writer).await;
         let result = &resp["result"];
         assert_eq!(result["uri"], "file:///def.scss");
         // Definition: $color at line 0, characters 0..6
@@ -2117,7 +2151,7 @@ mod tests {
             }),
         )
         .await;
-        let _diag = recv_msg(&mut reader).await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
 
         // Cursor on "btn" in @include btn at line 1
         // Line 1: ".card { @include btn; }"
@@ -2136,7 +2170,7 @@ mod tests {
         )
         .await;
 
-        let resp = recv_msg(&mut reader).await;
+        let resp = recv_msg(&mut reader, &mut writer).await;
         let result = &resp["result"];
         assert_eq!(result["uri"], "file:///mixin.scss");
         // @mixin btn → name "btn" starts at character 7
@@ -2166,7 +2200,7 @@ mod tests {
             }),
         )
         .await;
-        let _diag = recv_msg(&mut reader).await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
 
         // Cursor on "double" call at line 1
         // Line 1: ".x { width: double(5px); }"
@@ -2185,7 +2219,7 @@ mod tests {
         )
         .await;
 
-        let resp = recv_msg(&mut reader).await;
+        let resp = recv_msg(&mut reader, &mut writer).await;
         let result = &resp["result"];
         assert_eq!(result["uri"], "file:///func.scss");
         // @function double → name "double" at character 10
@@ -2215,7 +2249,7 @@ mod tests {
             }),
         )
         .await;
-        let _diag = recv_msg(&mut reader).await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
 
         // Cursor on $color declaration itself (should return null)
         send_msg(
@@ -2232,7 +2266,7 @@ mod tests {
         )
         .await;
 
-        let resp = recv_msg(&mut reader).await;
+        let resp = recv_msg(&mut reader, &mut writer).await;
         assert!(
             resp["result"].is_null(),
             "definition on a decl should be null"
@@ -2261,7 +2295,7 @@ mod tests {
             }),
         )
         .await;
-        let _diag = recv_msg(&mut reader).await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
 
         send_msg(
             &mut writer,
@@ -2277,7 +2311,7 @@ mod tests {
         )
         .await;
 
-        let resp = recv_msg(&mut reader).await;
+        let resp = recv_msg(&mut reader, &mut writer).await;
         let items = resp["result"].as_array().unwrap();
         assert_eq!(
             items.len(),
@@ -2313,7 +2347,7 @@ mod tests {
         )
         .await;
 
-        let resp = recv_msg(&mut reader).await;
+        let resp = recv_msg(&mut reader, &mut writer).await;
         assert!(
             resp["result"].is_null(),
             "completion for unknown file should be null"
@@ -2342,7 +2376,7 @@ mod tests {
             }),
         )
         .await;
-        let _diag = recv_msg(&mut reader).await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
 
         send_msg(
             &mut writer,
@@ -2358,7 +2392,7 @@ mod tests {
         )
         .await;
 
-        let resp = recv_msg(&mut reader).await;
+        let resp = recv_msg(&mut reader, &mut writer).await;
         let items = resp["result"].as_array().unwrap();
         assert_eq!(items.len(), 4, "expected 4 completions");
 
@@ -2401,7 +2435,7 @@ mod tests {
             }),
         )
         .await;
-        let _diag = recv_msg(&mut reader).await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
 
         send_msg(
             &mut writer,
@@ -2417,7 +2451,7 @@ mod tests {
         )
         .await;
 
-        let resp = recv_msg(&mut reader).await;
+        let resp = recv_msg(&mut reader, &mut writer).await;
         let content = resp["result"]["contents"]["value"].as_str().unwrap();
         assert!(content.contains("$color"), "hover should show variable name");
         assert!(content.contains("red"), "hover should show value");
@@ -2445,7 +2479,7 @@ mod tests {
             }),
         )
         .await;
-        let _diag = recv_msg(&mut reader).await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
 
         // Hover on the $ of $primary definition
         send_msg(
@@ -2462,7 +2496,7 @@ mod tests {
         )
         .await;
 
-        let resp = recv_msg(&mut reader).await;
+        let resp = recv_msg(&mut reader, &mut writer).await;
         let content = resp["result"]["contents"]["value"].as_str().unwrap();
         assert!(content.contains("$primary"), "hover on def should show name");
         assert!(content.contains("blue"), "hover on def should show value");
@@ -2490,7 +2524,7 @@ mod tests {
             }),
         )
         .await;
-        let _diag = recv_msg(&mut reader).await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
 
         // Hover on "btn" in @include btn(16px)
         send_msg(
@@ -2507,7 +2541,7 @@ mod tests {
         )
         .await;
 
-        let resp = recv_msg(&mut reader).await;
+        let resp = recv_msg(&mut reader, &mut writer).await;
         let content = resp["result"]["contents"]["value"].as_str().unwrap();
         assert!(content.contains("@mixin"), "hover should show @mixin");
         assert!(content.contains("btn"), "hover should show mixin name");
@@ -2535,7 +2569,7 @@ mod tests {
             }),
         )
         .await;
-        let _diag = recv_msg(&mut reader).await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
 
         // Hover on empty line
         send_msg(
@@ -2552,7 +2586,7 @@ mod tests {
         )
         .await;
 
-        let resp = recv_msg(&mut reader).await;
+        let resp = recv_msg(&mut reader, &mut writer).await;
         assert!(resp["result"].is_null(), "hover on empty space should be null");
     }
 
@@ -2578,7 +2612,7 @@ mod tests {
             }),
         )
         .await;
-        let _diag = recv_msg(&mut reader).await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
 
         send_msg(
             &mut writer,
@@ -2594,7 +2628,7 @@ mod tests {
         )
         .await;
 
-        let resp = recv_msg(&mut reader).await;
+        let resp = recv_msg(&mut reader, &mut writer).await;
         let content = resp["result"]["contents"]["value"].as_str().unwrap();
         assert!(content.contains("primary color"), "hover should show doc comment");
     }
@@ -2638,7 +2672,7 @@ mod tests {
             }),
         )
         .await;
-        let _diag = recv_msg(&mut reader).await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
 
         // References on $color usage at line 1
         send_msg(
@@ -2656,7 +2690,7 @@ mod tests {
         )
         .await;
 
-        let resp = recv_msg(&mut reader).await;
+        let resp = recv_msg(&mut reader, &mut writer).await;
         let locs = resp["result"].as_array().unwrap();
         // Should find 2 references (not including declaration)
         assert_eq!(locs.len(), 2, "expected 2 references");
@@ -2684,7 +2718,7 @@ mod tests {
             }),
         )
         .await;
-        let _diag = recv_msg(&mut reader).await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
 
         send_msg(
             &mut writer,
@@ -2701,7 +2735,7 @@ mod tests {
         )
         .await;
 
-        let resp = recv_msg(&mut reader).await;
+        let resp = recv_msg(&mut reader, &mut writer).await;
         let locs = resp["result"].as_array().unwrap();
         assert_eq!(locs.len(), 2, "expected 2: declaration + 1 ref");
     }
@@ -2728,7 +2762,7 @@ mod tests {
             }),
         )
         .await;
-        let _diag = recv_msg(&mut reader).await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
 
         send_msg(
             &mut writer,
@@ -2745,7 +2779,7 @@ mod tests {
         )
         .await;
 
-        let resp = recv_msg(&mut reader).await;
+        let resp = recv_msg(&mut reader, &mut writer).await;
         let locs = resp["result"].as_array().unwrap();
         assert_eq!(locs.len(), 2, "expected 2 mixin references");
     }
@@ -2772,7 +2806,7 @@ mod tests {
             }),
         )
         .await;
-        let _diag = recv_msg(&mut reader).await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
 
         send_msg(
             &mut writer,
@@ -2789,7 +2823,7 @@ mod tests {
         )
         .await;
 
-        let resp = recv_msg(&mut reader).await;
+        let resp = recv_msg(&mut reader, &mut writer).await;
         assert!(resp["result"].is_null());
     }
 
@@ -2815,7 +2849,7 @@ mod tests {
             }),
         )
         .await;
-        let _diag = recv_msg(&mut reader).await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
 
         send_msg(
             &mut writer,
@@ -2831,7 +2865,7 @@ mod tests {
         )
         .await;
 
-        let resp = recv_msg(&mut reader).await;
+        let resp = recv_msg(&mut reader, &mut writer).await;
         let result = &resp["result"];
         assert_eq!(result["placeholder"], "color");
     }
@@ -2858,7 +2892,7 @@ mod tests {
             }),
         )
         .await;
-        let _diag = recv_msg(&mut reader).await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
 
         send_msg(
             &mut writer,
@@ -2874,7 +2908,7 @@ mod tests {
         )
         .await;
 
-        let resp = recv_msg(&mut reader).await;
+        let resp = recv_msg(&mut reader, &mut writer).await;
         let result = &resp["result"];
         assert_eq!(result["placeholder"], "color");
     }
@@ -2901,7 +2935,7 @@ mod tests {
             }),
         )
         .await;
-        let _diag = recv_msg(&mut reader).await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
 
         send_msg(
             &mut writer,
@@ -2918,7 +2952,7 @@ mod tests {
         )
         .await;
 
-        let resp = recv_msg(&mut reader).await;
+        let resp = recv_msg(&mut reader, &mut writer).await;
         let changes = &resp["result"]["changes"]["file:///rename.scss"];
         let edits = changes.as_array().unwrap();
         assert!(edits.len() >= 2, "expected at least 2 edits (decl + ref)");
@@ -2949,7 +2983,7 @@ mod tests {
             }),
         )
         .await;
-        let _diag = recv_msg(&mut reader).await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
 
         send_msg(
             &mut writer,
@@ -2966,7 +3000,7 @@ mod tests {
         )
         .await;
 
-        let resp = recv_msg(&mut reader).await;
+        let resp = recv_msg(&mut reader, &mut writer).await;
         let changes = &resp["result"]["changes"]["file:///rename_mixin.scss"];
         let edits = changes.as_array().unwrap();
         assert!(edits.len() >= 2, "expected at least 2 edits");
@@ -2997,7 +3031,7 @@ mod tests {
             }),
         )
         .await;
-        let _diag = recv_msg(&mut reader).await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
 
         send_msg(
             &mut writer,
@@ -3014,7 +3048,7 @@ mod tests {
         )
         .await;
 
-        let resp = recv_msg(&mut reader).await;
+        let resp = recv_msg(&mut reader, &mut writer).await;
         assert!(resp["result"].is_null());
     }
 
@@ -3058,7 +3092,7 @@ mod tests {
             }),
         )
         .await;
-        let _diag = recv_msg(&mut reader).await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
 
         // Cursor after "add(1px, " → active param = 1
         send_msg(
@@ -3075,7 +3109,7 @@ mod tests {
         )
         .await;
 
-        let resp = recv_msg(&mut reader).await;
+        let resp = recv_msg(&mut reader, &mut writer).await;
         let result = &resp["result"];
         assert!(!result.is_null(), "should return signature help");
         let sigs = result["signatures"].as_array().unwrap();
@@ -3109,7 +3143,7 @@ mod tests {
             }),
         )
         .await;
-        let _diag = recv_msg(&mut reader).await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
 
         // Cursor after "@include btn(" → active param = 0
         send_msg(
@@ -3126,7 +3160,7 @@ mod tests {
         )
         .await;
 
-        let resp = recv_msg(&mut reader).await;
+        let resp = recv_msg(&mut reader, &mut writer).await;
         let result = &resp["result"];
         assert!(!result.is_null(), "should return signature help for mixin");
         let sigs = result["signatures"].as_array().unwrap();
@@ -3158,7 +3192,7 @@ mod tests {
             }),
         )
         .await;
-        let _diag = recv_msg(&mut reader).await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
 
         // Cursor after "f(1, 2, " → active param = 2
         send_msg(
@@ -3175,7 +3209,7 @@ mod tests {
         )
         .await;
 
-        let resp = recv_msg(&mut reader).await;
+        let resp = recv_msg(&mut reader, &mut writer).await;
         assert_eq!(resp["result"]["activeParameter"], 2);
     }
 
@@ -3201,7 +3235,7 @@ mod tests {
             }),
         )
         .await;
-        let _diag = recv_msg(&mut reader).await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
 
         send_msg(
             &mut writer,
@@ -3217,7 +3251,7 @@ mod tests {
         )
         .await;
 
-        let resp = recv_msg(&mut reader).await;
+        let resp = recv_msg(&mut reader, &mut writer).await;
         assert!(
             resp["result"].is_null(),
             "should be null outside function call"
@@ -3246,7 +3280,7 @@ mod tests {
             }),
         )
         .await;
-        let _diag = recv_msg(&mut reader).await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
 
         send_msg(
             &mut writer,
@@ -3262,7 +3296,7 @@ mod tests {
         )
         .await;
 
-        let resp = recv_msg(&mut reader).await;
+        let resp = recv_msg(&mut reader, &mut writer).await;
         let result = &resp["result"];
         let sig = &result["signatures"][0];
         assert_eq!(sig["label"], "@function scale($value, $factor: 2)");
@@ -3322,7 +3356,7 @@ mod tests {
             }),
         )
         .await;
-        let _diag = recv_msg(&mut reader).await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
 
         // Search for "btn"
         send_msg(
@@ -3336,7 +3370,7 @@ mod tests {
         )
         .await;
 
-        let resp = recv_msg(&mut reader).await;
+        let resp = recv_msg(&mut reader, &mut writer).await;
         let result = resp["result"].as_array().unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0]["name"], "btn");
@@ -3364,7 +3398,7 @@ mod tests {
             }),
         )
         .await;
-        let _diag = recv_msg(&mut reader).await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
 
         send_msg(
             &mut writer,
@@ -3377,7 +3411,7 @@ mod tests {
         )
         .await;
 
-        let resp = recv_msg(&mut reader).await;
+        let resp = recv_msg(&mut reader, &mut writer).await;
         let result = resp["result"].as_array().unwrap();
         assert_eq!(result.len(), 2, "empty query should return all symbols");
     }
@@ -3404,7 +3438,7 @@ mod tests {
             }),
         )
         .await;
-        let _diag = recv_msg(&mut reader).await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
 
         // "rg" should fuzzy-match "responsive-grid" but not "simple"
         send_msg(
@@ -3418,7 +3452,7 @@ mod tests {
         )
         .await;
 
-        let resp = recv_msg(&mut reader).await;
+        let resp = recv_msg(&mut reader, &mut writer).await;
         let result = resp["result"].as_array().unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0]["name"], "responsive-grid");
@@ -3446,7 +3480,7 @@ mod tests {
             }),
         )
         .await;
-        let _diag = recv_msg(&mut reader).await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
 
         send_msg(
             &mut writer,
@@ -3459,7 +3493,7 @@ mod tests {
         )
         .await;
 
-        let resp = recv_msg(&mut reader).await;
+        let resp = recv_msg(&mut reader, &mut writer).await;
         assert!(resp["result"].is_null(), "no match should return null");
     }
 
@@ -3491,7 +3525,7 @@ mod tests {
             }),
         )
         .await;
-        let resp = recv_msg(reader).await;
+        let resp = recv_msg(reader, writer).await;
 
         send_msg(
             writer,
