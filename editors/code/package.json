@@ -16,6 +16,13 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "semanticTokenTypes": [
+      {
+        "id": "mixin",
+        "superType": "function",
+        "description": "A Sass mixin declaration or @include reference."
+      }
+    ],
     "configuration": {
       "title": "sass-analyzer",
       "properties": {

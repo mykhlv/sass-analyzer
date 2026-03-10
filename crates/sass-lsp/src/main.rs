@@ -37,7 +37,7 @@ const DEBOUNCE_MS: u64 = 50;
 // Semantic token type indices (must match legend order in initialize)
 const TOK_VARIABLE: u32 = 0;
 const TOK_FUNCTION: u32 = 1;
-const TOK_MACRO: u32 = 2;
+const TOK_MIXIN: u32 = 2;
 const TOK_PARAMETER: u32 = 3;
 const TOK_PROPERTY: u32 = 4;
 const TOK_TYPE: u32 = 5;
@@ -222,7 +222,7 @@ fn collect_semantic_tokens(root: &SyntaxNode) -> Vec<RawSemanticToken> {
                     tokens.push(RawSemanticToken {
                         start: ident.text_range().start().into(),
                         len: utf16_len(ident.text()),
-                        token_type: TOK_MACRO,
+                        token_type: TOK_MIXIN,
                         modifiers: MOD_DECLARATION,
                     });
                 }
@@ -232,7 +232,7 @@ fn collect_semantic_tokens(root: &SyntaxNode) -> Vec<RawSemanticToken> {
                     tokens.push(RawSemanticToken {
                         start: ident.text_range().start().into(),
                         len: utf16_len(ident.text()),
-                        token_type: TOK_MACRO,
+                        token_type: TOK_MIXIN,
                         modifiers: 0,
                     });
                 }
@@ -461,7 +461,7 @@ impl LanguageServer for Backend {
                                 token_types: vec![
                                     SemanticTokenType::VARIABLE,
                                     SemanticTokenType::FUNCTION,
-                                    SemanticTokenType::MACRO,
+                                    SemanticTokenType::new("mixin"),
                                     SemanticTokenType::PARAMETER,
                                     SemanticTokenType::PROPERTY,
                                     SemanticTokenType::TYPE,
@@ -1805,7 +1805,7 @@ mod tests {
             [
                 "variable",
                 "function",
-                "macro",
+                "mixin",
                 "parameter",
                 "property",
                 "type"
