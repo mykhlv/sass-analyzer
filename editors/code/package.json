@@ -11,7 +11,9 @@
   "categories": [
     "Programming Languages"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onLanguage:scss"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "configuration": {
@@ -31,6 +33,29 @@
           "type": "string",
           "default": "",
           "description": "Override the path to the sass-lsp binary. Leave empty to use the bundled binary."
+        },
+        "sass-analyzer.loadPaths": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Additional directories to search for @use and @forward imports. Paths are relative to workspace root. Supports ${workspaceFolder}."
+        },
+        "sass-analyzer.importAliases": {
+          "type": "object",
+          "default": {},
+          "description": "Map of import alias prefixes to target directories (string or array of strings). Paths are relative to workspace root. Supports ${workspaceFolder}. For monorepos, use arrays to map one alias to different directories per project.",
+          "additionalProperties": {
+            "oneOf": [
+              { "type": "string" },
+              { "type": "array", "items": { "type": "string" } }
+            ]
+          }
+        },
+        "sass-analyzer.prependImports": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Module paths to implicitly @use as * in every file (e.g. for Vite additionalData). Supports ${workspaceFolder}."
         }
       }
     }

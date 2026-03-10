@@ -27,6 +27,18 @@ pub enum BuiltinModule {
 }
 
 impl BuiltinModule {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Math => "math",
+            Self::Color => "color",
+            Self::List => "list",
+            Self::Map => "map",
+            Self::Selector => "selector",
+            Self::SassString => "string",
+            Self::Meta => "meta",
+        }
+    }
+
     fn from_name(name: &str) -> Option<Self> {
         match name {
             "math" => Some(Self::Math),
@@ -65,6 +77,9 @@ impl std::error::Error for ResolveError {}
 pub struct ModuleResolver<V: Vfs = OsFileSystem> {
     vfs: V,
     load_paths: Vec<PathBuf>,
+    /// `(prefix, absolute_targets)` sorted by prefix length descending (longest match first).
+    import_aliases: Vec<(String, Vec<PathBuf>)>,
+    node_modules_enabled: bool,
 }
 
 impl ModuleResolver {
@@ -72,6 +87,8 @@ impl ModuleResolver {
         Self {
             vfs: OsFileSystem,
             load_paths: Vec::new(),
+            import_aliases: Vec::new(),
+            node_modules_enabled: false,
         }
     }
 }
@@ -87,11 +104,27 @@ impl<V: Vfs> ModuleResolver<V> {
         Self {
             vfs,
             load_paths: Vec::new(),
+            import_aliases: Vec::new(),
+            node_modules_enabled: false,
         }
     }
 
     pub fn add_load_path(&mut self, path: impl Into<PathBuf>) {
         self.load_paths.push(path.into());
+    }
+
+    /// Register an import alias. `targets` must be absolute paths.
+    /// For monorepos, multiple targets can map to the same prefix;
+    /// the resolver picks the target closest to the importing file.
+    pub fn add_import_alias(&mut self, prefix: String, targets: Vec<PathBuf>) {
+        self.import_aliases.push((prefix, targets));
+        // Longest prefix first so `@sass/sub` matches before `@sass`.
+        self.import_aliases
+            .sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+    }
+
+    pub fn enable_node_modules(&mut self) {
+        self.node_modules_enabled = true;
     }
 
     /// Resolve a module specifier relative to a base file.
@@ -114,15 +147,27 @@ impl<V: Vfs> ModuleResolver<V> {
             return Ok(ResolvedModule::Css(spec.to_owned()));
         }
 
-        // 3. Resolve relative to the base file's directory
+        // 3. Import aliases
+        if let Some(path) = self.resolve_alias(spec, base) {
+            return Ok(ResolvedModule::File(path));
+        }
+
+        // 4. Resolve relative to the base file's directory
         let base_dir = base.parent().unwrap_or(Path::new("."));
         if let Some(path) = self.resolve_in_dir(base_dir, spec) {
             return Ok(ResolvedModule::File(path));
         }
 
-        // 4. Try each load path
+        // 5. Try each load path
         for load_path in &self.load_paths {
             if let Some(path) = self.resolve_in_dir(load_path, spec) {
+                return Ok(ResolvedModule::File(path));
+            }
+        }
+
+        // 6. Walk up node_modules
+        if self.node_modules_enabled {
+            if let Some(path) = self.resolve_node_modules(spec, base) {
                 return Ok(ResolvedModule::File(path));
             }
         }
@@ -146,6 +191,21 @@ impl<V: Vfs> ModuleResolver<V> {
             None => dir.to_path_buf(),
         };
 
+        // If spec already has .scss extension, try direct path + partial first.
+        if Path::new(stem)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("scss"))
+        {
+            let direct = search_dir.join(stem);
+            if self.vfs.file_exists(&direct) {
+                return Some(direct);
+            }
+            let partial = search_dir.join(format!("_{stem}"));
+            if self.vfs.file_exists(&partial) {
+                return Some(partial);
+            }
+        }
+
         // Candidate order per Sass spec:
         // 1. {stem}.scss
         // 2. _{stem}.scss
@@ -160,4 +220,57 @@ impl<V: Vfs> ModuleResolver<V> {
 
         candidates.into_iter().find(|c| self.vfs.file_exists(c))
     }
+
+    fn resolve_alias(&self, spec: &str, base: &Path) -> Option<PathBuf> {
+        for (prefix, targets) in &self.import_aliases {
+            let Some(rest) = spec.strip_prefix(prefix.as_str()) else {
+                continue;
+            };
+            // Guard: "@sass" must not match "@sass-utils"
+            if !rest.is_empty() && !rest.starts_with('/') {
+                continue;
+            }
+            let rest = rest.strip_prefix('/').unwrap_or(rest);
+
+            if targets.len() == 1 {
+                return self.resolve_in_dir(&targets[0], rest);
+            }
+
+            // Multiple targets: pick the one closest to the importing file.
+            let base_dir = base.parent().unwrap_or(Path::new("."));
+            let best = targets
+                .iter()
+                .max_by_key(|t| common_prefix_len(t, base_dir));
+            if let Some(target) = best {
+                if let Some(path) = self.resolve_in_dir(target, rest) {
+                    return Some(path);
+                }
+            }
+            // Fallback: try all targets in order.
+            for target in targets {
+                if let Some(path) = self.resolve_in_dir(target, rest) {
+                    return Some(path);
+                }
+            }
+        }
+        None
+    }
+
+    fn resolve_node_modules(&self, spec: &str, base: &Path) -> Option<PathBuf> {
+        let mut dir = base.parent()?;
+        loop {
+            let nm = dir.join("node_modules");
+            if let Some(path) = self.resolve_in_dir(&nm, spec) {
+                return Some(path);
+            }
+            dir = dir.parent()?;
+        }
+    }
+}
+
+fn common_prefix_len(a: &Path, b: &Path) -> usize {
+    a.components()
+        .zip(b.components())
+        .take_while(|(x, y)| x == y)
+        .count()
 }

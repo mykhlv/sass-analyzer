@@ -26,6 +26,8 @@ pub struct Symbol {
     pub range: TextRange,
     pub selection_range: TextRange,
     pub params: Option<String>,
+    pub value: Option<String>,
+    pub doc: Option<String>,
 }
 
 #[allow(dead_code)]
@@ -77,6 +79,8 @@ fn collect_variable_decl(node: &SyntaxNode, symbols: &mut FileSymbols) {
         range: node.text_range(),
         selection_range: sel_range,
         params: None,
+        value: extract_variable_value(node),
+        doc: extract_doc_comment(node),
     });
 }
 
@@ -90,6 +94,8 @@ fn collect_function_rule(node: &SyntaxNode, symbols: &mut FileSymbols) {
         range: node.text_range(),
         selection_range: ident.text_range(),
         params: extract_param_text(node),
+        value: None,
+        doc: extract_doc_comment(node),
     });
 }
 
@@ -103,6 +109,8 @@ fn collect_mixin_rule(node: &SyntaxNode, symbols: &mut FileSymbols) {
         range: node.text_range(),
         selection_range: ident.text_range(),
         params: extract_param_text(node),
+        value: None,
+        doc: extract_doc_comment(node),
     });
 }
 
@@ -133,6 +141,8 @@ fn collect_placeholder_selector(node: &SyntaxNode, symbols: &mut FileSymbols) {
         range: node.text_range(),
         selection_range: sel_range,
         params: None,
+        value: None,
+        doc: extract_doc_comment(node),
     });
 }
 
@@ -251,6 +261,75 @@ fn extract_param_text(node: &SyntaxNode) -> Option<String> {
         .map(|pl| pl.text().to_string())
 }
 
+/// Extract the value portion of a `VARIABLE_DECL` (text after `:`, before `;`).
+fn extract_variable_value(node: &SyntaxNode) -> Option<String> {
+    let text = node.text().to_string();
+    let colon_pos = text.find(':')?;
+    let value = text[colon_pos + 1..].trim();
+    let value = value.strip_suffix(';').unwrap_or(value).trim();
+    if value.is_empty() {
+        return None;
+    }
+    if value.len() > 200 {
+        let end = value
+            .char_indices()
+            .nth(200)
+            .map_or(value.len(), |(i, _)| i);
+        Some(format!("{}…", &value[..end]))
+    } else {
+        Some(value.to_owned())
+    }
+}
+
+/// Extract `///` doc comments from leading trivia of a declaration node.
+/// In our CST, comments are children of the declaration node (not siblings).
+fn extract_doc_comment(node: &SyntaxNode) -> Option<String> {
+    // For placeholder selectors, the comment is on the parent RULE_SET
+    let ancestor;
+    let target = if node.kind() == SyntaxKind::SIMPLE_SELECTOR {
+        ancestor = node
+            .ancestors()
+            .find(|n| n.kind() == SyntaxKind::RULE_SET)?;
+        &ancestor
+    } else {
+        node
+    };
+
+    let mut comments = Vec::new();
+    let mut had_blank_line = false;
+
+    for element in target.children_with_tokens() {
+        match element {
+            rowan::NodeOrToken::Token(token) => match token.kind() {
+                SyntaxKind::SINGLE_LINE_COMMENT => {
+                    if had_blank_line {
+                        // Blank line between comment and declaration means it's not a doc comment
+                        comments.clear();
+                        had_blank_line = false;
+                    }
+                    if let Some(doc) = token.text().strip_prefix("///") {
+                        comments.push(doc.strip_prefix(' ').unwrap_or(doc).to_owned());
+                    } else {
+                        comments.clear();
+                    }
+                }
+                SyntaxKind::WHITESPACE => {
+                    if token.text().chars().filter(|&c| c == '\n').count() > 1 {
+                        had_blank_line = true;
+                    }
+                }
+                _ => break, // Hit actual content (DOLLAR, IDENT, AT_KEYWORD, etc.)
+            },
+            rowan::NodeOrToken::Node(_) => break,
+        }
+    }
+
+    if comments.is_empty() || had_blank_line {
+        return None;
+    }
+    Some(comments.join("\n"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -269,6 +348,7 @@ mod tests {
         assert_eq!(def.name, "color");
         assert_eq!(def.kind, SymbolKind::Variable);
         assert!(def.params.is_none());
+        assert_eq!(def.value.as_deref(), Some("red"));
     }
 
     #[test]
@@ -382,5 +462,61 @@ $primary: blue;
         assert_eq!(mixin_refs.len(), 1);
         assert!(func_refs.len() >= 1);
         assert_eq!(placeholder_refs.len(), 1);
+    }
+
+    #[test]
+    fn variable_value_extraction() {
+        let s = parse_symbols("$color: darken($base, 10%) !default;");
+        assert_eq!(
+            s.definitions[0].value.as_deref(),
+            Some("darken($base, 10%) !default")
+        );
+    }
+
+    #[test]
+    fn doc_comment_single_line() {
+        let s = parse_symbols("/// The primary color\n$primary: #333;");
+        assert_eq!(s.definitions[0].doc.as_deref(), Some("The primary color"));
+        assert_eq!(s.definitions[0].value.as_deref(), Some("#333"));
+    }
+
+    #[test]
+    fn doc_comment_multiline() {
+        let s = parse_symbols("/// Line 1\n/// Line 2\n$x: 1;");
+        assert_eq!(s.definitions[0].doc.as_deref(), Some("Line 1\nLine 2"));
+    }
+
+    #[test]
+    fn doc_comment_blank_line_breaks_association() {
+        let s = parse_symbols("/// Orphaned comment\n\n$x: 1;");
+        assert!(s.definitions[0].doc.is_none());
+    }
+
+    #[test]
+    fn no_doc_comment() {
+        let s = parse_symbols("$x: 1;");
+        assert!(s.definitions[0].doc.is_none());
+    }
+
+    #[test]
+    fn regular_comment_not_doc() {
+        let s = parse_symbols("// Just a comment\n$x: 1;");
+        assert!(s.definitions[0].doc.is_none());
+    }
+
+    #[test]
+    fn function_with_doc_comment() {
+        let s = parse_symbols("/// Doubles a number\n@function double($n) { @return $n * 2; }");
+        assert_eq!(s.definitions[0].doc.as_deref(), Some("Doubles a number"));
+        assert_eq!(s.definitions[0].params.as_deref(), Some("($n)"));
+    }
+
+    #[test]
+    fn mixin_with_doc_comment() {
+        let s = parse_symbols("/// Responsive breakpoint\n@mixin responsive($bp) { @content; }");
+        assert_eq!(
+            s.definitions[0].doc.as_deref(),
+            Some("Responsive breakpoint")
+        );
     }
 }

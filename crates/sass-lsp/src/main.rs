@@ -1,3 +1,5 @@
+mod builtins;
+mod config;
 mod symbols;
 mod workspace;
 
@@ -348,7 +350,10 @@ async fn run_worker(
                     Task::Close { uri } => {
                         pending.remove(&uri);
                         documents.remove(&uri);
-                        module_graph.remove_file(&uri);
+                        // Don't remove from module_graph: the file may still be a
+                        // dependency of other files (indexed via index_dependency).
+                        // VS Code sends didClose for peek previews after
+                        // go-to-definition, which would destroy indexed dependencies.
                         client.publish_diagnostics(uri, vec![], None).await;
                     }
                 }
@@ -404,7 +409,33 @@ async fn run_worker(
 // ── LanguageServer impl ─────────────────────────────────────────────
 
 impl LanguageServer for Backend {
-    async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
+    #[allow(deprecated)] // root_uri is deprecated but still widely sent by editors
+    async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        // Extract workspace root from workspace_folders or root_uri.
+        let workspace_root = params
+            .workspace_folders
+            .as_ref()
+            .and_then(|folders| folders.first())
+            .and_then(|f| f.uri.to_file_path().map(std::borrow::Cow::into_owned))
+            .or_else(|| {
+                params
+                    .root_uri
+                    .as_ref()
+                    .and_then(|u| u.to_file_path().map(std::borrow::Cow::into_owned))
+            });
+
+        let lsp_config: config::SassAnalyzerConfig = params
+            .initialization_options
+            .and_then(|v| serde_json::from_value(v).ok())
+            .unwrap_or_default();
+
+        let resolver = config::build_resolver(&lsp_config, workspace_root.as_deref());
+        self.module_graph.set_resolver(resolver);
+        self.module_graph
+            .set_prepend_imports(lsp_config.prepend_imports);
+
+        tracing::info!(?workspace_root, "configured resolver");
+
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
@@ -549,7 +580,7 @@ impl LanguageServer for Backend {
 
         let resolved = if let Some(namespace) = &ref_info.namespace {
             self.module_graph
-                .resolve_qualified(&uri, namespace, &ref_info.name)
+                .resolve_qualified(&uri, namespace, &ref_info.name, ref_info.kind)
         } else {
             self.module_graph
                 .resolve_unqualified(&uri, &ref_info.name, ref_info.kind)
@@ -1615,6 +1646,63 @@ mod tests {
 
         let placeholder = items.iter().find(|i| i["label"] == "%ph").unwrap();
         assert_eq!(placeholder["kind"], 7, "placeholder kind = CLASS = 7");
+    }
+
+    async fn do_initialize_with(
+        reader: &mut (impl AsyncReadExt + Unpin),
+        writer: &mut (impl AsyncWriteExt + Unpin),
+        init_options: Value,
+    ) -> Value {
+        send_msg(
+            writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "capabilities": {},
+                    "rootUri": "file:///project",
+                    "initializationOptions": init_options
+                }
+            }),
+        )
+        .await;
+        let resp = recv_msg(reader).await;
+
+        send_msg(
+            writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "initialized",
+                "params": {}
+            }),
+        )
+        .await;
+
+        resp
+    }
+
+    #[tokio::test]
+    async fn initialize_with_config() {
+        let (mut reader, mut writer) = spawn_server();
+        let resp = do_initialize_with(
+            &mut reader,
+            &mut writer,
+            serde_json::json!({
+                "loadPaths": ["src/sass"],
+                "importAliases": { "@sass": "src/sass" },
+                "prependImports": ["variables"]
+            }),
+        )
+        .await;
+        assert!(resp["result"]["capabilities"].is_object());
+    }
+
+    #[tokio::test]
+    async fn initialize_with_empty_config() {
+        let (mut reader, mut writer) = spawn_server();
+        let resp = do_initialize_with(&mut reader, &mut writer, serde_json::json!({})).await;
+        assert!(resp["result"]["capabilities"].is_object());
     }
 }
 

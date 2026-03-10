@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use sass_parser::resolver::{BuiltinModule, ModuleResolver, ResolveError, ResolvedModule};
 use sass_parser::vfs::MemoryFs;
@@ -158,6 +158,156 @@ fn resolve_relative_before_load_path() {
     assert_eq!(
         r.resolve("colors", Path::new("/project/src/main.scss")),
         Ok(ResolvedModule::File("/project/src/_colors.scss".into())),
+    );
+}
+
+// ── Import aliases ──────────────────────────────────────────────────
+
+#[test]
+fn resolve_alias_single_target() {
+    let mut r = resolver_with(&["/project/src/sass/colors.scss"]);
+    r.add_import_alias("@sass".into(), vec![PathBuf::from("/project/src/sass")]);
+    assert_eq!(
+        r.resolve("@sass/colors", Path::new("/project/app/main.scss")),
+        Ok(ResolvedModule::File("/project/src/sass/colors.scss".into())),
+    );
+}
+
+#[test]
+fn resolve_alias_partial() {
+    let mut r = resolver_with(&["/project/src/sass/_mixins.scss"]);
+    r.add_import_alias("@sass".into(), vec![PathBuf::from("/project/src/sass")]);
+    assert_eq!(
+        r.resolve("@sass/mixins", Path::new("/project/app/main.scss")),
+        Ok(ResolvedModule::File(
+            "/project/src/sass/_mixins.scss".into()
+        )),
+    );
+}
+
+#[test]
+fn resolve_alias_with_extension() {
+    let mut r = resolver_with(&["/project/src/sass/colors.scss"]);
+    r.add_import_alias("@sass".into(), vec![PathBuf::from("/project/src/sass")]);
+    assert_eq!(
+        r.resolve("@sass/colors.scss", Path::new("/project/app/main.scss")),
+        Ok(ResolvedModule::File("/project/src/sass/colors.scss".into())),
+    );
+}
+
+#[test]
+fn resolve_alias_multiple_targets_picks_closest() {
+    let mut r = resolver_with(&[
+        "/project/frontend/src/Sass/colors.scss",
+        "/project/solutions/src/Sass/colors.scss",
+    ]);
+    r.add_import_alias(
+        "@sass".into(),
+        vec![
+            PathBuf::from("/project/frontend/src/Sass"),
+            PathBuf::from("/project/solutions/src/Sass"),
+        ],
+    );
+    assert_eq!(
+        r.resolve("@sass/colors", Path::new("/project/frontend/app/main.scss"),),
+        Ok(ResolvedModule::File(
+            "/project/frontend/src/Sass/colors.scss".into()
+        )),
+    );
+    assert_eq!(
+        r.resolve(
+            "@sass/colors",
+            Path::new("/project/solutions/app/main.scss"),
+        ),
+        Ok(ResolvedModule::File(
+            "/project/solutions/src/Sass/colors.scss".into()
+        )),
+    );
+}
+
+#[test]
+fn resolve_alias_prefix_boundary() {
+    let mut r = resolver_with(&["/project/src/sass/x.scss"]);
+    r.add_import_alias("@sass".into(), vec![PathBuf::from("/project/src/sass")]);
+    // "@sass-utils/x" should NOT match the "@sass" alias
+    assert_eq!(
+        r.resolve("@sass-utils/x", Path::new("/project/main.scss")),
+        Err(ResolveError::NotFound("@sass-utils/x".into())),
+    );
+}
+
+#[test]
+fn resolve_alias_not_found() {
+    let mut r = resolver_with(&[]);
+    r.add_import_alias("@sass".into(), vec![PathBuf::from("/project/src/sass")]);
+    assert_eq!(
+        r.resolve("@sass/nope", Path::new("/project/app/main.scss")),
+        Err(ResolveError::NotFound("@sass/nope".into())),
+    );
+}
+
+#[test]
+fn resolve_alias_before_relative() {
+    let mut r = resolver_with(&["/project/src/sass/colors.scss", "/project/app/colors.scss"]);
+    r.add_import_alias("@sass".into(), vec![PathBuf::from("/project/src/sass")]);
+    assert_eq!(
+        r.resolve("@sass/colors", Path::new("/project/app/main.scss")),
+        Ok(ResolvedModule::File("/project/src/sass/colors.scss".into())),
+    );
+}
+
+// ── node_modules resolution ─────────────────────────────────────────
+
+#[test]
+fn resolve_node_modules_direct() {
+    let mut r = resolver_with(&["/project/node_modules/@quartznetwork/sass/colors.scss"]);
+    r.enable_node_modules();
+    assert_eq!(
+        r.resolve(
+            "@quartznetwork/sass/colors",
+            Path::new("/project/src/main.scss"),
+        ),
+        Ok(ResolvedModule::File(
+            "/project/node_modules/@quartznetwork/sass/colors.scss".into(),
+        )),
+    );
+}
+
+#[test]
+fn resolve_node_modules_walks_up() {
+    let mut r = resolver_with(&["/project/node_modules/shared-styles/_vars.scss"]);
+    r.enable_node_modules();
+    assert_eq!(
+        r.resolve(
+            "shared-styles/vars",
+            Path::new("/project/src/deep/nested/main.scss"),
+        ),
+        Ok(ResolvedModule::File(
+            "/project/node_modules/shared-styles/_vars.scss".into(),
+        )),
+    );
+}
+
+#[test]
+fn resolve_node_modules_index() {
+    let mut r = resolver_with(&["/project/node_modules/@org/pkg/_index.scss"]);
+    r.enable_node_modules();
+    assert_eq!(
+        r.resolve("@org/pkg", Path::new("/project/src/main.scss")),
+        Ok(ResolvedModule::File(
+            "/project/node_modules/@org/pkg/_index.scss".into(),
+        )),
+    );
+}
+
+#[test]
+fn resolve_load_paths_before_node_modules() {
+    let mut r = resolver_with(&["/libs/_colors.scss", "/project/node_modules/colors.scss"]);
+    r.add_load_path("/libs");
+    r.enable_node_modules();
+    assert_eq!(
+        r.resolve("colors", Path::new("/project/src/main.scss")),
+        Ok(ResolvedModule::File("/libs/_colors.scss".into())),
     );
 }
 
