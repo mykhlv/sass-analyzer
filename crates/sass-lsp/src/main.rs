@@ -906,6 +906,34 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
+        // Conflict detection: check if new_name already exists in the target file
+        if self
+            .module_graph
+            .check_name_conflict(&target_uri, &new_name, target_kind)
+        {
+            let kind_label = match target_kind {
+                symbols::SymbolKind::Variable => "variable",
+                symbols::SymbolKind::Function => "function",
+                symbols::SymbolKind::Mixin => "mixin",
+                symbols::SymbolKind::Placeholder => "placeholder",
+            };
+            let sigil = if target_kind == symbols::SymbolKind::Variable {
+                "$"
+            } else if target_kind == symbols::SymbolKind::Placeholder {
+                "%"
+            } else {
+                ""
+            };
+            return Err(tower_lsp_server::jsonrpc::Error {
+                code: tower_lsp_server::jsonrpc::ErrorCode::InvalidParams,
+                message: format!(
+                    "A {kind_label} '{sigil}{new_name}' already exists in this scope"
+                )
+                .into(),
+                data: None,
+            });
+        }
+
         // Find all references + declaration
         let refs = self.module_graph.find_all_references(
             &target_uri,
@@ -926,6 +954,22 @@ impl LanguageServer for Backend {
             let edit_range = name_only_range(target_kind, range);
             changes.entry(ref_uri).or_default().push(TextEdit {
                 range: text_range_to_lsp(edit_range, &li),
+                new_text: new_name.clone(),
+            });
+        }
+
+        // Update @forward show/hide clauses that mention the old name
+        let forward_refs = self.module_graph.find_forward_show_hide_references(
+            &target_uri,
+            &target_name,
+            target_kind,
+        );
+        for (fwd_uri, range) in forward_refs {
+            let Some(li) = self.module_graph.line_index(&fwd_uri) else {
+                continue;
+            };
+            changes.entry(fwd_uri).or_default().push(TextEdit {
+                range: text_range_to_lsp(range, &li),
                 new_text: new_name.clone(),
             });
         }
@@ -3107,6 +3151,107 @@ mod tests {
 
         let resp = recv_msg(&mut reader, &mut writer).await;
         assert!(resp["result"].is_null());
+    }
+
+    #[tokio::test]
+    async fn rename_conflict_returns_error() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "$color: red;\n$primary: blue;\n.a { color: $color; }\n";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///rename_conflict.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
+
+        // Try to rename $color to $primary — should fail (conflict)
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 80,
+                "method": "textDocument/rename",
+                "params": {
+                    "textDocument": { "uri": "file:///rename_conflict.scss" },
+                    "position": { "line": 2, "character": 15 },
+                    "newName": "primary"
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader, &mut writer).await;
+        assert!(resp["error"].is_object(), "expected error response");
+        let msg = resp["error"]["message"].as_str().unwrap();
+        assert!(
+            msg.contains("already exists"),
+            "error message should mention conflict: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn rename_no_conflict_different_kind() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        // $color and @function color — different kinds, rename should succeed
+        let scss =
+            "$color: red;\n@function color() { @return red; }\n.a { color: $color; }\n";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///rename_no_conflict.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
+
+        // Rename $color to "shade" — no conflict because "shade" doesn't exist
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 81,
+                "method": "textDocument/rename",
+                "params": {
+                    "textDocument": { "uri": "file:///rename_no_conflict.scss" },
+                    "position": { "line": 2, "character": 15 },
+                    "newName": "shade"
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader, &mut writer).await;
+        assert!(
+            resp["error"].is_null(),
+            "should succeed: no conflict with different kind"
+        );
+        let changes = &resp["result"]["changes"]["file:///rename_no_conflict.scss"];
+        let edits = changes.as_array().unwrap();
+        assert!(edits.len() >= 2, "expected at least 2 edits (decl + ref)");
     }
 
     // ── Signature help tests ────────────────────────────────────────

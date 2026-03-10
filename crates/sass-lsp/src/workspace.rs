@@ -534,6 +534,106 @@ impl ModuleGraph {
         results
     }
 
+    /// Check if renaming a symbol to `new_name` would conflict with an
+    /// existing definition of the same kind in the target file.
+    pub fn check_name_conflict(
+        &self,
+        target_uri: &Uri,
+        new_name: &str,
+        kind: symbols::SymbolKind,
+    ) -> bool {
+        if let Some(info) = self.files.get(target_uri) {
+            return info
+                .symbols
+                .definitions
+                .iter()
+                .any(|s| s.name == new_name && s.kind == kind);
+        }
+        false
+    }
+
+    /// Find all `@forward ... show/hide` clauses across the workspace that
+    /// mention `old_name` for the given symbol kind. Returns `(file_uri, text_range)`
+    /// pairs pointing to the name token inside the show/hide list.
+    pub fn find_forward_show_hide_references(
+        &self,
+        target_uri: &Uri,
+        old_name: &str,
+        kind: symbols::SymbolKind,
+    ) -> Vec<(Uri, TextRange)> {
+        let mut results = Vec::new();
+
+        for entry in &self.edges {
+            let file_uri = entry.key();
+            let edges = entry.value();
+
+            for edge in edges {
+                if edge.kind != ImportKind::Forward {
+                    continue;
+                }
+                // Only care about forwards that eventually reach target_uri
+                if !self.forward_reaches(&edge.target, target_uri) {
+                    continue;
+                }
+
+                let has_name = edge.visibility.show.as_ref().is_some_and(|list| {
+                    list.iter().any(|n| n == old_name)
+                }) || edge.visibility.hide.as_ref().is_some_and(|list| {
+                    list.iter().any(|n| n == old_name)
+                });
+
+                if !has_name {
+                    continue;
+                }
+
+                // Walk the FORWARD_RULE CST to find the exact token range
+                let Some(info) = self.files.get(file_uri) else {
+                    continue;
+                };
+                let root = SyntaxNode::new_root(info.green.clone());
+                let ranges =
+                    find_name_in_forward_clauses(&root, old_name, kind);
+                for range in ranges {
+                    results.push((file_uri.clone(), range));
+                }
+            }
+        }
+
+        results
+    }
+
+    /// Check if `from` URI can reach `target` through @forward chains.
+    fn forward_reaches(&self, from: &Uri, target: &Uri) -> bool {
+        let mut visited = HashSet::new();
+        self.forward_reaches_inner(from, target, &mut visited)
+    }
+
+    fn forward_reaches_inner(
+        &self,
+        current: &Uri,
+        target: &Uri,
+        visited: &mut HashSet<Uri>,
+    ) -> bool {
+        if current == target {
+            return true;
+        }
+        if !visited.insert(current.clone()) {
+            return false;
+        }
+        // Check if this module directly defines the symbol (it IS the target)
+        // Also follow further @forward chains
+        if let Some(edges) = self.edges.get(current) {
+            for edge in edges.value() {
+                if edge.kind == ImportKind::Forward
+                    && self.forward_reaches_inner(&edge.target, target, visited)
+                {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     fn index_dependency(&self, uri: &Uri, path: &Path) {
         let Ok(source) = std::fs::read_to_string(path) else {
             return;
@@ -706,6 +806,78 @@ fn parse_member_list(tokens: &[sass_parser::syntax::SyntaxToken], start: usize) 
         i += 1;
     }
     members
+}
+
+/// Walk all `FORWARD_RULE` nodes in a file's CST and find token ranges where
+/// `name` appears in a `show` or `hide` clause. For variables, matches `$name`.
+fn find_name_in_forward_clauses(
+    root: &SyntaxNode,
+    name: &str,
+    kind: symbols::SymbolKind,
+) -> Vec<TextRange> {
+    let mut results = Vec::new();
+
+    for node in root.descendants() {
+        if node.kind() != SyntaxKind::FORWARD_RULE {
+            continue;
+        }
+
+        let tokens: Vec<_> = node
+            .children_with_tokens()
+            .filter_map(rowan::NodeOrToken::into_token)
+            .collect();
+
+        let mut i = 0;
+        let mut in_show_hide = false;
+
+        while i < tokens.len() {
+            let tok = &tokens[i];
+            if tok.kind() == SyntaxKind::IDENT && (tok.text() == "show" || tok.text() == "hide") {
+                in_show_hide = true;
+                i += 1;
+                continue;
+            }
+
+            if !in_show_hide {
+                i += 1;
+                continue;
+            }
+
+            // End of show/hide list
+            if tok.kind() == SyntaxKind::SEMICOLON {
+                break;
+            }
+            if tok.kind() == SyntaxKind::IDENT
+                && (tok.text() == "as" || tok.text() == "with")
+            {
+                break;
+            }
+
+            // Variable: $name
+            if kind == symbols::SymbolKind::Variable && tok.kind() == SyntaxKind::DOLLAR {
+                if let Some(next) = tokens.get(i + 1) {
+                    if next.kind() == SyntaxKind::IDENT && next.text() == name {
+                        // Range covers just the ident (without $), matching name_only_range
+                        results.push(next.text_range());
+                    }
+                }
+                i += 2;
+                continue;
+            }
+
+            // Function/mixin/placeholder: plain IDENT
+            if kind != symbols::SymbolKind::Variable
+                && tok.kind() == SyntaxKind::IDENT
+                && tok.text() == name
+            {
+                results.push(tok.text_range());
+            }
+
+            i += 1;
+        }
+    }
+
+    results
 }
 
 fn is_visible(vis: &ForwardVisibility, name: &str) -> bool {
@@ -1510,5 +1682,164 @@ mod tests {
         });
         let config: crate::config::SassAnalyzerConfig = serde_json::from_value(json).unwrap();
         assert_eq!(config.prepend_imports, vec!["src/globals", "src/vars"]);
+    }
+
+    // ── Rename safety tests ─────────────────────────────────────────
+
+    #[test]
+    fn check_name_conflict_same_kind() {
+        let graph = ModuleGraph::new();
+        let uri: Uri = "file:///test.scss".parse().unwrap();
+        let (green, syms, li) = make_info("$color: red;\n$primary: blue;");
+        graph.files.insert(
+            uri.clone(),
+            ModuleInfo {
+                symbols: syms,
+                green,
+                line_index: li,
+            },
+        );
+
+        assert!(graph.check_name_conflict(&uri, "primary", symbols::SymbolKind::Variable));
+        assert!(!graph.check_name_conflict(&uri, "shade", symbols::SymbolKind::Variable));
+    }
+
+    #[test]
+    fn check_name_conflict_different_kind_no_conflict() {
+        let graph = ModuleGraph::new();
+        let uri: Uri = "file:///test.scss".parse().unwrap();
+        let (green, syms, li) =
+            make_info("$color: red;\n@function color() { @return red; }");
+        graph.files.insert(
+            uri.clone(),
+            ModuleInfo {
+                symbols: syms,
+                green,
+                line_index: li,
+            },
+        );
+
+        // "color" exists as function, but we're checking for variable → no conflict
+        assert!(!graph.check_name_conflict(&uri, "color", symbols::SymbolKind::Mixin));
+    }
+
+    #[test]
+    fn find_forward_show_hide_variable() {
+        let source = "@forward \"lib\" show $primary, $secondary;";
+        let (green, _) = sass_parser::parse(source);
+        let root = SyntaxNode::new_root(green);
+
+        let ranges =
+            find_name_in_forward_clauses(&root, "primary", symbols::SymbolKind::Variable);
+        assert_eq!(ranges.len(), 1);
+        let text = &source[usize::from(ranges[0].start())..usize::from(ranges[0].end())];
+        assert_eq!(text, "primary");
+    }
+
+    #[test]
+    fn find_forward_show_hide_mixin() {
+        let source = "@forward \"lib\" show btn, card;";
+        let (green, _) = sass_parser::parse(source);
+        let root = SyntaxNode::new_root(green);
+
+        let ranges = find_name_in_forward_clauses(&root, "btn", symbols::SymbolKind::Mixin);
+        assert_eq!(ranges.len(), 1);
+        let text = &source[usize::from(ranges[0].start())..usize::from(ranges[0].end())];
+        assert_eq!(text, "btn");
+    }
+
+    #[test]
+    fn find_forward_hide_clause() {
+        let source = "@forward \"lib\" hide $internal;";
+        let (green, _) = sass_parser::parse(source);
+        let root = SyntaxNode::new_root(green);
+
+        let ranges =
+            find_name_in_forward_clauses(&root, "internal", symbols::SymbolKind::Variable);
+        assert_eq!(ranges.len(), 1);
+    }
+
+    #[test]
+    fn find_forward_clause_no_match() {
+        let source = "@forward \"lib\" show $primary;";
+        let (green, _) = sass_parser::parse(source);
+        let root = SyntaxNode::new_root(green);
+
+        let ranges =
+            find_name_in_forward_clauses(&root, "secondary", symbols::SymbolKind::Variable);
+        assert!(ranges.is_empty());
+    }
+
+    #[test]
+    fn forward_reaches_direct() {
+        let graph = ModuleGraph::new();
+        let a: Uri = "file:///a.scss".parse().unwrap();
+        let b: Uri = "file:///b.scss".parse().unwrap();
+
+        graph.edges.insert(
+            a.clone(),
+            vec![ImportEdge {
+                target: b.clone(),
+                namespace: Namespace::Star,
+                kind: ImportKind::Forward,
+                visibility: ForwardVisibility::default(),
+            }],
+        );
+
+        assert!(graph.forward_reaches(&b, &b));
+        assert!(graph.forward_reaches(&a, &b));
+        assert!(!graph.forward_reaches(&b, &a));
+    }
+
+    #[test]
+    fn find_forward_show_hide_refs_integration() {
+        let graph = ModuleGraph::new();
+        let main_uri: Uri = "file:///main.scss".parse().unwrap();
+        let lib_uri: Uri = "file:///lib.scss".parse().unwrap();
+
+        let (green, syms, li) = make_info("$primary: blue;");
+        graph.files.insert(
+            lib_uri.clone(),
+            ModuleInfo {
+                symbols: syms,
+                green,
+                line_index: li,
+            },
+        );
+
+        // main: @forward "lib" show $primary;
+        let main_source = "@forward \"lib\" show $primary;";
+        let (green, syms, li) = make_info(main_source);
+        graph.files.insert(
+            main_uri.clone(),
+            ModuleInfo {
+                symbols: syms,
+                green,
+                line_index: li,
+            },
+        );
+        graph.edges.insert(
+            main_uri.clone(),
+            vec![ImportEdge {
+                target: lib_uri.clone(),
+                namespace: Namespace::Star,
+                kind: ImportKind::Forward,
+                visibility: ForwardVisibility {
+                    show: Some(vec!["primary".into()]),
+                    ..Default::default()
+                },
+            }],
+        );
+
+        let refs = graph.find_forward_show_hide_references(
+            &lib_uri,
+            "primary",
+            symbols::SymbolKind::Variable,
+        );
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].0, main_uri);
+        let text =
+            &main_source[usize::from(refs[0].1.start())..usize::from(refs[0].1.end())];
+        assert_eq!(text, "primary");
     }
 }
