@@ -27,7 +27,8 @@ use tower_lsp_server::ls_types::{
     SemanticTokensLegend, SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
     SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo, SignatureHelp,
     SignatureHelpOptions, SignatureHelpParams, SignatureInformation, SymbolInformation,
-    TextDocumentPositionParams, TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Uri,
+    TextDocumentContentChangeEvent, TextDocumentPositionParams, TextDocumentSyncCapability,
+    TextDocumentSyncKind, TextEdit, Uri,
     WorkDoneProgressOptions, WorkspaceEdit, WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
 use tower_lsp_server::{Client, LanguageServer, LspService, Server};
@@ -60,6 +61,9 @@ enum Task {
 struct Backend {
     client: Client,
     documents: Arc<DashMap<Uri, DocumentState>>,
+    /// Latest source text per file, updated synchronously in `did_open`/`did_change`.
+    /// Needed for incremental sync: we apply text edits here before sending to worker.
+    source_texts: Arc<DashMap<Uri, String>>,
     module_graph: Arc<workspace::ModuleGraph>,
     task_tx: mpsc::UnboundedSender<Task>,
 }
@@ -131,6 +135,51 @@ fn byte_to_lsp_pos(
 #[allow(clippy::cast_possible_truncation)]
 fn utf16_len(s: &str) -> u32 {
     s.encode_utf16().count() as u32
+}
+
+/// Apply incremental text edits from LSP to a source string.
+/// Converts LSP positions (0-based line, UTF-16 column) to byte offsets via linear scan.
+/// Returns `false` if any position is out of bounds.
+fn apply_content_changes(text: &mut String, changes: Vec<TextDocumentContentChangeEvent>) -> bool {
+    for change in changes {
+        match change.range {
+            Some(range) => {
+                let Some(start) = lsp_pos_to_byte(text, range.start) else {
+                    return false;
+                };
+                let Some(end) = lsp_pos_to_byte(text, range.end) else {
+                    return false;
+                };
+                if start > end || end > text.len() {
+                    return false;
+                }
+                text.replace_range(start..end, &change.text);
+            }
+            None => {
+                *text = change.text;
+            }
+        }
+    }
+    true
+}
+
+#[allow(clippy::cast_possible_truncation)]
+fn lsp_pos_to_byte(text: &str, pos: Position) -> Option<usize> {
+    let mut byte_offset = 0usize;
+    for _ in 0..pos.line {
+        let remaining = &text[byte_offset..];
+        let nl = remaining.find('\n')?;
+        byte_offset += nl + 1;
+    }
+    let mut utf16_count = 0u32;
+    for ch in text[byte_offset..].chars() {
+        if utf16_count >= pos.character || ch == '\n' {
+            break;
+        }
+        utf16_count += ch.len_utf16() as u32;
+        byte_offset += ch.len_utf8();
+    }
+    Some(byte_offset)
 }
 
 /// Find the first IDENT token among direct children.
@@ -453,7 +502,7 @@ impl LanguageServer for Backend {
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                    TextDocumentSyncKind::FULL,
+                    TextDocumentSyncKind::INCREMENTAL,
                 )),
                 semantic_tokens_provider: Some(
                     SemanticTokensServerCapabilities::SemanticTokensOptions(
@@ -531,6 +580,7 @@ impl LanguageServer for Backend {
         if doc.text.len() > MAX_FILE_SIZE {
             return;
         }
+        self.source_texts.insert(doc.uri.clone(), doc.text.clone());
         let _ = self.task_tx.send(Task::Parse {
             uri: doc.uri,
             version: doc.version,
@@ -541,20 +591,41 @@ impl LanguageServer for Backend {
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri;
         let version = params.text_document.version;
-        let Some(change) = params.content_changes.into_iter().last() else {
+
+        let Some(mut text) = self.source_texts.get(&uri).map(|t| t.clone()) else {
+            // No prior text — take last full-content change if available.
+            if let Some(change) = params.content_changes.into_iter().last() {
+                if change.text.len() > MAX_FILE_SIZE {
+                    return;
+                }
+                self.source_texts.insert(uri.clone(), change.text.clone());
+                let _ = self.task_tx.send(Task::Parse {
+                    uri,
+                    version,
+                    text: change.text,
+                });
+            }
             return;
         };
-        if change.text.len() > MAX_FILE_SIZE {
+
+        if !apply_content_changes(&mut text, params.content_changes) {
+            tracing::warn!(?uri, "incremental edit failed, dropping change");
             return;
         }
+
+        if text.len() > MAX_FILE_SIZE {
+            return;
+        }
+        self.source_texts.insert(uri.clone(), text.clone());
         let _ = self.task_tx.send(Task::Parse {
             uri,
             version,
-            text: change.text,
+            text,
         });
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        self.source_texts.remove(&params.text_document.uri);
         let _ = self.task_tx.send(Task::Close {
             uri: params.text_document.uri,
         });
@@ -1952,6 +2023,7 @@ async fn main() {
         Backend {
             client,
             documents,
+            source_texts: Arc::new(DashMap::new()),
             module_graph,
             task_tx,
         }
@@ -2045,6 +2117,7 @@ mod tests {
             Backend {
                 client,
                 documents,
+                source_texts: Arc::new(DashMap::new()),
                 module_graph,
                 task_tx,
             }
@@ -2089,7 +2162,7 @@ mod tests {
         let resp = do_initialize(&mut reader, &mut writer).await;
 
         let caps = &resp["result"]["capabilities"];
-        assert_eq!(caps["textDocumentSync"], 1);
+        assert_eq!(caps["textDocumentSync"], 2);
 
         let legend = &caps["semanticTokensProvider"]["legend"];
         let types: Vec<&str> = legend["tokenTypes"]
@@ -4405,5 +4478,232 @@ mod tests {
         let (mut reader, mut writer) = spawn_server();
         let resp = do_initialize_with(&mut reader, &mut writer, serde_json::json!({})).await;
         assert!(resp["result"]["capabilities"].is_object());
+    }
+
+    #[test]
+    fn lsp_pos_to_byte_ascii() {
+        let text = "abc\ndef\nghi";
+        assert_eq!(lsp_pos_to_byte(text, Position::new(0, 0)), Some(0));
+        assert_eq!(lsp_pos_to_byte(text, Position::new(0, 2)), Some(2));
+        assert_eq!(lsp_pos_to_byte(text, Position::new(1, 0)), Some(4));
+        assert_eq!(lsp_pos_to_byte(text, Position::new(1, 2)), Some(6));
+        assert_eq!(lsp_pos_to_byte(text, Position::new(2, 1)), Some(9));
+    }
+
+    #[test]
+    fn lsp_pos_to_byte_multibyte() {
+        // "ä" is 2 UTF-8 bytes, 1 UTF-16 code unit
+        let text = "äbc";
+        assert_eq!(lsp_pos_to_byte(text, Position::new(0, 0)), Some(0));
+        assert_eq!(lsp_pos_to_byte(text, Position::new(0, 1)), Some(2)); // after ä
+        assert_eq!(lsp_pos_to_byte(text, Position::new(0, 2)), Some(3)); // after b
+    }
+
+    #[test]
+    fn lsp_pos_to_byte_emoji() {
+        // "😀" is 4 UTF-8 bytes, 2 UTF-16 code units (surrogate pair)
+        let text = "😀b";
+        assert_eq!(lsp_pos_to_byte(text, Position::new(0, 0)), Some(0));
+        assert_eq!(lsp_pos_to_byte(text, Position::new(0, 2)), Some(4)); // after 😀
+        assert_eq!(lsp_pos_to_byte(text, Position::new(0, 3)), Some(5)); // after b
+    }
+
+    #[test]
+    fn lsp_pos_to_byte_out_of_bounds() {
+        let text = "ab";
+        // Line 1 doesn't exist (no newline)
+        assert_eq!(lsp_pos_to_byte(text, Position::new(1, 0)), None);
+    }
+
+    #[test]
+    fn apply_content_changes_insert() {
+        let mut text = String::from("ab\ncd");
+        let changes = vec![TextDocumentContentChangeEvent {
+            range: Some(Range::new(Position::new(0, 1), Position::new(0, 1))),
+            range_length: None,
+            text: "X".into(),
+        }];
+        assert!(apply_content_changes(&mut text, changes));
+        assert_eq!(text, "aXb\ncd");
+    }
+
+    #[test]
+    fn apply_content_changes_delete() {
+        let mut text = String::from("abcd");
+        let changes = vec![TextDocumentContentChangeEvent {
+            range: Some(Range::new(Position::new(0, 1), Position::new(0, 3))),
+            range_length: None,
+            text: String::new(),
+        }];
+        assert!(apply_content_changes(&mut text, changes));
+        assert_eq!(text, "ad");
+    }
+
+    #[test]
+    fn apply_content_changes_replace_across_lines() {
+        let mut text = String::from("ab\ncd\nef");
+        let changes = vec![TextDocumentContentChangeEvent {
+            range: Some(Range::new(Position::new(0, 1), Position::new(1, 1))),
+            range_length: None,
+            text: "XY".into(),
+        }];
+        assert!(apply_content_changes(&mut text, changes));
+        assert_eq!(text, "aXYd\nef");
+    }
+
+    #[test]
+    fn apply_content_changes_full_replacement() {
+        let mut text = String::from("old");
+        let changes = vec![TextDocumentContentChangeEvent {
+            range: None,
+            range_length: None,
+            text: "new content".into(),
+        }];
+        assert!(apply_content_changes(&mut text, changes));
+        assert_eq!(text, "new content");
+    }
+
+    #[test]
+    fn apply_content_changes_sequential() {
+        let mut text = String::from("abc");
+        // Two sequential changes: insert X at pos 1, then insert Y at pos 3
+        // After first: "aXbc", after second: "aXbYc"
+        let changes = vec![
+            TextDocumentContentChangeEvent {
+                range: Some(Range::new(Position::new(0, 1), Position::new(0, 1))),
+                range_length: None,
+                text: "X".into(),
+            },
+            TextDocumentContentChangeEvent {
+                range: Some(Range::new(Position::new(0, 3), Position::new(0, 3))),
+                range_length: None,
+                text: "Y".into(),
+            },
+        ];
+        assert!(apply_content_changes(&mut text, changes));
+        assert_eq!(text, "aXbYc");
+    }
+
+    #[tokio::test]
+    async fn incremental_sync_updates_diagnostics() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        // Open with valid SCSS
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///incr.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": "$x: 1;\n.a { color: red; }"
+                    }
+                }
+            }),
+        )
+        .await;
+
+        let notif = recv_msg(&mut reader, &mut writer).await;
+        assert_eq!(notif["method"], "textDocument/publishDiagnostics");
+        let diags = notif["params"]["diagnostics"].as_array().unwrap();
+        assert!(diags.is_empty(), "valid SCSS should have 0 diagnostics");
+
+        // Send incremental change: replace "red" with "blue"
+        // "red" is at line 1, col 14..17
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didChange",
+                "params": {
+                    "textDocument": { "uri": "file:///incr.scss", "version": 2 },
+                    "contentChanges": [{
+                        "range": {
+                            "start": { "line": 1, "character": 14 },
+                            "end": { "line": 1, "character": 17 }
+                        },
+                        "text": "blue"
+                    }]
+                }
+            }),
+        )
+        .await;
+
+        let notif = recv_msg(&mut reader, &mut writer).await;
+        assert_eq!(notif["method"], "textDocument/publishDiagnostics");
+        let diags = notif["params"]["diagnostics"].as_array().unwrap();
+        assert!(diags.is_empty(), "incremental edit should still be valid");
+    }
+
+    #[tokio::test]
+    async fn incremental_sync_hover_after_edit() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        // Open with a variable
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///incr2.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": "$color: red;\n.a { color: $color; }"
+                    }
+                }
+            }),
+        )
+        .await;
+        let _ = recv_msg(&mut reader, &mut writer).await; // diagnostics
+
+        // Incremental change: replace "red" with "blue" (line 0, col 8..11)
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didChange",
+                "params": {
+                    "textDocument": { "uri": "file:///incr2.scss", "version": 2 },
+                    "contentChanges": [{
+                        "range": {
+                            "start": { "line": 0, "character": 8 },
+                            "end": { "line": 0, "character": 11 }
+                        },
+                        "text": "blue"
+                    }]
+                }
+            }),
+        )
+        .await;
+        let _ = recv_msg(&mut reader, &mut writer).await; // diagnostics
+
+        // Hover on $color reference — should show updated value "blue"
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "textDocument/hover",
+                "params": {
+                    "textDocument": { "uri": "file:///incr2.scss" },
+                    "position": { "line": 1, "character": 16 }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader, &mut writer).await;
+        let contents = resp["result"]["contents"]["value"].as_str().unwrap();
+        assert!(
+            contents.contains("blue"),
+            "hover should reflect incremental edit, got: {contents}"
+        );
     }
 }
