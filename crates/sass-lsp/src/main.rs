@@ -785,13 +785,20 @@ impl LanguageServer for Backend {
                 return Ok(Some(CompletionResponse::Array(items)));
             }
             CompletionContext::PropertyName(partial) => {
-                let items: Vec<CompletionItem> = css_properties::CSS_PROPERTIES
+                let mut scored: Vec<(u32, &str)> = css_properties::CSS_PROPERTIES
                     .iter()
-                    .filter(|p| partial.is_empty() || p.starts_with(&*partial))
-                    .map(|p| CompletionItem {
-                        label: (*p).to_owned(),
+                    .filter_map(|p| {
+                        let score = fuzzy_score(p, &partial)?;
+                        Some((score, *p))
+                    })
+                    .collect();
+                scored.sort_by(|a, b| b.0.cmp(&a.0));
+                let items: Vec<CompletionItem> = scored
+                    .into_iter()
+                    .map(|(score, p)| CompletionItem {
+                        label: p.to_owned(),
                         kind: Some(CompletionItemKind::PROPERTY),
-                        sort_text: Some(format!("0_{p}")),
+                        sort_text: Some(format!("0_{:04}_{p}", 1000 - score)),
                         ..CompletionItem::default()
                     })
                     .collect();
@@ -1166,10 +1173,10 @@ impl LanguageServer for Backend {
         let query = params.query.to_lowercase();
         let all = self.module_graph.all_symbols();
 
-        let mut matches: Vec<SymbolInformation> = all
+        let mut scored: Vec<(u32, SymbolInformation)> = all
             .into_iter()
-            .filter(|(_, sym)| fuzzy_match(&sym.name, &query))
             .filter_map(|(uri, sym)| {
+                let score = fuzzy_score(&sym.name, &query)?;
                 let li = self.module_graph.line_index(&uri)?;
                 let range = text_range_to_lsp(sym.selection_range, &li);
                 let kind = match sym.kind {
@@ -1187,18 +1194,22 @@ impl LanguageServer for Backend {
                 let container_name = uri
                     .to_file_path()
                     .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()));
-                Some(SymbolInformation {
-                    name: sym.name,
-                    kind,
-                    tags: None,
-                    deprecated: None,
-                    location: Location { uri, range },
-                    container_name,
-                })
+                Some((
+                    score,
+                    SymbolInformation {
+                        name: sym.name,
+                        kind,
+                        tags: None,
+                        deprecated: None,
+                        location: Location { uri, range },
+                        container_name,
+                    },
+                ))
             })
             .collect();
 
-        matches.sort_by(|a, b| a.name.cmp(&b.name));
+        scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.name.cmp(&b.1.name)));
+        let matches: Vec<SymbolInformation> = scored.into_iter().map(|(_, si)| si).collect();
 
         if matches.is_empty() {
             Ok(None)
@@ -1981,14 +1992,63 @@ fn parse_param_labels(signature: &str, params_text: &str) -> Vec<ParameterInform
 
 // ── Workspace symbol search ─────────────────────────────────────────
 
-fn fuzzy_match(name: &str, query: &str) -> bool {
+/// Fuzzy-score a symbol name against a query. Returns `None` if no match.
+/// Higher score = better match. Scoring tiers:
+///   - Exact match: 1000
+///   - Prefix match: 500 + (100 × coverage ratio)
+///   - Word-boundary match: 200 + (100 × coverage ratio)
+///   - Subsequence match: 100 × coverage ratio
+#[allow(clippy::cast_possible_truncation)]
+fn fuzzy_score(name: &str, query: &str) -> Option<u32> {
     if query.is_empty() {
-        return true;
+        return Some(0);
     }
     let name_lower = name.to_lowercase();
+    let query_lower = query.to_lowercase();
+
+    // Exact match.
+    if name_lower == query_lower {
+        return Some(1000);
+    }
+
+    // Prefix match.
+    if name_lower.starts_with(&query_lower) {
+        let coverage = (query.len() * 100 / name.len()) as u32;
+        return Some(500 + coverage);
+    }
+
+    // Word-boundary match: query chars align with starts of words (after `-`, `_`, or camelCase).
+    if word_boundary_match(&name_lower, name, &query_lower) {
+        let coverage = (query.len() * 100 / name.len()) as u32;
+        return Some(200 + coverage);
+    }
+
+    // Subsequence match.
     let mut name_chars = name_lower.chars();
-    for qch in query.chars() {
-        if name_chars.find(|&c| c == qch).is_none() {
+    for qch in query_lower.chars() {
+        name_chars.find(|&c| c == qch)?;
+    }
+    let coverage = (query.len() * 100 / name.len()) as u32;
+    Some(coverage)
+}
+
+fn word_boundary_match(name_lower: &str, name_original: &str, query_lower: &str) -> bool {
+    let boundaries: Vec<char> = std::iter::once(name_lower.chars().next())
+        .flatten()
+        .chain(
+            name_original
+                .chars()
+                .zip(name_original.chars().skip(1))
+                .filter(|&(prev, cur)| {
+                    prev == '-' || prev == '_' || (prev.is_lowercase() && cur.is_uppercase())
+                })
+                .map(|(_, cur)| cur.to_lowercase().next().unwrap_or(cur)),
+        )
+        .collect();
+
+    let mut bi = boundaries.iter();
+    for qch in query_lower.chars() {
+        if bi.find(|&&c| c == qch).is_none() {
             return false;
         }
     }
@@ -4381,12 +4441,38 @@ mod tests {
     }
 
     #[test]
-    fn fuzzy_match_basics() {
-        assert!(super::fuzzy_match("responsive-grid", "rg"));
-        assert!(super::fuzzy_match("primary", "pry"));
-        assert!(super::fuzzy_match("Button", "btn"));
-        assert!(!super::fuzzy_match("simple", "rg"));
-        assert!(super::fuzzy_match("anything", ""));
+    fn fuzzy_score_basics() {
+        // Exact match → highest score.
+        assert_eq!(super::fuzzy_score("color", "color"), Some(1000));
+        // Prefix match → 500+.
+        assert!(super::fuzzy_score("color-primary", "color").unwrap() >= 500);
+        // Word boundary match → 200+ (r and g match starts of "responsive" and "grid").
+        let rg_score = super::fuzzy_score("responsive-grid", "rg").unwrap();
+        assert!(rg_score >= 200, "word boundary should score 200+, got {rg_score}");
+        // Subsequence match → >0.
+        assert!(super::fuzzy_score("primary", "pry").unwrap() > 0);
+        // No match → None.
+        assert_eq!(super::fuzzy_score("simple", "rg"), None);
+        // Empty query → matches everything.
+        assert_eq!(super::fuzzy_score("anything", ""), Some(0));
+    }
+
+    #[test]
+    fn fuzzy_score_ranking() {
+        let exact = super::fuzzy_score("color", "color").unwrap();
+        let prefix = super::fuzzy_score("color-primary", "color").unwrap();
+        let boundary = super::fuzzy_score("responsive-grid", "rg").unwrap();
+        let subseq = super::fuzzy_score("primary", "pry").unwrap();
+        assert!(exact > prefix, "exact > prefix");
+        assert!(prefix > boundary, "prefix > boundary");
+        assert!(boundary > subseq, "boundary > subsequence");
+    }
+
+    #[test]
+    fn fuzzy_score_camel_case_boundary() {
+        // camelCase boundary: "bc" matches "B" from "border" and "C" from "Color"
+        let score = super::fuzzy_score("borderColor", "bc").unwrap();
+        assert!(score >= 200, "camelCase boundary match, got {score}");
     }
 
     #[test]
