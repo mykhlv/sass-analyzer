@@ -18,11 +18,12 @@ use tower_lsp_server::ls_types::{
     CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
     Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
     DidOpenTextDocumentParams, DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams,
-    GotoDefinitionResponse, InitializeParams, InitializeResult, InitializedParams, Location, OneOf,
-    Position, Range, SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokens,
-    SemanticTokensFullOptions, SemanticTokensLegend, SemanticTokensOptions, SemanticTokensParams,
-    SemanticTokensResult, SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo,
-    TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
+    GotoDefinitionResponse, Hover, HoverContents, HoverParams, InitializeParams, InitializeResult,
+    InitializedParams, Location, MarkupContent, MarkupKind, OneOf, Position, Range, SemanticToken,
+    SemanticTokenModifier, SemanticTokenType, SemanticTokens, SemanticTokensFullOptions,
+    SemanticTokensLegend, SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
+    SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo, TextDocumentSyncCapability,
+    TextDocumentSyncKind, Uri,
 };
 use tower_lsp_server::{Client, LanguageServer, LspService, Server};
 
@@ -470,6 +471,9 @@ impl LanguageServer for Backend {
                     trigger_characters: Some(vec!["$".into(), ".".into()]),
                     ..CompletionOptions::default()
                 }),
+                hover_provider: Some(tower_lsp_server::ls_types::HoverProviderCapability::Simple(
+                    true,
+                )),
                 ..ServerCapabilities::default()
             },
             server_info: Some(ServerInfo {
@@ -615,6 +619,51 @@ impl LanguageServer for Backend {
             .collect();
 
         Ok(Some(CompletionResponse::Array(items)))
+    }
+
+    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        let (green, offset, file_symbols) = {
+            let Some(doc) = self.documents.get(&uri) else {
+                return Ok(None);
+            };
+            let Some(offset) = lsp_position_to_offset(&doc.text, &doc.line_index, position) else {
+                return Ok(None);
+            };
+            (doc.green.clone(), offset, doc.symbols.clone())
+        };
+
+        let root = SyntaxNode::new_root(green);
+
+        // 1. Try reference at cursor → resolve to definition
+        if let Some(ref_info) = find_reference_at_offset(&root, offset) {
+            let resolved = if let Some(namespace) = &ref_info.namespace {
+                self.module_graph
+                    .resolve_qualified(&uri, namespace, &ref_info.name, ref_info.kind)
+            } else {
+                self.module_graph
+                    .resolve_unqualified(&uri, &ref_info.name, ref_info.kind)
+            };
+
+            if let Some((target_uri, symbol)) = resolved {
+                let source = if target_uri == uri {
+                    None
+                } else {
+                    Some(&target_uri)
+                };
+                return Ok(Some(make_hover(&symbol, source)));
+            }
+            return Ok(None);
+        }
+
+        // 2. Try definition at cursor (hovering on a declaration name)
+        if let Some(symbol) = find_definition_at_offset(&file_symbols, offset) {
+            return Ok(Some(make_hover(symbol, None)));
+        }
+
+        Ok(None)
     }
 }
 
@@ -920,6 +969,67 @@ fn percent_ident_name(node: &SyntaxNode) -> Option<String> {
         }
     }
     None
+}
+
+// ── Hover ───────────────────────────────────────────────────────────
+
+fn find_definition_at_offset(
+    symbols: &symbols::FileSymbols,
+    offset: sass_parser::text_range::TextSize,
+) -> Option<&symbols::Symbol> {
+    symbols
+        .definitions
+        .iter()
+        .find(|s| s.selection_range.contains(offset))
+}
+
+fn make_hover(sym: &symbols::Symbol, source_uri: Option<&Uri>) -> Hover {
+    Hover {
+        contents: HoverContents::Markup(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: format_hover_markdown(sym, source_uri),
+        }),
+        range: None,
+    }
+}
+
+fn format_hover_markdown(sym: &symbols::Symbol, source_uri: Option<&Uri>) -> String {
+    let signature = match sym.kind {
+        symbols::SymbolKind::Variable => {
+            if let Some(value) = &sym.value {
+                format!("${}: {value}", sym.name)
+            } else {
+                format!("${}", sym.name)
+            }
+        }
+        symbols::SymbolKind::Function => {
+            let params = sym.params.as_deref().unwrap_or("()");
+            format!("@function {}{params}", sym.name)
+        }
+        symbols::SymbolKind::Mixin => {
+            let params = sym.params.as_deref().unwrap_or("");
+            format!("@mixin {}{params}", sym.name)
+        }
+        symbols::SymbolKind::Placeholder => format!("%{}", sym.name),
+    };
+
+    let mut parts = vec![format!("```scss\n{signature}\n```")];
+
+    if let Some(doc) = &sym.doc {
+        parts.push(doc.clone());
+    }
+
+    if let Some(uri) = source_uri {
+        if let Some(module) = builtins::builtin_name_from_uri(uri.as_str()) {
+            parts.push(format!("Sass built-in (`sass:{module}`)"));
+        } else if let Some(path) = uri.to_file_path() {
+            if let Some(name) = path.file_name() {
+                parts.push(format!("Defined in `{}`", name.to_string_lossy()));
+            }
+        }
+    }
+
+    parts.join("\n\n")
 }
 
 // ── Tests ───────────────────────────────────────────────────────────
@@ -1646,6 +1756,234 @@ mod tests {
 
         let placeholder = items.iter().find(|i| i["label"] == "%ph").unwrap();
         assert_eq!(placeholder["kind"], 7, "placeholder kind = CLASS = 7");
+    }
+
+    #[tokio::test]
+    async fn hover_on_variable_reference() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "$color: red;\n.btn { color: $color; }\n";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///hover.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader).await;
+
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 30,
+                "method": "textDocument/hover",
+                "params": {
+                    "textDocument": { "uri": "file:///hover.scss" },
+                    "position": { "line": 1, "character": 15 }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader).await;
+        let content = resp["result"]["contents"]["value"].as_str().unwrap();
+        assert!(content.contains("$color"), "hover should show variable name");
+        assert!(content.contains("red"), "hover should show value");
+    }
+
+    #[tokio::test]
+    async fn hover_on_variable_definition() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "$primary: blue;\n";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///hover_def.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader).await;
+
+        // Hover on the $ of $primary definition
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 31,
+                "method": "textDocument/hover",
+                "params": {
+                    "textDocument": { "uri": "file:///hover_def.scss" },
+                    "position": { "line": 0, "character": 1 }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader).await;
+        let content = resp["result"]["contents"]["value"].as_str().unwrap();
+        assert!(content.contains("$primary"), "hover on def should show name");
+        assert!(content.contains("blue"), "hover on def should show value");
+    }
+
+    #[tokio::test]
+    async fn hover_on_mixin_reference() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "@mixin btn($size) { font-size: $size; }\n.card { @include btn(16px); }\n";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///hover_mixin.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader).await;
+
+        // Hover on "btn" in @include btn(16px)
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 32,
+                "method": "textDocument/hover",
+                "params": {
+                    "textDocument": { "uri": "file:///hover_mixin.scss" },
+                    "position": { "line": 1, "character": 17 }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader).await;
+        let content = resp["result"]["contents"]["value"].as_str().unwrap();
+        assert!(content.contains("@mixin"), "hover should show @mixin");
+        assert!(content.contains("btn"), "hover should show mixin name");
+    }
+
+    #[tokio::test]
+    async fn hover_returns_null_on_empty_space() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "$color: red;\n\n.btn { }\n";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///hover_null.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader).await;
+
+        // Hover on empty line
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 33,
+                "method": "textDocument/hover",
+                "params": {
+                    "textDocument": { "uri": "file:///hover_null.scss" },
+                    "position": { "line": 1, "character": 0 }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader).await;
+        assert!(resp["result"].is_null(), "hover on empty space should be null");
+    }
+
+    #[tokio::test]
+    async fn hover_with_doc_comment() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "/// The primary color\n$primary: #333;\n.a { color: $primary; }\n";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///hover_doc.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader).await;
+
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 34,
+                "method": "textDocument/hover",
+                "params": {
+                    "textDocument": { "uri": "file:///hover_doc.scss" },
+                    "position": { "line": 2, "character": 14 }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader).await;
+        let content = resp["result"]["contents"]["value"].as_str().unwrap();
+        assert!(content.contains("primary color"), "hover should show doc comment");
+    }
+
+    #[tokio::test]
+    async fn initialize_reports_hover_capability() {
+        let (mut reader, mut writer) = spawn_server();
+        let resp = do_initialize(&mut reader, &mut writer).await;
+        let caps = &resp["result"]["capabilities"];
+        assert_eq!(caps["hoverProvider"], true);
     }
 
     async fn do_initialize_with(
