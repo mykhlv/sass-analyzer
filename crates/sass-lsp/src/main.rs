@@ -435,6 +435,7 @@ async fn run_worker(
                         green.clone(),
                         file_symbols.clone(),
                         line_index.clone(),
+                        text.clone(),
                     );
 
                     documents.insert(
@@ -568,7 +569,9 @@ impl LanguageServer for Backend {
     }
 
     async fn initialized(&self, _: InitializedParams) {
-        tracing::info!("sass-analyzer server initialized");
+        let files = self.module_graph.file_count();
+        let cached = self.module_graph.cached_tree_count();
+        tracing::info!(files, cached, "sass-analyzer server initialized");
     }
 
     async fn shutdown(&self) -> Result<()> {

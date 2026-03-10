@@ -1,6 +1,6 @@
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 use dashmap::DashMap;
 use sass_parser::imports::{self, ImportKind, ImportRef};
@@ -13,6 +13,8 @@ use tower_lsp_server::ls_types::Uri;
 
 use crate::builtins;
 use crate::symbols::{self, FileSymbols};
+
+const MAX_CACHED_TREES: usize = 200;
 
 /// Namespace binding for an `@use` rule.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,12 +44,15 @@ pub struct ImportEdge {
 }
 
 /// Parsed + analyzed info for a single file.
+/// Symbols and line index are always retained. The green tree may be evicted
+/// by the LRU cache to cap memory; it is re-parsed on demand from `source_text`.
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ModuleInfo {
     pub symbols: FileSymbols,
-    pub green: rowan::GreenNode,
+    pub green: Option<rowan::GreenNode>,
     pub line_index: sass_parser::line_index::LineIndex,
+    pub source_text: String,
 }
 
 /// Cross-file dependency graph for the SCSS workspace.
@@ -57,6 +62,8 @@ pub struct ModuleGraph {
     resolver: RwLock<Arc<ModuleResolver<OsFileSystem>>>,
     builtin_symbols: DashMap<String, Vec<symbols::Symbol>>,
     prepend_imports: RwLock<Vec<String>>,
+    /// LRU order for green tree eviction (front = most recently used).
+    tree_lru: Mutex<VecDeque<Uri>>,
 }
 
 impl ModuleGraph {
@@ -67,6 +74,7 @@ impl ModuleGraph {
             resolver: RwLock::new(Arc::new(ModuleResolver::new())),
             builtin_symbols: DashMap::new(),
             prepend_imports: RwLock::new(Vec::new()),
+            tree_lru: Mutex::new(VecDeque::new()),
         }
     }
 
@@ -88,6 +96,58 @@ impl ModuleGraph {
         *guard = Arc::new(resolver);
     }
 
+    /// Move a URI to the front of the LRU list (most recently used).
+    fn touch_lru(&self, uri: &Uri) {
+        let mut lru = self.tree_lru.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(pos) = lru.iter().position(|u| u == uri) {
+            lru.remove(pos);
+        }
+        lru.push_front(uri.clone());
+    }
+
+    /// Evict green trees from files beyond the LRU limit.
+    fn evict_trees(&self) {
+        let mut lru = self.tree_lru.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        while lru.len() > MAX_CACHED_TREES {
+            if let Some(evicted_uri) = lru.pop_back() {
+                if let Some(mut info) = self.files.get_mut(&evicted_uri) {
+                    info.green = None;
+                }
+            }
+        }
+    }
+
+    /// Get the green tree for a URI, re-parsing from stored source if evicted.
+    fn get_or_reparse_green(&self, uri: &Uri) -> Option<rowan::GreenNode> {
+        let info = self.files.get(uri)?;
+        if let Some(green) = &info.green {
+            return Some(green.clone());
+        }
+        // Re-parse from stored text.
+        let source = info.source_text.clone();
+        drop(info);
+        let (green, _) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            sass_parser::parse(&source)
+        }))
+        .ok()?;
+        if let Some(mut info) = self.files.get_mut(uri) {
+            info.green = Some(green.clone());
+        }
+        self.touch_lru(uri);
+        self.evict_trees();
+        Some(green)
+    }
+
+    /// Total number of indexed files.
+    pub fn file_count(&self) -> usize {
+        self.files.len()
+    }
+
+    /// Number of files currently holding a green tree in memory.
+    pub fn cached_tree_count(&self) -> usize {
+        self.files.iter().filter(|e| e.green.is_some()).count()
+    }
+
     /// Index a file: parse if needed, collect symbols and resolve imports.
     /// `open_docs` provides in-memory text for open documents (takes priority over disk).
     pub fn index_file(
@@ -96,15 +156,19 @@ impl ModuleGraph {
         green: rowan::GreenNode,
         symbols: FileSymbols,
         line_index: sass_parser::line_index::LineIndex,
+        source_text: String,
     ) {
         self.files.insert(
             uri.clone(),
             ModuleInfo {
                 symbols,
-                green: green.clone(),
+                green: Some(green.clone()),
                 line_index,
+                source_text,
             },
         );
+        self.touch_lru(uri);
+        self.evict_trees();
 
         let root = SyntaxNode::new_root(green);
         let import_refs = imports::collect_imports(&root);
@@ -197,6 +261,10 @@ impl ModuleGraph {
     pub fn remove_file(&self, uri: &Uri) {
         self.files.remove(uri);
         self.edges.remove(uri);
+        let mut lru = self.tree_lru.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(pos) = lru.iter().position(|u| u == uri) {
+            lru.remove(pos);
+        }
     }
 
     /// Resolve a qualified name (`namespace.$name` or `namespace.func()`)
@@ -600,49 +668,53 @@ impl ModuleGraph {
         let mut results = Vec::new();
         let ref_kind = symbol_to_ref_kind(target_kind);
 
-        for entry in &self.files {
-            let file_uri = entry.key();
-            let info = entry.value();
+        // Collect URIs + symbol-level matches first (releases DashMap shard locks).
+        let file_uris: Vec<Uri> = self.files.iter().map(|e| e.key().clone()).collect();
 
-            // Include declaration if requested
-            if include_declaration && file_uri == target_uri {
-                if let Some(sym) = info
-                    .symbols
-                    .definitions
-                    .iter()
-                    .find(|s| s.name == target_name && s.kind == target_kind)
-                {
-                    results.push((target_uri.clone(), sym.selection_range));
+        for file_uri in &file_uris {
+            if let Some(info) = self.files.get(file_uri) {
+                // Include declaration if requested
+                if include_declaration && file_uri == target_uri {
+                    if let Some(sym) = info
+                        .symbols
+                        .definitions
+                        .iter()
+                        .find(|s| s.name == target_name && s.kind == target_kind)
+                    {
+                        results.push((target_uri.clone(), sym.selection_range));
+                    }
                 }
-            }
 
-            // Check unqualified references from SymbolRef
-            for sym_ref in &info.symbols.references {
-                if sym_ref.name != target_name || sym_ref.kind != ref_kind {
-                    continue;
-                }
-                if let Some((resolved_uri, _)) =
-                    self.resolve_unqualified(file_uri, &sym_ref.name, target_kind)
-                {
-                    if &resolved_uri == target_uri {
-                        results.push((file_uri.clone(), sym_ref.selection_range));
+                // Check unqualified references from SymbolRef
+                for sym_ref in &info.symbols.references {
+                    if sym_ref.name != target_name || sym_ref.kind != ref_kind {
+                        continue;
+                    }
+                    if let Some((resolved_uri, _)) =
+                        self.resolve_unqualified(file_uri, &sym_ref.name, target_kind)
+                    {
+                        if &resolved_uri == target_uri {
+                            results.push((file_uri.clone(), sym_ref.selection_range));
+                        }
                     }
                 }
             }
 
             // Check namespace-qualified references via CST walk
-            let root = SyntaxNode::new_root(info.green.clone());
-            for node in root.descendants() {
-                if node.kind() != SyntaxKind::NAMESPACE_REF {
-                    continue;
-                }
-                if let Some((ns, name, kind, range)) = extract_ns_ref_info(&node) {
-                    if name == target_name && kind == target_kind {
-                        if let Some((resolved_uri, _)) =
-                            self.resolve_qualified(file_uri, &ns, &name, target_kind)
-                        {
-                            if &resolved_uri == target_uri {
-                                results.push((file_uri.clone(), range));
+            if let Some(green) = self.get_or_reparse_green(file_uri) {
+                let root = SyntaxNode::new_root(green);
+                for node in root.descendants() {
+                    if node.kind() != SyntaxKind::NAMESPACE_REF {
+                        continue;
+                    }
+                    if let Some((ns, name, kind, range)) = extract_ns_ref_info(&node) {
+                        if name == target_name && kind == target_kind {
+                            if let Some((resolved_uri, _)) =
+                                self.resolve_qualified(file_uri, &ns, &name, target_kind)
+                            {
+                                if &resolved_uri == target_uri {
+                                    results.push((file_uri.clone(), range));
+                                }
                             }
                         }
                     }
@@ -706,14 +778,12 @@ impl ModuleGraph {
                 }
 
                 // Walk the FORWARD_RULE CST to find the exact token range
-                let Some(info) = self.files.get(file_uri) else {
-                    continue;
-                };
-                let root = SyntaxNode::new_root(info.green.clone());
-                let ranges =
-                    find_name_in_forward_clauses(&root, old_name, kind);
-                for range in ranges {
-                    results.push((file_uri.clone(), range));
+                if let Some(green) = self.get_or_reparse_green(file_uri) {
+                    let root = SyntaxNode::new_root(green);
+                    let ranges = find_name_in_forward_clauses(&root, old_name, kind);
+                    for range in ranges {
+                        results.push((file_uri.clone(), range));
+                    }
                 }
             }
         }
@@ -769,7 +839,7 @@ impl ModuleGraph {
             symbols::collect_symbols(&root)
         };
         // Full indexing: also resolves imports so @forward chains are tracked.
-        self.index_file(uri, green, file_symbols, line_index);
+        self.index_file(uri, green, file_symbols, line_index, source);
     }
 }
 
@@ -1187,31 +1257,24 @@ mod tests {
 
     fn make_info(
         source: &str,
-    ) -> (
-        rowan::GreenNode,
-        FileSymbols,
-        sass_parser::line_index::LineIndex,
-    ) {
+    ) -> ModuleInfo {
         let (green, _) = sass_parser::parse(source);
         let root = SyntaxNode::new_root(green.clone());
         let syms = symbols::collect_symbols(&root);
         let li = sass_parser::line_index::LineIndex::new(source);
-        (green, syms, li)
+        ModuleInfo {
+            symbols: syms,
+            green: Some(green),
+            line_index: li,
+            source_text: source.to_owned(),
+        }
     }
 
     #[test]
     fn module_graph_local_resolution() {
         let graph = ModuleGraph::new();
         let uri: Uri = "file:///test.scss".parse().unwrap();
-        let (green, syms, line_index) = make_info("$color: red;\n@mixin btn { }");
-        graph.files.insert(
-            uri.clone(),
-            ModuleInfo {
-                symbols: syms,
-                green,
-                line_index,
-            },
-        );
+        graph.files.insert(uri.clone(), make_info("$color: red;\n@mixin btn { }"));
 
         let result = graph.resolve_unqualified(&uri, "color", symbols::SymbolKind::Variable);
         assert!(result.is_some());
@@ -1230,26 +1293,10 @@ mod tests {
         let dep_uri: Uri = "file:///colors.scss".parse().unwrap();
 
         // Index dependency
-        let (green, syms, line_index) = make_info("$primary: blue;");
-        graph.files.insert(
-            dep_uri.clone(),
-            ModuleInfo {
-                symbols: syms,
-                green,
-                line_index,
-            },
-        );
+        graph.files.insert(dep_uri.clone(), make_info("$primary: blue;"));
 
         // Index main with manual edge
-        let (green, syms, line_index) = make_info("$local: red;");
-        graph.files.insert(
-            uri.clone(),
-            ModuleInfo {
-                symbols: syms,
-                green,
-                line_index,
-            },
-        );
+        graph.files.insert(uri.clone(), make_info("$local: red;"));
         graph.edges.insert(
             uri.clone(),
             vec![ImportEdge {
@@ -1276,25 +1323,9 @@ mod tests {
         let uri: Uri = "file:///main.scss".parse().unwrap();
         let dep_uri: Uri = "file:///colors.scss".parse().unwrap();
 
-        let (green, syms, line_index) = make_info("$primary: blue;\n$secondary: green;");
-        graph.files.insert(
-            dep_uri.clone(),
-            ModuleInfo {
-                symbols: syms,
-                green,
-                line_index,
-            },
-        );
+        graph.files.insert(dep_uri.clone(), make_info("$primary: blue;\n$secondary: green;"));
 
-        let (green, _, line_index) = make_info("");
-        graph.files.insert(
-            uri.clone(),
-            ModuleInfo {
-                symbols: symbols::FileSymbols::default(),
-                green,
-                line_index,
-            },
-        );
+        graph.files.insert(uri.clone(), make_info(""));
         graph.edges.insert(
             uri.clone(),
             vec![ImportEdge {
@@ -1330,27 +1361,12 @@ mod tests {
         let mid_uri: Uri = "file:///mid.scss".parse().unwrap();
         let lib_uri: Uri = "file:///lib.scss".parse().unwrap();
 
-        let (green, syms, li) = make_info(
-            "$primary: blue;\n$secondary: green;\n@mixin btn { }\n@function size() { @return 1; }",
-        );
         graph.files.insert(
             lib_uri.clone(),
-            ModuleInfo {
-                symbols: syms,
-                green,
-                line_index: li,
-            },
+            make_info("$primary: blue;\n$secondary: green;\n@mixin btn { }\n@function size() { @return 1; }"),
         );
 
-        let (green, _, li) = make_info("");
-        graph.files.insert(
-            mid_uri.clone(),
-            ModuleInfo {
-                symbols: symbols::FileSymbols::default(),
-                green,
-                line_index: li,
-            },
-        );
+        graph.files.insert(mid_uri.clone(), make_info(""));
         // mid @forward "lib" with visibility
         graph.edges.insert(
             mid_uri.clone(),
@@ -1362,15 +1378,7 @@ mod tests {
             }],
         );
 
-        let (green, _, li) = make_info("");
-        graph.files.insert(
-            consumer_uri.clone(),
-            ModuleInfo {
-                symbols: symbols::FileSymbols::default(),
-                green,
-                line_index: li,
-            },
-        );
+        graph.files.insert(consumer_uri.clone(), make_info(""));
         // consumer @use "mid" as *
         graph.edges.insert(
             consumer_uri.clone(),
@@ -1505,25 +1513,9 @@ mod tests {
         let mid_uri: Uri = "file:///mid.scss".parse().unwrap();
         let lib_uri: Uri = "file:///lib.scss".parse().unwrap();
 
-        let (green, syms, li) = make_info("$primary: blue;\n$secondary: green;\n@mixin btn { }");
-        graph.files.insert(
-            lib_uri.clone(),
-            ModuleInfo {
-                symbols: syms,
-                green,
-                line_index: li,
-            },
-        );
+        graph.files.insert(lib_uri.clone(), make_info("$primary: blue;\n$secondary: green;\n@mixin btn { }"));
 
-        let (green, _, li) = make_info("");
-        graph.files.insert(
-            mid_uri.clone(),
-            ModuleInfo {
-                symbols: symbols::FileSymbols::default(),
-                green,
-                line_index: li,
-            },
-        );
+        graph.files.insert(mid_uri.clone(), make_info(""));
         graph.edges.insert(
             mid_uri.clone(),
             vec![ImportEdge {
@@ -1537,15 +1529,7 @@ mod tests {
             }],
         );
 
-        let (green, _, li) = make_info("");
-        graph.files.insert(
-            top_uri.clone(),
-            ModuleInfo {
-                symbols: symbols::FileSymbols::default(),
-                green,
-                line_index: li,
-            },
-        );
+        graph.files.insert(top_uri.clone(), make_info(""));
         graph.edges.insert(
             top_uri.clone(),
             vec![ImportEdge {
@@ -1559,15 +1543,7 @@ mod tests {
             }],
         );
 
-        let (green, _, li) = make_info("");
-        graph.files.insert(
-            consumer_uri.clone(),
-            ModuleInfo {
-                symbols: symbols::FileSymbols::default(),
-                green,
-                line_index: li,
-            },
-        );
+        graph.files.insert(consumer_uri.clone(), make_info(""));
         graph.edges.insert(
             consumer_uri.clone(),
             vec![ImportEdge {
@@ -1614,15 +1590,7 @@ mod tests {
         let graph = ModuleGraph::new();
         let uri: Uri = "file:///main.scss".parse().unwrap();
 
-        let (green, _, li) = make_info("");
-        graph.files.insert(
-            uri.clone(),
-            ModuleInfo {
-                symbols: symbols::FileSymbols::default(),
-                green,
-                line_index: li,
-            },
-        );
+        graph.files.insert(uri.clone(), make_info(""));
 
         let syms = builtins::builtin_symbols(module).unwrap();
         graph.builtin_symbols.insert(module.to_owned(), syms);
@@ -1719,25 +1687,9 @@ mod tests {
         let uri: Uri = "file:///main.scss".parse().unwrap();
         let globals_uri: Uri = "file:///globals.scss".parse().unwrap();
 
-        let (green, syms, li) = make_info("$brand: red;\n@mixin container { }");
-        graph.files.insert(
-            globals_uri.clone(),
-            ModuleInfo {
-                symbols: syms,
-                green,
-                line_index: li,
-            },
-        );
+        graph.files.insert(globals_uri.clone(), make_info("$brand: red;\n@mixin container { }"));
 
-        let (green, syms, li) = make_info("$local: blue;");
-        graph.files.insert(
-            uri.clone(),
-            ModuleInfo {
-                symbols: syms,
-                green,
-                line_index: li,
-            },
-        );
+        graph.files.insert(uri.clone(), make_info("$local: blue;"));
 
         // Synthetic star import from prepend
         graph.edges.insert(
@@ -1763,25 +1715,9 @@ mod tests {
         let uri: Uri = "file:///main.scss".parse().unwrap();
         let globals_uri: Uri = "file:///globals.scss".parse().unwrap();
 
-        let (green, syms, li) = make_info("$brand: red;");
-        graph.files.insert(
-            globals_uri.clone(),
-            ModuleInfo {
-                symbols: syms,
-                green,
-                line_index: li,
-            },
-        );
+        graph.files.insert(globals_uri.clone(), make_info("$brand: red;"));
 
-        let (green, _, li) = make_info("");
-        graph.files.insert(
-            uri.clone(),
-            ModuleInfo {
-                symbols: symbols::FileSymbols::default(),
-                green,
-                line_index: li,
-            },
-        );
+        graph.files.insert(uri.clone(), make_info(""));
 
         graph.edges.insert(
             uri.clone(),
@@ -1815,15 +1751,7 @@ mod tests {
     fn check_name_conflict_same_kind() {
         let graph = ModuleGraph::new();
         let uri: Uri = "file:///test.scss".parse().unwrap();
-        let (green, syms, li) = make_info("$color: red;\n$primary: blue;");
-        graph.files.insert(
-            uri.clone(),
-            ModuleInfo {
-                symbols: syms,
-                green,
-                line_index: li,
-            },
-        );
+        graph.files.insert(uri.clone(), make_info("$color: red;\n$primary: blue;"));
 
         assert!(graph.check_name_conflict(&uri, "primary", symbols::SymbolKind::Variable));
         assert!(!graph.check_name_conflict(&uri, "shade", symbols::SymbolKind::Variable));
@@ -1833,15 +1761,9 @@ mod tests {
     fn check_name_conflict_different_kind_no_conflict() {
         let graph = ModuleGraph::new();
         let uri: Uri = "file:///test.scss".parse().unwrap();
-        let (green, syms, li) =
-            make_info("$color: red;\n@function color() { @return red; }");
         graph.files.insert(
             uri.clone(),
-            ModuleInfo {
-                symbols: syms,
-                green,
-                line_index: li,
-            },
+            make_info("$color: red;\n@function color() { @return red; }"),
         );
 
         // "color" exists as function, but we're checking for variable → no conflict
@@ -1922,27 +1844,11 @@ mod tests {
         let main_uri: Uri = "file:///main.scss".parse().unwrap();
         let lib_uri: Uri = "file:///lib.scss".parse().unwrap();
 
-        let (green, syms, li) = make_info("$primary: blue;");
-        graph.files.insert(
-            lib_uri.clone(),
-            ModuleInfo {
-                symbols: syms,
-                green,
-                line_index: li,
-            },
-        );
+        graph.files.insert(lib_uri.clone(), make_info("$primary: blue;"));
 
         // main: @forward "lib" show $primary;
         let main_source = "@forward \"lib\" show $primary;";
-        let (green, syms, li) = make_info(main_source);
-        graph.files.insert(
-            main_uri.clone(),
-            ModuleInfo {
-                symbols: syms,
-                green,
-                line_index: li,
-            },
-        );
+        graph.files.insert(main_uri.clone(), make_info(main_source));
         graph.edges.insert(
             main_uri.clone(),
             vec![ImportEdge {
