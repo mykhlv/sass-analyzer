@@ -1,3 +1,5 @@
+use std::fmt::Write;
+
 use sass_parser::syntax::SyntaxNode;
 use sass_parser::syntax_kind::*;
 
@@ -370,7 +372,7 @@ fn boundary_large_generated_file() {
     // 1MB file should complete without panic
     let mut input = String::new();
     for i in 0..10_000 {
-        input.push_str(&format!(".class{i} {{ color: red; }}\n"));
+        let _ = writeln!(input, ".class{i} {{ color: red; }}");
     }
     let start = std::time::Instant::now();
     let (tree, _) = parse(&input);
@@ -455,18 +457,18 @@ fn golden_scss_round_trip() {
     );
 }
 
+fn count_kind(node: &SyntaxNode, kind: SyntaxKind) -> usize {
+    let mut n = usize::from(node.kind() == kind);
+    for child in node.children() {
+        n += count_kind(&child, kind);
+    }
+    n
+}
+
 #[test]
 fn golden_scss_has_expected_nodes() {
     let source = include_str!("fixtures/golden.scss");
     let (tree, _errors) = parse(source);
-
-    fn count_kind(node: &SyntaxNode, kind: SyntaxKind) -> usize {
-        let mut n = if node.kind() == kind { 1 } else { 0 };
-        for child in node.children() {
-            n += count_kind(&child, kind);
-        }
-        n
-    }
 
     // Variables
     assert!(

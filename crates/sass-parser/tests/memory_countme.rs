@@ -4,7 +4,7 @@
 static NORMALIZE_CSS: &str = include_str!("fixtures/normalize.css");
 
 fn generate_large_scss(target_bytes: usize) -> String {
-    let block = r#"
+    let block = r"
 .component-#{$i} {
   $color: hsl($i * 10, 50%, 50%);
   color: $color;
@@ -20,7 +20,7 @@ fn generate_large_scss(target_bytes: usize) -> String {
     align-items: center;
   }
 }
-"#;
+";
     let mut buf = String::with_capacity(target_bytes + block.len());
     buf.push_str("$i: 1;\n");
     while buf.len() < target_bytes {

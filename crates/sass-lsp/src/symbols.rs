@@ -460,7 +460,7 @@ $primary: blue;
 
         assert!(var_refs.len() >= 2, "at least $primary + $size refs");
         assert_eq!(mixin_refs.len(), 1);
-        assert!(func_refs.len() >= 1);
+        assert!(!func_refs.is_empty());
         assert_eq!(placeholder_refs.len(), 1);
     }
 

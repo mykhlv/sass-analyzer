@@ -8,7 +8,7 @@
 //!   cd test-corpus && bash download.sh
 //!
 //! Run with:
-//!   cargo test --test sass_spec_test -- --ignored --nocapture
+//!   `cargo test --test sass_spec_test -- --ignored --nocapture`
 
 use std::collections::BTreeMap;
 use std::fmt::Write;
@@ -20,7 +20,7 @@ use sass_parser::syntax::SyntaxNode;
 
 /// A single test case extracted from an HRX file or a directory.
 struct TestCase {
-    /// Display path: hrx_file_relative / entry_prefix
+    /// Display path: `hrx_file_relative` / `entry_prefix`
     display_path: String,
     input_scss: String,
     /// dart-sass expects success (has output.css)
@@ -56,13 +56,11 @@ fn parse_hrx(content: &str, hrx_rel_path: &str) -> Vec<TestCase> {
             } else {
                 current_body.clear();
             }
-        } else {
-            if current_path.is_some() {
-                if !current_body.is_empty() {
-                    current_body.push('\n');
-                }
-                current_body.push_str(line);
+        } else if current_path.is_some() {
+            if !current_body.is_empty() {
+                current_body.push('\n');
             }
+            current_body.push_str(line);
         }
     }
     // Flush last entry.
@@ -124,9 +122,8 @@ fn collect_hrx_files(dir: &Path) -> Vec<PathBuf> {
 }
 
 fn collect_hrx_recursive(dir: &Path, out: &mut Vec<PathBuf>) {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return,
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
     };
 
     for entry in entries {
@@ -149,9 +146,8 @@ fn collect_standalone_tests(dir: &Path, spec_dir: &Path) -> Vec<TestCase> {
 }
 
 fn collect_standalone_recursive(dir: &Path, spec_dir: &Path, out: &mut Vec<TestCase>) {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return,
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
     };
 
     for entry in entries {
@@ -162,9 +158,8 @@ fn collect_standalone_recursive(dir: &Path, spec_dir: &Path, out: &mut Vec<TestC
             collect_standalone_recursive(&path, spec_dir, out);
         } else if path.file_name().is_some_and(|n| n == "input.scss") {
             let parent = path.parent().unwrap();
-            let source = match std::fs::read_to_string(&path) {
-                Ok(s) => s,
-                Err(_) => continue,
+            let Ok(source) = std::fs::read_to_string(&path) else {
+                continue;
             };
 
             let has_output = parent.join("output.css").exists();
@@ -341,16 +336,15 @@ fn print_compatibility_report(results: &[CaseResult]) {
 // ── Main test ───────────────────────────────────────────────────────
 
 #[test]
-#[ignore]
+#[ignore = "requires downloading sass-spec corpus"]
 fn sass_spec_compatibility() {
     let spec_dir = spec_root();
 
-    if !spec_dir.exists() {
-        panic!(
-            "sass-spec not found at {}. Run: cd test-corpus && bash download.sh",
-            spec_dir.display()
-        );
-    }
+    assert!(
+        spec_dir.exists(),
+        "sass-spec not found at {}. Run: cd test-corpus && bash download.sh",
+        spec_dir.display()
+    );
 
     let hrx_files = collect_hrx_files(&spec_dir);
     assert!(

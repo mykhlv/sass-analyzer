@@ -45,7 +45,7 @@ fn lex_normalize_css(bencher: Bencher<'_, '_>) {
     bencher
         .counter(divan::counter::BytesCount::of_str(NORMALIZE_CSS))
         .with_inputs(|| NORMALIZE_CSS)
-        .bench_values(|source| sass_parser::lexer::tokenize(source));
+        .bench_values(sass_parser::lexer::tokenize);
 }
 
 #[divan::bench]
@@ -53,7 +53,7 @@ fn lex_and_build_input_normalize_css(bencher: Bencher<'_, '_>) {
     bencher
         .counter(divan::counter::BytesCount::of_str(NORMALIZE_CSS))
         .with_inputs(|| NORMALIZE_CSS)
-        .bench_values(|source| sass_parser::input::Input::from_source(source));
+        .bench_values(sass_parser::input::Input::from_source);
 }
 
 #[divan::bench]
@@ -74,7 +74,7 @@ fn parse_normalize_css(bencher: Bencher<'_, '_>) {
     bencher
         .counter(divan::counter::BytesCount::of_str(NORMALIZE_CSS))
         .with_inputs(|| NORMALIZE_CSS)
-        .bench_values(|source| sass_parser::parse(source));
+        .bench_values(sass_parser::parse);
 }
 
 #[divan::bench]
@@ -99,7 +99,7 @@ fn lex_angular_material(bencher: Bencher<'_, '_>) {
     bencher
         .counter(divan::counter::BytesCount::of_str(source))
         .with_inputs(|| source.as_str())
-        .bench_values(|s| sass_parser::lexer::tokenize(s));
+        .bench_values(sass_parser::lexer::tokenize);
 }
 
 #[divan::bench]
@@ -111,7 +111,7 @@ fn lex_and_build_input_angular_material(bencher: Bencher<'_, '_>) {
     bencher
         .counter(divan::counter::BytesCount::of_str(source))
         .with_inputs(|| source.as_str())
-        .bench_values(|s| sass_parser::input::Input::from_source(s));
+        .bench_values(sass_parser::input::Input::from_source);
 }
 
 #[divan::bench]
@@ -140,7 +140,7 @@ fn parse_angular_material(bencher: Bencher<'_, '_>) {
     bencher
         .counter(divan::counter::BytesCount::of_str(source))
         .with_inputs(|| source.as_str())
-        .bench_values(|s| sass_parser::parse(s));
+        .bench_values(sass_parser::parse);
 }
 
 #[divan::bench]

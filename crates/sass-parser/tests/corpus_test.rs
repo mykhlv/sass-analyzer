@@ -4,7 +4,7 @@
 //!   cd test-corpus && bash download.sh
 //!
 //! Run with:
-//!   cargo test --test corpus_test -- --ignored --nocapture
+//!   `cargo test --test corpus_test -- --ignored --nocapture`
 
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
@@ -23,9 +23,8 @@ fn collect_scss_files(dir: &Path) -> Vec<PathBuf> {
 }
 
 fn collect_recursive(dir: &Path, out: &mut Vec<PathBuf>) {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return,
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
     };
 
     for entry in entries {
@@ -126,17 +125,16 @@ fn print_corpus_report(corpus_name: &str, results: &[FileResult], corpus_dir: &P
 }
 
 #[test]
-#[ignore]
+#[ignore = "requires downloading test corpus"]
 fn bootstrap_scss_zero_panics_and_round_trip() {
     let corpus = corpus_root();
     let bootstrap_dir = corpus.join("bootstrap/scss");
 
-    if !bootstrap_dir.exists() {
-        panic!(
-            "Bootstrap corpus not found at {}. Run: cd test-corpus && bash download.sh",
-            bootstrap_dir.display()
-        );
-    }
+    assert!(
+        bootstrap_dir.exists(),
+        "Bootstrap corpus not found at {}. Run: cd test-corpus && bash download.sh",
+        bootstrap_dir.display()
+    );
 
     let results = parse_corpus_dir(&bootstrap_dir);
     print_corpus_report("Bootstrap", &results, &bootstrap_dir);
@@ -177,12 +175,11 @@ fn run_corpus_test(name: &str, subdir: &str) {
     let corpus = corpus_root();
     let dir = corpus.join(subdir);
 
-    if !dir.exists() {
-        panic!(
-            "{name} corpus not found at {}. Run: cd test-corpus && bash download.sh",
-            dir.display()
-        );
-    }
+    assert!(
+        dir.exists(),
+        "{name} corpus not found at {}. Run: cd test-corpus && bash download.sh",
+        dir.display()
+    );
 
     let results = parse_corpus_dir(&dir);
     print_corpus_report(name, &results, &dir);
@@ -207,25 +204,25 @@ fn run_corpus_test(name: &str, subdir: &str) {
 }
 
 #[test]
-#[ignore]
+#[ignore = "requires downloading test corpus"]
 fn foundation_scss_zero_panics_and_round_trip() {
     run_corpus_test("Foundation", "foundation/scss");
 }
 
 #[test]
-#[ignore]
+#[ignore = "requires downloading test corpus"]
 fn primer_scss_zero_panics_and_round_trip() {
     run_corpus_test("Primer", "primer/src");
 }
 
 #[test]
-#[ignore]
+#[ignore = "requires downloading test corpus"]
 fn bulma_scss_zero_panics_and_round_trip() {
     run_corpus_test("Bulma", "bulma/sass");
 }
 
 #[test]
-#[ignore]
+#[ignore = "requires downloading test corpus"]
 fn angular_material_scss_zero_panics_and_round_trip() {
     run_corpus_test("Angular Material", "angular-material/scss");
 }

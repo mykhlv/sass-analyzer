@@ -2,6 +2,7 @@ use expect_test::{Expect, expect};
 use sass_parser::imports::collect_imports;
 use sass_parser::syntax::{SyntaxNode, debug_tree};
 
+#[allow(clippy::needless_pass_by_value)]
 fn check_tree(source: &str, expect: Expect) {
     let (green, errors) = sass_parser::parse(source);
     let tree = SyntaxNode::new_root(green);
@@ -23,6 +24,7 @@ fn check_tree(source: &str, expect: Expect) {
     expect.assert_eq(buf.trim_end());
 }
 
+#[allow(clippy::needless_pass_by_value)]
 fn check_imports(source: &str, expect: Expect) {
     let (green, _) = sass_parser::parse(source);
     let tree = SyntaxNode::new_root(green);

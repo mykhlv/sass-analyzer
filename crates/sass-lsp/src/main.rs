@@ -1009,9 +1009,9 @@ impl LanguageServer for Backend {
                         tower_lsp_server::ls_types::SymbolKind::CLASS
                     }
                 };
-                let container_name = uri.to_file_path().and_then(|p| {
-                    p.file_name().map(|n| n.to_string_lossy().into_owned())
-                });
+                let container_name = uri
+                    .to_file_path()
+                    .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()));
                 Some(SymbolInformation {
                     name: sym.name,
                     kind,
@@ -1669,6 +1669,41 @@ fn fuzzy_match(name: &str, query: &str) -> bool {
         }
     }
     true
+}
+
+// ── Main ────────────────────────────────────────────────────────────
+
+#[tokio::main]
+async fn main() {
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env()
+                .add_directive(tracing::Level::INFO.into()),
+        )
+        .init();
+
+    let stdin = tokio::io::stdin();
+    let stdout = tokio::io::stdout();
+
+    let (service, socket) = LspService::new(|client| {
+        let documents = Arc::new(DashMap::new());
+        let module_graph = Arc::new(workspace::ModuleGraph::new());
+        let (task_tx, task_rx) = mpsc::unbounded_channel();
+        tokio::spawn(run_worker(
+            task_rx,
+            client.clone(),
+            Arc::clone(&documents),
+            Arc::clone(&module_graph),
+        ));
+        Backend {
+            client,
+            documents,
+            module_graph,
+            task_tx,
+        }
+    });
+    Server::new(stdin, stdout, socket).serve(service).await;
 }
 
 // ── Tests ───────────────────────────────────────────────────────────
@@ -2463,7 +2498,10 @@ mod tests {
 
         let resp = recv_msg(&mut reader, &mut writer).await;
         let content = resp["result"]["contents"]["value"].as_str().unwrap();
-        assert!(content.contains("$color"), "hover should show variable name");
+        assert!(
+            content.contains("$color"),
+            "hover should show variable name"
+        );
         assert!(content.contains("red"), "hover should show value");
     }
 
@@ -2508,7 +2546,10 @@ mod tests {
 
         let resp = recv_msg(&mut reader, &mut writer).await;
         let content = resp["result"]["contents"]["value"].as_str().unwrap();
-        assert!(content.contains("$primary"), "hover on def should show name");
+        assert!(
+            content.contains("$primary"),
+            "hover on def should show name"
+        );
         assert!(content.contains("blue"), "hover on def should show value");
     }
 
@@ -2597,7 +2638,10 @@ mod tests {
         .await;
 
         let resp = recv_msg(&mut reader, &mut writer).await;
-        assert!(resp["result"].is_null(), "hover on empty space should be null");
+        assert!(
+            resp["result"].is_null(),
+            "hover on empty space should be null"
+        );
     }
 
     #[tokio::test]
@@ -2640,7 +2684,10 @@ mod tests {
 
         let resp = recv_msg(&mut reader, &mut writer).await;
         let content = resp["result"]["contents"]["value"].as_str().unwrap();
-        assert!(content.contains("primary color"), "hover should show doc comment");
+        assert!(
+            content.contains("primary color"),
+            "hover should show doc comment"
+        );
     }
 
     #[tokio::test]
@@ -3572,39 +3619,4 @@ mod tests {
         let resp = do_initialize_with(&mut reader, &mut writer, serde_json::json!({})).await;
         assert!(resp["result"]["capabilities"].is_object());
     }
-}
-
-// ── Main ────────────────────────────────────────────────────────────
-
-#[tokio::main]
-async fn main() {
-    tracing_subscriber::fmt()
-        .with_writer(std::io::stderr)
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(tracing::Level::INFO.into()),
-        )
-        .init();
-
-    let stdin = tokio::io::stdin();
-    let stdout = tokio::io::stdout();
-
-    let (service, socket) = LspService::new(|client| {
-        let documents = Arc::new(DashMap::new());
-        let module_graph = Arc::new(workspace::ModuleGraph::new());
-        let (task_tx, task_rx) = mpsc::unbounded_channel();
-        tokio::spawn(run_worker(
-            task_rx,
-            client.clone(),
-            Arc::clone(&documents),
-            Arc::clone(&module_graph),
-        ));
-        Backend {
-            client,
-            documents,
-            module_graph,
-            task_tx,
-        }
-    });
-    Server::new(stdin, stdout, socket).serve(service).await;
 }

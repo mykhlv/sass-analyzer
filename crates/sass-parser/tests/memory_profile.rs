@@ -9,7 +9,7 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 static NORMALIZE_CSS: &str = include_str!("fixtures/normalize.css");
 
 fn generate_large_scss(target_bytes: usize) -> String {
-    let block = r#"
+    let block = r"
 .component-#{$i} {
   $color: hsl($i * 10, 50%, 50%);
   color: $color;
@@ -25,7 +25,7 @@ fn generate_large_scss(target_bytes: usize) -> String {
     align-items: center;
   }
 }
-"#;
+";
     let mut buf = String::with_capacity(target_bytes + block.len());
     buf.push_str("$i: 1;\n");
     while buf.len() < target_bytes {
@@ -40,7 +40,7 @@ fn dhat_heap_profile() {
 
     // --- normalize.css (6 KB) ---
     let (green, _) = sass_parser::parse(NORMALIZE_CSS);
-    let _tree = sass_parser::syntax::SyntaxNode::new_root(green);
+    let tree = sass_parser::syntax::SyntaxNode::new_root(green);
 
     let stats = dhat::HeapStats::get();
     eprintln!("── dhat: normalize.css ({} bytes) ──", NORMALIZE_CSS.len());
@@ -56,7 +56,7 @@ fn dhat_heap_profile() {
     assert!(stats.total_blocks > 0, "should have heap allocations");
 
     // --- large SCSS (~1 MB) ---
-    drop(_tree);
+    drop(tree);
 
     let source = generate_large_scss(1_000_000);
     let blocks_before = dhat::HeapStats::get().total_blocks;
@@ -69,7 +69,7 @@ fn dhat_heap_profile() {
     let input_kb = source.len() / 1024;
 
     eprintln!("── dhat: generated SCSS ({input_kb} KB) ──");
-    eprintln!("  New blocks:       {:>8}", new_blocks);
+    eprintln!("  New blocks:       {new_blocks:>8}");
     eprintln!("  Max bytes live:   {:>8}", stats.max_bytes);
     eprintln!(
         "  Allocs/KB input:  {:.1}",

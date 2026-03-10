@@ -5,10 +5,20 @@ use sass_parser::parser::Parser;
 use sass_parser::syntax::SassLanguage;
 use sass_parser::syntax_kind::*;
 
+fn recurse_depth(p: &mut Parser<'_>, remaining: u32) {
+    if remaining == 0 {
+        return;
+    }
+    if let Ok(mut g) = p.depth_guard() {
+        recurse_depth(&mut g, remaining - 1);
+    }
+}
+
 fn make_input(tokens: &[(SyntaxKind, &str)]) -> Input {
     Input::from_tokens(tokens)
 }
 
+#[allow(clippy::needless_pass_by_value)]
 fn check(
     tokens: &[(SyntaxKind, &str)],
     source: &str,
@@ -33,7 +43,7 @@ fn check(
     if !errs.is_empty() {
         buf.push_str("errors:\n");
         for (msg, range) in &errs {
-            buf.push_str(&format!("  {range:?}: {msg}\n"));
+            let _ = std::fmt::Write::write_fmt(&mut buf, format_args!("  {range:?}: {msg}\n"));
         }
     }
     expect.assert_eq(&buf);
@@ -48,9 +58,9 @@ fn empty_input() {
             let m = p.start();
             let _ = m.complete(p, SOURCE_FILE);
         },
-        expect![[r#"
+        expect![[r"
             SOURCE_FILE@0..0
-        "#]],
+        "]],
     );
 }
 
@@ -161,23 +171,14 @@ fn depth_limit_triggers_error() {
         "",
         |p| {
             let m = p.start();
-            fn recurse(p: &mut Parser<'_>, remaining: u32) {
-                if remaining == 0 {
-                    return;
-                }
-                match p.depth_guard() {
-                    Ok(mut g) => recurse(&mut g, remaining - 1),
-                    Err(()) => {}
-                }
-            }
-            recurse(p, 257); // 256 succeed, 257th fails
+            recurse_depth(p, 257); // 256 succeed, 257th fails
             let _ = m.complete(p, SOURCE_FILE);
         },
-        expect![[r#"
+        expect![[r"
             SOURCE_FILE@0..0
             errors:
               0..0: nesting too deep
-        "#]],
+        "]],
     );
 }
 
@@ -229,6 +230,7 @@ fn marker_abandon_tombstone() {
 
 // ── Integration tests: lexer → Input → Parser → bridge → rowan (1.16) ──
 
+#[allow(clippy::needless_pass_by_value)]
 fn lex_parse_check(source: &str, expect: Expect) {
     let tokens = sass_parser::lexer::tokenize(source);
     let input = Input::from_tokens(&tokens);
@@ -255,7 +257,7 @@ fn lex_parse_check(source: &str, expect: Expect) {
     if !errs.is_empty() {
         buf.push_str("errors:\n");
         for (msg, range) in &errs {
-            buf.push_str(&format!("  {range:?}: {msg}\n"));
+            let _ = std::fmt::Write::write_fmt(&mut buf, format_args!("  {range:?}: {msg}\n"));
         }
     }
     expect.assert_eq(&buf);
@@ -265,9 +267,9 @@ fn lex_parse_check(source: &str, expect: Expect) {
 fn integration_empty() {
     lex_parse_check(
         "",
-        expect![[r#"
+        expect![[r"
             SOURCE_FILE@0..0
-        "#]],
+        "]],
     );
 }
 

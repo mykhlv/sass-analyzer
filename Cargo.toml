@@ -36,6 +36,8 @@ missing_panics_doc = "allow"
 too_many_lines = "allow"
 match_same_arms = "allow"
 similar_names = "allow"
+cast_precision_loss = "allow"
+needless_raw_string_hashes = "allow"
 
 [profile.release]
 strip = true
