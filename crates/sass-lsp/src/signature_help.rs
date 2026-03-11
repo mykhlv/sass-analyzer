@@ -202,8 +202,10 @@ pub(crate) fn parse_param_labels(signature: &str, params_text: &str) -> Vec<Para
                 if !param.is_empty() {
                     let abs_start = content_offset + segment_start;
                     let abs_end = content_offset + segment_start + param.len();
+                    let utf16_start = byte_offset_to_utf16(&signature[..abs_start]);
+                    let utf16_end = byte_offset_to_utf16(&signature[..abs_end]);
                     result.push(ParameterInformation {
-                        label: ParameterLabel::LabelOffsets([abs_start as u32, abs_end as u32]),
+                        label: ParameterLabel::LabelOffsets([utf16_start, utf16_end]),
                         documentation: None,
                     });
                 }
@@ -225,11 +227,18 @@ pub(crate) fn parse_param_labels(signature: &str, params_text: &str) -> Vec<Para
     if !param.is_empty() {
         let abs_start = content_offset + segment_start;
         let abs_end = content_offset + segment_start + param.len();
+        let utf16_start = byte_offset_to_utf16(&signature[..abs_start]);
+        let utf16_end = byte_offset_to_utf16(&signature[..abs_end]);
         result.push(ParameterInformation {
-            label: ParameterLabel::LabelOffsets([abs_start as u32, abs_end as u32]),
+            label: ParameterLabel::LabelOffsets([utf16_start, utf16_end]),
             documentation: None,
         });
     }
 
     result
+}
+
+#[allow(clippy::cast_possible_truncation)]
+fn byte_offset_to_utf16(s: &str) -> u32 {
+    s.encode_utf16().count() as u32
 }
