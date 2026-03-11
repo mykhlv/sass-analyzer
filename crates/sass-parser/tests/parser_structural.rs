@@ -1,7 +1,7 @@
 use std::fmt::Write;
 
 use sass_parser::syntax::SyntaxNode;
-use sass_parser::syntax_kind::*;
+use sass_parser::syntax_kind::SyntaxKind::{self, *};
 
 fn parse(
     source: &str,

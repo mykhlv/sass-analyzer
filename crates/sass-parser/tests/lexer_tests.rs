@@ -1,5 +1,5 @@
 use sass_parser::lexer::{Lexer, tokenize};
-use sass_parser::syntax_kind::*;
+use sass_parser::syntax_kind::SyntaxKind::{self, *};
 
 fn lex(input: &str) -> Vec<(SyntaxKind, &str)> {
     tokenize(input)
@@ -1244,6 +1244,78 @@ fn empty_interpolation() {
             (STRING_END, "\""),
         ]
     );
+}
+
+// ── Lexer error recovery ──────────────────────────────────────────────
+
+#[test]
+fn unterminated_block_comment_then_valid() {
+    // After an unterminated block comment, the rest of the input is consumed as error.
+    // This verifies the lexer doesn't produce garbage tokens.
+    let tokens = lex("/* oops");
+    assert_eq!(tokens, vec![(ERROR, "/* oops")]);
+}
+
+#[test]
+fn unterminated_string_consumes_to_eof() {
+    // SCSS strings can span lines, so an unterminated string consumes to EOF
+    let tokens = lex("\"oops\na: b;");
+    assert_eq!(tokens, vec![(ERROR, "\"oops\na: b;")]);
+}
+
+#[test]
+fn unterminated_interpolation_in_string() {
+    // #{  opened but never closed — string continues to EOF
+    let tokens = lex("\"hello #{$x");
+    assert_eq!(
+        tokens,
+        vec![
+            (STRING_START, "\"hello "),
+            (HASH_LBRACE, "#{"),
+            (DOLLAR, "$"),
+            (IDENT, "x"),
+        ]
+    );
+}
+
+#[test]
+fn error_char_then_valid_tokens() {
+    // A single error character should not break lexing of subsequent tokens
+    let tokens = lex("^\n.foo { }");
+    assert_eq!(
+        tokens,
+        vec![
+            (ERROR, "^"),
+            (WHITESPACE, "\n"),
+            (DOT, "."),
+            (IDENT, "foo"),
+            (WHITESPACE, " "),
+            (LBRACE, "{"),
+            (WHITESPACE, " "),
+            (RBRACE, "}"),
+        ]
+    );
+}
+
+#[test]
+fn multiple_error_chars_isolated() {
+    // Each error char is its own token, not merged
+    let tokens = lex("^\x01");
+    assert_eq!(tokens, vec![(ERROR, "^"), (ERROR, "\x01")]);
+}
+
+#[test]
+fn bom_mid_file_is_error() {
+    // BOM is only valid at start; mid-file BOM should be an error
+    let tokens = lex("a\u{FEFF}b");
+    // The lexer treats BOM as whitespace regardless of position
+    assert_eq!(
+        tokens.len(),
+        3,
+        "should produce 3 tokens (ident, bom-token, ident)"
+    );
+    assert_eq!(tokens[0], (IDENT, "a"));
+    assert_eq!(tokens[2], (IDENT, "b"));
 }
 
 // ── Round-trip ────────────────────────────────────────────────────────

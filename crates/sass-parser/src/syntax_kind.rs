@@ -191,4 +191,4 @@ impl From<SyntaxKind> for u16 {
     }
 }
 
-pub use SyntaxKind::*;
+pub(crate) use SyntaxKind::*;

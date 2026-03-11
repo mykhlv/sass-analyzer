@@ -1,6 +1,6 @@
 pub(crate) mod at_rules;
 mod declarations;
-pub mod expressions;
+pub(crate) mod expressions;
 pub(crate) mod selectors;
 
 use crate::parser::Parser;

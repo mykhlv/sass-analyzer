@@ -7,9 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+- Cross-platform CI (Ubuntu, Windows, macOS) with cargo-deny license/vulnerability auditing
+- CONTRIBUTING.md with development setup and coding guidelines
+- Crate-level documentation with quick start example
+- Lexer error recovery tests and non-ASCII / UTF-16 LSP tests
+
 ### Fixed
 - Correct UTF-16 column offsets for non-ASCII content in diagnostics, go-to-definition, hover, references, rename, and document symbols
 - Windows: extension now finds the bundled `sass-lsp.exe` binary
+- `path_to_uri` no longer panics on paths with special characters
+- Silent failure when LSP worker channel drops (now logs error)
 
 ## 0.1.0 — 2026-03-08
 

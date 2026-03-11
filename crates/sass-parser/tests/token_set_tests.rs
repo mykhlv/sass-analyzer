@@ -1,4 +1,4 @@
-use sass_parser::syntax_kind::*;
+use sass_parser::syntax_kind::SyntaxKind::*;
 use sass_parser::token_set::TokenSet;
 
 #[test]

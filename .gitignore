@@ -1,4 +1,19 @@
 /target/
+node_modules/
+*.vsix
+.DS_Store
+Thumbs.db
+
+# Extension build artifacts
+editors/code/out/
+editors/code/bin/
+
+# Fuzz build artifacts
+crates/sass-parser/fuzz/target/
+crates/sass-parser/fuzz/corpus/
+crates/sass-parser/fuzz/artifacts/
+
+# Test corpora (downloaded on demand)
 /test-corpus/bootstrap/
 /test-corpus/foundation/
 /test-corpus/primer/

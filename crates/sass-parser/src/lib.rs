@@ -1,3 +1,29 @@
+//! Hand-written, lossless SCSS parser following rust-analyzer's architecture.
+//!
+//! Produces a lossless concrete syntax tree (CST) via [rowan], where every byte
+//! of the input is preserved. The tree is built in two phases: an events-based
+//! parser emits `Event`s, and a bridge converts them into a rowan green tree.
+//!
+//! # Quick start
+//!
+//! ```
+//! let source = "$color: #fff;\n.btn { color: $color; }";
+//! let (green, errors) = sass_parser::parse(source);
+//!
+//! // The tree round-trips losslessly
+//! let root = sass_parser::syntax::SyntaxNode::new_root(green);
+//! assert_eq!(root.text().to_string(), source);
+//! assert!(errors.is_empty());
+//! ```
+//!
+//! # Key types
+//!
+//! - [`parse()`] — entry point, returns a green tree + diagnostics
+//! - [`syntax_kind::SyntaxKind`] — all node and token kinds
+//! - [`syntax::SyntaxNode`] / [`syntax::SyntaxToken`] — typed tree accessors
+//! - [`line_index::LineIndex`] — byte offset ↔ line/column mapping
+//! - [`resolver::ModuleResolver`] — `@use` / `@forward` / `@import` resolution
+
 // ── Public API ──────────────────────────────────────────────────────
 pub mod syntax_kind;
 pub mod text_range;

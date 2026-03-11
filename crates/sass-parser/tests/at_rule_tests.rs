@@ -1,27 +1,8 @@
-use expect_test::{Expect, expect};
-use sass_parser::syntax::{SyntaxNode, debug_tree};
+mod common;
 
-#[allow(clippy::needless_pass_by_value)]
-fn check(source: &str, expect: Expect) {
-    let (green, errors) = sass_parser::parse(source);
-    let tree = SyntaxNode::new_root(green);
-
-    assert_eq!(
-        tree.text().to_string(),
-        source,
-        "lossless round-trip failed"
-    );
-
-    let mut buf = debug_tree(&tree);
-    if !errors.is_empty() {
-        buf.push_str("errors:\n");
-        for (msg, range) in &errors {
-            use std::fmt::Write;
-            let _ = writeln!(buf, "  {range:?}: {msg}");
-        }
-    }
-    expect.assert_eq(&buf);
-}
+use common::check;
+use expect_test::expect;
+use sass_parser::syntax::SyntaxNode;
 
 // ── @mixin ──────────────────────────────────────────────────────────────
 

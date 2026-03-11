@@ -648,12 +648,14 @@ impl LanguageServer for Backend {
             return;
         }
         self.source_texts.insert(doc.uri.clone(), doc.text.clone());
-        let _ = self.task_tx.send(Task::Parse {
+        if self.task_tx.send(Task::Parse {
             uri: doc.uri,
             version: doc.version,
             text: doc.text,
             incremental: None,
-        });
+        }).is_err() {
+            tracing::error!("worker channel closed, parse task dropped");
+        }
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -667,12 +669,14 @@ impl LanguageServer for Backend {
                     return;
                 }
                 self.source_texts.insert(uri.clone(), change.text.clone());
-                let _ = self.task_tx.send(Task::Parse {
+                if self.task_tx.send(Task::Parse {
                     uri,
                     version,
                     text: change.text,
                     incremental: None,
-                });
+                }).is_err() {
+                    tracing::error!("worker channel closed, parse task dropped");
+                }
             }
             return;
         };
@@ -690,21 +694,25 @@ impl LanguageServer for Backend {
             return;
         }
         self.source_texts.insert(uri.clone(), text.clone());
-        let _ = self.task_tx.send(Task::Parse {
+        if self.task_tx.send(Task::Parse {
             uri,
             version,
             text,
             incremental,
-        });
+        }).is_err() {
+            tracing::error!("worker channel closed, parse task dropped");
+        }
     }
 
     async fn did_save(&self, _params: DidSaveTextDocumentParams) {}
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         self.source_texts.remove(&params.text_document.uri);
-        let _ = self.task_tx.send(Task::Close {
+        if self.task_tx.send(Task::Close {
             uri: params.text_document.uri,
-        });
+        }).is_err() {
+            tracing::error!("worker channel closed, close task dropped");
+        }
     }
 
     async fn semantic_tokens_full(
@@ -1336,9 +1344,18 @@ fn detect_completion_context(text: &str, position: Position) -> CompletionContex
         return CompletionContext::General;
     };
 
-    // Get text before cursor on this line
-    let col = position.character as usize;
-    let before: String = line.chars().take(col).collect();
+    // Get text before cursor on this line (position.character is UTF-16 offset)
+    let target_utf16 = position.character as usize;
+    let mut utf16_count = 0;
+    let mut byte_offset = 0;
+    for ch in line.chars() {
+        if utf16_count >= target_utf16 {
+            break;
+        }
+        utf16_count += ch.len_utf16();
+        byte_offset += ch.len_utf8();
+    }
+    let before = &line[..byte_offset];
     let trimmed = before.trim_start();
 
     // @use "path" or @forward "path" → module path completion
@@ -4792,6 +4809,100 @@ mod tests {
         ];
         assert!(apply_content_changes(&mut text, changes));
         assert_eq!(text, "aXbYc");
+    }
+
+    // ── Non-ASCII / UTF-16 tests ─────────────────────────────────────
+
+    #[test]
+    fn byte_to_lsp_pos_ascii() {
+        let source = "abc\ndef";
+        let li = sass_parser::line_index::LineIndex::new(source);
+        // 'd' is at byte 4 (line 2, col 1)
+        let (line, col) = byte_to_lsp_pos(source, &li, 4.into());
+        assert_eq!((line, col), (1, 0));
+    }
+
+    #[test]
+    fn byte_to_lsp_pos_multibyte() {
+        // 'é' is 2 bytes in UTF-8 but 1 UTF-16 code unit
+        let source = "café\nx";
+        let li = sass_parser::line_index::LineIndex::new(source);
+        // 'x' is at byte 6 (c=1, a=1, f=1, é=2, \n=1)
+        let (line, col) = byte_to_lsp_pos(source, &li, 6.into());
+        assert_eq!((line, col), (1, 0));
+        // end of "café" = byte 5, col should be 4 (c, a, f, é each 1 UTF-16 unit)
+        let (line, col) = byte_to_lsp_pos(source, &li, 5.into());
+        assert_eq!((line, col), (0, 4));
+    }
+
+    #[test]
+    fn byte_to_lsp_pos_surrogate_pair() {
+        // '𝕊' (U+1D54A) is 4 bytes in UTF-8 and 2 UTF-16 code units (surrogate pair)
+        let source = "a𝕊b\nx";
+        let li = sass_parser::line_index::LineIndex::new(source);
+        // 'b' is at byte 5 (a=1, 𝕊=4), should be UTF-16 col 3 (a=1, 𝕊=2)
+        let (line, col) = byte_to_lsp_pos(source, &li, 5.into());
+        assert_eq!((line, col), (0, 3));
+    }
+
+    #[test]
+    fn apply_content_changes_multibyte() {
+        // LSP positions use UTF-16 columns. 'é' is 1 UTF-16 unit.
+        let mut text = String::from("café");
+        // Insert 'X' after 'f' (UTF-16 col 3)
+        let changes = vec![TextDocumentContentChangeEvent {
+            range: Some(Range::new(Position::new(0, 3), Position::new(0, 3))),
+            range_length: None,
+            text: "X".into(),
+        }];
+        assert!(apply_content_changes(&mut text, changes));
+        assert_eq!(text, "cafXé");
+    }
+
+    #[test]
+    fn apply_content_changes_surrogate_pair() {
+        // '𝕊' (U+1D54A) is 2 UTF-16 code units.
+        let mut text = String::from("a𝕊b");
+        // Delete 'b' at UTF-16 col 3 (a=1, 𝕊=2)
+        let changes = vec![TextDocumentContentChangeEvent {
+            range: Some(Range::new(Position::new(0, 3), Position::new(0, 4))),
+            range_length: None,
+            text: String::new(),
+        }];
+        assert!(apply_content_changes(&mut text, changes));
+        assert_eq!(text, "a𝕊");
+    }
+
+    #[tokio::test]
+    async fn diagnostics_with_non_ascii_content() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        // Open a file with Ukrainian text and an intentional parse error
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///unicode.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": "$колір: #fff;\n.кнопка { color: $колір; }"
+                    }
+                }
+            }),
+        )
+        .await;
+
+        let diag = recv_msg(&mut reader, &mut writer).await;
+        assert_eq!(diag["method"], "textDocument/publishDiagnostics");
+        let diagnostics = diag["params"]["diagnostics"].as_array().unwrap();
+        assert!(
+            diagnostics.is_empty(),
+            "valid SCSS with non-ASCII should produce no errors, got: {diagnostics:?}"
+        );
     }
 
     #[tokio::test]

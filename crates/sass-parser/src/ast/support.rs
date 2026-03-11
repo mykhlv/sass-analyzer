@@ -13,7 +13,10 @@ pub(crate) fn children<N: AstNode>(parent: &SyntaxNode) -> AstChildren<N> {
 }
 
 /// Find the first child token of the given kind.
-#[allow(dead_code)]
+///
+/// Part of the standard AST support layer (cf. rust-analyzer).
+/// Will be used by typed AST accessors as they are added.
+#[expect(dead_code, reason = "reserved for AST layer expansion")]
 pub(crate) fn token(parent: &SyntaxNode, kind: SyntaxKind) -> Option<SyntaxToken> {
     parent
         .children_with_tokens()

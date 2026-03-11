@@ -1108,8 +1108,26 @@ fn uri_to_path(uri: &Uri) -> Option<PathBuf> {
 
 fn path_to_uri(path: &Path) -> Uri {
     Uri::from_file_path(path).unwrap_or_else(|| {
-        let s = format!("file://{}", path.display());
-        s.parse().expect("failed to parse fallback URI")
+        // Percent-encode the path for URI safety (spaces, #, %, etc.)
+        let path_str = path.to_string_lossy();
+        let encoded: String = path_str
+            .bytes()
+            .flat_map(|b| match b {
+                b'/' | b'.' | b'-' | b'_' | b'~' | b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' => {
+                    vec![b as char]
+                }
+                _ => format!("%{b:02X}").chars().collect(),
+            })
+            .collect();
+        let s = format!("file:///{encoded}");
+        match s.parse() {
+            Ok(uri) => uri,
+            Err(e) => {
+                tracing::error!(?path, %e, "failed to construct URI from path");
+                // Last-resort: return a syntactically valid but unresolvable URI
+                "file:///invalid-path".parse().unwrap()
+            }
+        }
     })
 }
 
