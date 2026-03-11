@@ -174,18 +174,22 @@ impl ModuleGraph {
             .tree_lru
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut kept = Vec::new();
         while lru.len() > self.runtime_config.max_cached_trees() {
-            if let Some(evicted_uri) = lru.pop_back() {
-                if let Some(mut info) = self.files.get_mut(&evicted_uri) {
-                    if info.source_text.is_some() {
-                        info.green = None;
-                    } else {
-                        // Can't evict green when source is also gone — keep it.
-                        lru.push_back(evicted_uri);
-                        break;
-                    }
+            let Some(evicted_uri) = lru.pop_back() else {
+                break;
+            };
+            if let Some(mut info) = self.files.get_mut(&evicted_uri) {
+                if info.source_text.is_some() {
+                    info.green = None;
+                } else {
+                    kept.push(evicted_uri);
+                    continue;
                 }
             }
+        }
+        for uri in kept {
+            lru.push_back(uri);
         }
     }
 
@@ -196,18 +200,22 @@ impl ModuleGraph {
             .source_lru
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut kept = Vec::new();
         while lru.len() > self.runtime_config.max_cached_sources() {
-            if let Some(evicted_uri) = lru.pop_back() {
-                if let Some(mut info) = self.files.get_mut(&evicted_uri) {
-                    if info.green.is_some() {
-                        info.source_text = None;
-                    } else {
-                        // Can't evict source when green is also gone — keep it.
-                        lru.push_back(evicted_uri);
-                        break;
-                    }
+            let Some(evicted_uri) = lru.pop_back() else {
+                break;
+            };
+            if let Some(mut info) = self.files.get_mut(&evicted_uri) {
+                if info.green.is_some() {
+                    info.source_text = None;
+                } else {
+                    kept.push(evicted_uri);
+                    continue;
                 }
             }
+        }
+        for uri in kept {
+            lru.push_back(uri);
         }
     }
 
