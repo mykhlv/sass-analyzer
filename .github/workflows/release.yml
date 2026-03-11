@@ -67,6 +67,9 @@ jobs:
       - name: Copy LICENSE into extension
         run: cp LICENSE editors/code/LICENSE
 
+      - name: Copy CHANGELOG into extension
+        run: cp CHANGELOG.md editors/code/CHANGELOG.md
+
       - name: Package VSIX
         working-directory: editors/code
         run: npx @vscode/vsce package --target ${{ matrix.vsce-target }} -o sass-analyzer-${{ matrix.vsce-target }}.vsix

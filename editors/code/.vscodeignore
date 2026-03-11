@@ -4,4 +4,3 @@ src/
 tsconfig.json
 *.ts
 !out/extension.js
-CHANGELOG.md
