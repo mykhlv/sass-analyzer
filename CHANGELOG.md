@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Fixed
+- Correct UTF-16 column offsets for non-ASCII content in diagnostics, go-to-definition, hover, references, rename, and document symbols
+- Windows: extension now finds the bundled `sass-lsp.exe` binary
+
 ## 0.1.0 — 2026-03-08
 
 Initial release.
