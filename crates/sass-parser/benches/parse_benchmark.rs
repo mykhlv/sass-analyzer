@@ -158,6 +158,84 @@ fn parse_and_build_tree_angular_material(bencher: Bencher<'_, '_>) {
         });
 }
 
+// ── Incremental reparse benchmarks ──────────────────────────────────────
+
+/// Prepare an incremental edit scenario: parse old source, apply a single-char
+/// insert at `offset`, return (old_green, old_errors, edit, new_source).
+fn prepare_incremental(
+    source: &str,
+    offset: u32,
+    insert: &str,
+) -> (
+    rowan::GreenNode,
+    Vec<(String, sass_parser::text_range::TextRange)>,
+    sass_parser::reparse::TextEdit,
+    String,
+) {
+    let (old_green, old_errors) = sass_parser::parse(source);
+    let mut new_source = source.to_owned();
+    new_source.insert_str(offset as usize, insert);
+    let edit = sass_parser::reparse::TextEdit {
+        offset: sass_parser::text_range::TextSize::from(offset),
+        delete: sass_parser::text_range::TextSize::from(0u32),
+        insert_len: sass_parser::text_range::TextSize::from(insert.len() as u32),
+    };
+    (old_green, old_errors, edit, new_source)
+}
+
+#[divan::bench]
+fn full_reparse_normalize_css(bencher: Bencher<'_, '_>) {
+    let offset = NORMALIZE_CSS.len() / 2;
+    let mut new_source = NORMALIZE_CSS.to_owned();
+    new_source.insert(offset, 'x');
+    bencher
+        .with_inputs(|| new_source.clone())
+        .bench_values(|s| sass_parser::parse(&s));
+}
+
+#[divan::bench]
+fn incremental_reparse_normalize_css(bencher: Bencher<'_, '_>) {
+    let offset = NORMALIZE_CSS.len() as u32 / 2;
+    let (old_green, old_errors, edit, new_source) =
+        prepare_incremental(NORMALIZE_CSS, offset, "x");
+    bencher
+        .with_inputs(|| (old_green.clone(), old_errors.clone(), new_source.clone()))
+        .bench_values(|(g, e, s)| {
+            sass_parser::reparse::incremental_reparse(&g, &e, &edit, &s)
+        });
+}
+
+#[divan::bench]
+fn full_reparse_angular_material(bencher: Bencher<'_, '_>) {
+    let source = &*ANGULAR_MATERIAL;
+    if source.is_empty() {
+        return;
+    }
+    let offset = source.len() / 2;
+    let mut new_source = source.clone();
+    new_source.insert(offset, 'x');
+    bencher
+        .counter(divan::counter::BytesCount::of_str(source))
+        .with_inputs(|| new_source.clone())
+        .bench_values(|s| sass_parser::parse(&s));
+}
+
+#[divan::bench]
+fn incremental_reparse_angular_material(bencher: Bencher<'_, '_>) {
+    let source = &*ANGULAR_MATERIAL;
+    if source.is_empty() {
+        return;
+    }
+    let offset = source.len() as u32 / 2;
+    let (old_green, old_errors, edit, new_source) =
+        prepare_incremental(source, offset, "x");
+    bencher
+        .with_inputs(|| (old_green.clone(), old_errors.clone(), new_source.clone()))
+        .bench_values(|(g, e, s)| {
+            sass_parser::reparse::incremental_reparse(&g, &e, &edit, &s)
+        });
+}
+
 fn main() {
     divan::main();
 }
