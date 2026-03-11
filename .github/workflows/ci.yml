@@ -14,8 +14,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.85
-        with:
-          components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --workspace
       - run: cargo clippy --workspace -- -D warnings
