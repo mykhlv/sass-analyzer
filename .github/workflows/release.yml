@@ -64,6 +64,9 @@ jobs:
         working-directory: editors/code
         run: npm run build
 
+      - name: Copy LICENSE into extension
+        run: cp LICENSE editors/code/LICENSE
+
       - name: Package VSIX
         working-directory: editors/code
         run: npx @vscode/vsce package --target ${{ matrix.vsce-target }} -o sass-analyzer-${{ matrix.vsce-target }}.vsix
