@@ -18,7 +18,8 @@ use tower_lsp_server::jsonrpc::Result;
 use tower_lsp_server::ls_types::{
     CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
     Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DocumentLink, DocumentLinkOptions, DocumentLinkParams,
+    DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentLink, DocumentLinkOptions,
+    DocumentLinkParams,
     DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse,
     Hover, HoverContents, HoverParams, InitializeParams, InitializeResult, InitializedParams,
     Location, MarkupContent, MarkupKind, OneOf, ParameterInformation, ParameterLabel, Position,
@@ -703,6 +704,8 @@ impl LanguageServer for Backend {
             incremental,
         });
     }
+
+    async fn did_save(&self, _params: DidSaveTextDocumentParams) {}
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         self.source_texts.remove(&params.text_document.uri);
