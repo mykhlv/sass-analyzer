@@ -1248,6 +1248,7 @@ fn path_to_uri(path: &Path) -> Uri {
                 _ => format!("%{b:02X}").chars().collect(),
             })
             .collect();
+        let encoded = encoded.strip_prefix('/').unwrap_or(&encoded);
         let s = format!("file:///{encoded}");
         match s.parse() {
             Ok(uri) => uri,

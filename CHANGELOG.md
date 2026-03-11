@@ -44,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `merge_errors` clamps negative shifted offsets to zero instead of wrapping to corrupt ranges
 - Lexer now handles scientific notation in numbers (`1e3`, `2.5e-2`, `1E+3`)
 - Signature help parameter offsets now use UTF-16 code units (fixes highlight for non-ASCII parameter names)
+- `path_to_uri` fallback no longer produces `file:////path` (4 slashes) on Unix
 
 ## 0.1.0 — 2026-03-08
 
