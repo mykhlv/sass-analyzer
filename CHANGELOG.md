@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Linux ARM64 (`aarch64-unknown-linux-gnu`) release target
 
 ### Changed
+- Runtime constants (`maxFileSize`, `debounceMs`, `maxCachedTrees`, `maxCachedSources`) are now configurable via `initializationOptions` and `workspace/didChangeConfiguration`
 - LRU eviction for source text in module graph to cap memory usage
 - Completion handler avoids cloning full document text
 - `@use` path completion runs on a blocking thread to avoid stalling the LSP
