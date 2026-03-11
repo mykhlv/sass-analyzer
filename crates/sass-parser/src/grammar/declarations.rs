@@ -109,7 +109,7 @@ fn value(p: &mut Parser<'_>) {
     let m = p.start();
     let ctx = ParseContext::CssValue;
 
-    let mut count = 0;
+    let mut has_content = false;
     loop {
         if p.at(SEMICOLON) || p.at(RBRACE) || p.at(LBRACE) || p.at_end() || p.at(BANG) {
             break;
@@ -117,28 +117,28 @@ fn value(p: &mut Parser<'_>) {
         // In CssValue context, `/` is a separator — just consume it
         if p.at(SLASH) {
             p.bump();
-            count += 1;
+            has_content = true;
             continue;
         }
         if p.at(COMMA) {
             p.bump();
-            count += 1;
+            has_content = true;
             continue;
         }
         if !p.at_ts(expressions::EXPR_START) {
             // Unknown token in value position — bump for progress
             p.bump();
-            count += 1;
+            has_content = true;
             continue;
         }
         if expressions::expr(p, ctx).is_some() {
-            count += 1;
+            has_content = true;
         } else {
             break;
         }
     }
 
-    if count == 0 && !p.at(SEMICOLON) && !p.at(RBRACE) && !p.at(LBRACE) && !p.at_end() {
+    if !has_content && !p.at(SEMICOLON) && !p.at(RBRACE) && !p.at(LBRACE) && !p.at_end() {
         p.err_and_bump("expected value");
     }
 
