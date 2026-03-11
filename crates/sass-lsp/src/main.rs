@@ -346,9 +346,13 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
-        let Ok(new_config) =
-            serde_json::from_value::<config::SassAnalyzerConfig>(params.settings)
-        else {
+        // VS Code wraps settings under the configurationSection key.
+        let value = params
+            .settings
+            .get("sass-analyzer")
+            .cloned()
+            .unwrap_or(params.settings);
+        let Ok(new_config) = serde_json::from_value::<config::SassAnalyzerConfig>(value) else {
             tracing::warn!("failed to deserialize configuration, ignoring");
             return;
         };

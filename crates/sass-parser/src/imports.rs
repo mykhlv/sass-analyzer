@@ -71,12 +71,13 @@ fn collect_rec(node: &SyntaxNode, out: &mut Vec<ImportRef>) {
             {
                 if token.kind() == SyntaxKind::QUOTED_STRING {
                     let text = token.text();
-                    let path = text[1..text.len() - 1].to_owned();
-                    out.push(ImportRef {
-                        kind: ImportKind::Import,
-                        path,
-                        range: node.text_range(),
-                    });
+                    if let Some(unquoted) = text.get(1..text.len().saturating_sub(1)) {
+                        out.push(ImportRef {
+                            kind: ImportKind::Import,
+                            path: unquoted.to_owned(),
+                            range: node.text_range(),
+                        });
+                    }
                 }
             }
         }

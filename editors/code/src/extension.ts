@@ -84,6 +84,9 @@ export async function activate(context: ExtensionContext): Promise<void> {
     connectionOptions: {
       maxRestartCount: 4,
     },
+    synchronize: {
+      configurationSection: "sass-analyzer",
+    },
     initializationOptions: {
       loadPaths,
       importAliases,
@@ -104,7 +107,15 @@ export async function activate(context: ExtensionContext): Promise<void> {
     clientOptions,
   );
 
-  client.start();
+  if (!fs.existsSync(serverPath)) {
+    window.showErrorMessage(
+      `sass-analyzer: server binary not found at ${serverPath}. ` +
+      `Run \`cargo build -p sass-lsp\` or set sass-analyzer.server.path.`,
+    );
+    return;
+  }
+
+  await client.start();
 }
 
 export async function deactivate(): Promise<void> {

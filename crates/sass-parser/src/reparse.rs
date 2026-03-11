@@ -286,7 +286,7 @@ fn merge_errors(
         } else if range.start() >= region_old_end {
             let shift = |offset: TextSize| -> TextSize {
                 let v = i64::from(u32::from(offset)) + delta;
-                TextSize::from(v as u32)
+                TextSize::from(v.max(0) as u32)
             };
             result.push((
                 msg.clone(),
