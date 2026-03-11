@@ -12,10 +12,9 @@ use sass_parser::vfs::OsFileSystem;
 use tower_lsp_server::ls_types::Uri;
 
 use crate::builtins;
+use crate::config::RuntimeConfig;
 use crate::symbols::{self, FileSymbols};
 
-const MAX_CACHED_TREES: usize = 200;
-const MAX_CACHED_SOURCES: usize = 200;
 
 /// Namespace binding for an `@use` rule.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,10 +71,11 @@ pub struct ModuleGraph {
     tree_lru: Mutex<VecDeque<Uri>>,
     /// LRU order for source text eviction (front = most recently used).
     source_lru: Mutex<VecDeque<Uri>>,
+    runtime_config: Arc<RuntimeConfig>,
 }
 
 impl ModuleGraph {
-    pub fn new() -> Self {
+    pub fn new(runtime_config: Arc<RuntimeConfig>) -> Self {
         Self {
             files: DashMap::new(),
             edges: DashMap::new(),
@@ -85,6 +85,7 @@ impl ModuleGraph {
             allowed_roots: RwLock::new(Vec::new()),
             tree_lru: Mutex::new(VecDeque::new()),
             source_lru: Mutex::new(VecDeque::new()),
+            runtime_config,
         }
     }
 
@@ -174,7 +175,7 @@ impl ModuleGraph {
             .tree_lru
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        while lru.len() > MAX_CACHED_TREES {
+        while lru.len() > self.runtime_config.max_cached_trees() {
             if let Some(evicted_uri) = lru.pop_back() {
                 if let Some(mut info) = self.files.get_mut(&evicted_uri) {
                     if info.source_text.is_some() {
@@ -196,7 +197,7 @@ impl ModuleGraph {
             .source_lru
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        while lru.len() > MAX_CACHED_SOURCES {
+        while lru.len() > self.runtime_config.max_cached_sources() {
             if let Some(evicted_uri) = lru.pop_back() {
                 if let Some(mut info) = self.files.get_mut(&evicted_uri) {
                     if info.green.is_some() {
@@ -1424,7 +1425,7 @@ mod tests {
 
     #[test]
     fn module_graph_local_resolution() {
-        let graph = ModuleGraph::new();
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
         let uri: Uri = "file:///test.scss".parse().unwrap();
         graph
             .files
@@ -1442,7 +1443,7 @@ mod tests {
 
     #[test]
     fn module_graph_visible_symbols() {
-        let graph = ModuleGraph::new();
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
         let uri: Uri = "file:///main.scss".parse().unwrap();
         let dep_uri: Uri = "file:///colors.scss".parse().unwrap();
 
@@ -1475,7 +1476,7 @@ mod tests {
 
     #[test]
     fn qualified_resolution() {
-        let graph = ModuleGraph::new();
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
         let uri: Uri = "file:///main.scss".parse().unwrap();
         let dep_uri: Uri = "file:///colors.scss".parse().unwrap();
 
@@ -1515,7 +1516,7 @@ mod tests {
 
     /// 3-file chain: consumer @use "mid" as * → mid @forward "lib" with vis → lib defines symbols
     fn setup_forward_chain(vis: ForwardVisibility) -> (ModuleGraph, Uri, Uri, Uri) {
-        let graph = ModuleGraph::new();
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
         let consumer_uri: Uri = "file:///consumer.scss".parse().unwrap();
         let mid_uri: Uri = "file:///mid.scss".parse().unwrap();
         let lib_uri: Uri = "file:///lib.scss".parse().unwrap();
@@ -1666,7 +1667,7 @@ mod tests {
         // mid @forward "lib" show primary, btn
         // top @forward "mid" as m-*
         // consumer @use "top" as *
-        let graph = ModuleGraph::new();
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
         let consumer_uri: Uri = "file:///consumer.scss".parse().unwrap();
         let top_uri: Uri = "file:///top.scss".parse().unwrap();
         let mid_uri: Uri = "file:///mid.scss".parse().unwrap();
@@ -1749,7 +1750,7 @@ mod tests {
     // ── Builtin module tests ────────────────────────────────────────
 
     fn setup_builtin_graph(module: &str, namespace: Namespace) -> (ModuleGraph, Uri) {
-        let graph = ModuleGraph::new();
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
         let uri: Uri = "file:///main.scss".parse().unwrap();
 
         graph.files.insert(uri.clone(), make_info(""));
@@ -1845,7 +1846,7 @@ mod tests {
     #[test]
     fn prepend_import_visible_symbols() {
         // Simulate: prependImports = ["globals"] → every file gets @use "globals" as *
-        let graph = ModuleGraph::new();
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
         let uri: Uri = "file:///main.scss".parse().unwrap();
         let globals_uri: Uri = "file:///globals.scss".parse().unwrap();
 
@@ -1876,7 +1877,7 @@ mod tests {
 
     #[test]
     fn prepend_import_unqualified_resolution() {
-        let graph = ModuleGraph::new();
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
         let uri: Uri = "file:///main.scss".parse().unwrap();
         let globals_uri: Uri = "file:///globals.scss".parse().unwrap();
 
@@ -1916,7 +1917,7 @@ mod tests {
 
     #[test]
     fn check_name_conflict_same_kind() {
-        let graph = ModuleGraph::new();
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
         let uri: Uri = "file:///test.scss".parse().unwrap();
         graph
             .files
@@ -1928,7 +1929,7 @@ mod tests {
 
     #[test]
     fn check_name_conflict_different_kind_no_conflict() {
-        let graph = ModuleGraph::new();
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
         let uri: Uri = "file:///test.scss".parse().unwrap();
         graph.files.insert(
             uri.clone(),
@@ -1986,7 +1987,7 @@ mod tests {
 
     #[test]
     fn forward_reaches_direct() {
-        let graph = ModuleGraph::new();
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
         let a: Uri = "file:///a.scss".parse().unwrap();
         let b: Uri = "file:///b.scss".parse().unwrap();
 
@@ -2007,7 +2008,7 @@ mod tests {
 
     #[test]
     fn find_forward_show_hide_refs_integration() {
-        let graph = ModuleGraph::new();
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
         let main_uri: Uri = "file:///main.scss".parse().unwrap();
         let lib_uri: Uri = "file:///lib.scss".parse().unwrap();
 
@@ -2044,7 +2045,7 @@ mod tests {
 
     #[test]
     fn path_traversal_blocked_outside_roots() {
-        let graph = ModuleGraph::new();
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
         // Use a known directory as allowed root
         let tmp = std::env::temp_dir();
         graph.set_allowed_roots(vec![tmp.clone()]);
@@ -2058,14 +2059,14 @@ mod tests {
 
     #[test]
     fn path_traversal_permissive_without_roots() {
-        let graph = ModuleGraph::new();
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
         // No roots configured → permissive fallback
         assert!(graph.is_path_allowed(Path::new("/any/path")));
     }
 
     #[test]
     fn path_traversal_dotdot_resolved() {
-        let graph = ModuleGraph::new();
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
         let tmp = std::env::temp_dir();
         graph.set_allowed_roots(vec![tmp.clone()]);
 

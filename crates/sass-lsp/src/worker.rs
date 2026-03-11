@@ -14,7 +14,8 @@ use tower_lsp_server::ls_types::{Diagnostic, DiagnosticSeverity, Uri};
 use crate::convert::text_range_to_lsp;
 use crate::symbols;
 use crate::workspace;
-use crate::{DEBOUNCE_MS, DocumentState, IncrementalEdit, Task};
+use crate::config::RuntimeConfig;
+use crate::{DocumentState, IncrementalEdit, Task};
 
 pub(crate) fn parse_document(text: &str) -> Option<(rowan::GreenNode, Vec<(String, TextRange)>)> {
     std::panic::catch_unwind(AssertUnwindSafe(|| sass_parser::parse(text))).ok()
@@ -67,9 +68,10 @@ pub(crate) async fn run_worker(
     client: Client,
     documents: Arc<DashMap<Uri, DocumentState>>,
     module_graph: Arc<workspace::ModuleGraph>,
+    runtime_config: Arc<RuntimeConfig>,
 ) {
     let mut pending: HashMap<Uri, (i32, String, Option<IncrementalEdit>)> = HashMap::new();
-    let debounce = Duration::from_millis(DEBOUNCE_MS);
+    let debounce = Duration::from_millis(runtime_config.debounce_ms());
     let sleep = tokio::time::sleep(debounce);
     tokio::pin!(sleep);
     let mut has_pending = false;
