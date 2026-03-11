@@ -83,7 +83,9 @@ pub fn incremental_reparse(
     let delta = i64::from(u32::from(edit.insert_len)) - i64::from(u32::from(edit.delete));
 
     let new_end = i64::from(u32::from(old_end)) + delta;
-    let new_end = u32::try_from(new_end).ok().filter(|&e| (e as usize) <= new_source.len())?;
+    let new_end = u32::try_from(new_end)
+        .ok()
+        .filter(|&e| (e as usize) <= new_source.len())?;
     let new_start = u32::from(old_start);
     if new_start as usize > new_source.len() || new_start > new_end {
         return None;
@@ -202,10 +204,7 @@ fn child_overlaps_edit(child_range: TextRange, edit_range: TextRange) -> bool {
 }
 
 /// Parse a region using the appropriate grammar entry point.
-fn parse_region(
-    source: &str,
-    container_kind: SyntaxKind,
-) -> (GreenNode, Vec<(String, TextRange)>) {
+fn parse_region(source: &str, container_kind: SyntaxKind) -> (GreenNode, Vec<(String, TextRange)>) {
     let input = crate::input::Input::from_source(source);
     let mut parser = crate::parser::Parser::new(input, source);
     if container_kind == SyntaxKind::SOURCE_FILE {
@@ -286,7 +285,10 @@ fn merge_errors(
                 let v = i64::from(u32::from(offset)) + delta;
                 TextSize::from(v as u32)
             };
-            result.push((msg.clone(), TextRange::new(shift(range.start()), shift(range.end()))));
+            result.push((
+                msg.clone(),
+                TextRange::new(shift(range.start()), shift(range.end())),
+            ));
         }
     }
 
