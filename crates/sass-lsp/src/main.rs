@@ -19,18 +19,17 @@ use tower_lsp_server::ls_types::{
     CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
     Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
     DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentLink, DocumentLinkOptions,
-    DocumentLinkParams,
-    DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse,
-    Hover, HoverContents, HoverParams, InitializeParams, InitializeResult, InitializedParams,
-    Location, MarkupContent, MarkupKind, OneOf, ParameterInformation, ParameterLabel, Position,
-    PrepareRenameResponse, Range, ReferenceParams, RenameOptions, RenameParams, SemanticToken,
-    SemanticTokenModifier, SemanticTokenType, SemanticTokens, SemanticTokensFullOptions,
-    SemanticTokensLegend, SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
-    SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo, SignatureHelp,
-    SignatureHelpOptions, SignatureHelpParams, SignatureInformation, SymbolInformation,
-    TextDocumentContentChangeEvent, TextDocumentPositionParams, TextDocumentSyncCapability,
-    TextDocumentSyncKind, TextEdit, Uri,
-    WorkDoneProgressOptions, WorkspaceEdit, WorkspaceSymbolParams, WorkspaceSymbolResponse,
+    DocumentLinkParams, DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams,
+    GotoDefinitionResponse, Hover, HoverContents, HoverParams, InitializeParams, InitializeResult,
+    InitializedParams, Location, MarkupContent, MarkupKind, OneOf, ParameterInformation,
+    ParameterLabel, Position, PrepareRenameResponse, Range, ReferenceParams, RenameOptions,
+    RenameParams, SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokens,
+    SemanticTokensFullOptions, SemanticTokensLegend, SemanticTokensOptions, SemanticTokensParams,
+    SemanticTokensResult, SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo,
+    SignatureHelp, SignatureHelpOptions, SignatureHelpParams, SignatureInformation,
+    SymbolInformation, TextDocumentContentChangeEvent, TextDocumentPositionParams,
+    TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Uri, WorkDoneProgressOptions,
+    WorkspaceEdit, WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
 use tower_lsp_server::{Client, LanguageServer, LspService, Server};
 
@@ -903,9 +902,7 @@ impl LanguageServer for Backend {
             .filter(|(prefix, _, sym)| match &ctx {
                 CompletionContext::Variable => sym.kind == symbols::SymbolKind::Variable,
                 CompletionContext::IncludeMixin => sym.kind == symbols::SymbolKind::Mixin,
-                CompletionContext::Namespace(ns) => {
-                    prefix.as_ref().is_some_and(|p| p == ns)
-                }
+                CompletionContext::Namespace(ns) => prefix.as_ref().is_some_and(|p| p == ns),
                 CompletionContext::Extend => sym.kind == symbols::SymbolKind::Placeholder,
                 CompletionContext::General | CompletionContext::PropertyValue => true,
                 CompletionContext::PropertyName(_) | CompletionContext::UseModulePath(_) => false,
@@ -1147,10 +1144,8 @@ impl LanguageServer for Backend {
             };
             return Err(tower_lsp_server::jsonrpc::Error {
                 code: tower_lsp_server::jsonrpc::ErrorCode::InvalidParams,
-                message: format!(
-                    "A {kind_label} '{sigil}{new_name}' already exists in this scope"
-                )
-                .into(),
+                message: format!("A {kind_label} '{sigil}{new_name}' already exists in this scope")
+                    .into(),
                 data: None,
             });
         }
@@ -1383,7 +1378,10 @@ fn detect_completion_context(text: &str, position: Position) -> CompletionContex
     if before.ends_with('$') || before.contains('$') && !before.ends_with(' ') {
         if let Some(dollar_pos) = before.rfind('$') {
             let after_dollar = &before[dollar_pos + 1..];
-            if after_dollar.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
+            if after_dollar
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+            {
                 return CompletionContext::Variable;
             }
         }
@@ -1834,11 +1832,8 @@ fn format_hover_markdown(sym: &symbols::Symbol, source_uri: Option<&Uri>) -> Str
                 symbols::SymbolKind::Variable => format!("%24{}", sym.name),
                 _ => sym.name.clone(),
             };
-            let url =
-                format!("https://sass-lang.com/documentation/modules/{module}/#{anchor}");
-            parts.push(format!(
-                "`sass:{module}` · [docs]({url})"
-            ));
+            let url = format!("https://sass-lang.com/documentation/modules/{module}/#{anchor}");
+            parts.push(format!("`sass:{module}` · [docs]({url})"));
         } else if let Some(path) = uri.to_file_path() {
             if let Some(name) = path.file_name() {
                 parts.push(format!("Defined in `{}`", name.to_string_lossy()));
@@ -2932,7 +2927,8 @@ mod tests {
         let (mut reader, mut writer) = spawn_server();
         do_initialize(&mut reader, &mut writer).await;
 
-        let scss = "$color: red;\n@mixin btn { }\n@function double($n) { @return $n * 2; }\n.a { color: $";
+        let scss =
+            "$color: red;\n@mixin btn { }\n@function double($n) { @return $n * 2; }\n.a { color: $";
         send_msg(
             &mut writer,
             &serde_json::json!({
@@ -3548,10 +3544,7 @@ mod tests {
 
         let resp = recv_msg(&mut reader, &mut writer).await;
         let content = resp["result"]["contents"]["value"].as_str().unwrap();
-        assert!(
-            content.contains("$pi"),
-            "hover should show variable name"
-        );
+        assert!(content.contains("$pi"), "hover should show variable name");
         assert!(
             content.contains("sass-lang.com/documentation/modules/math/#%24pi"),
             "hover should contain doc URL with $ anchor: {content}"
@@ -4032,8 +4025,7 @@ mod tests {
         do_initialize(&mut reader, &mut writer).await;
 
         // $color and @function color — different kinds, rename should succeed
-        let scss =
-            "$color: red;\n@function color() { @return red; }\n.a { color: $color; }\n";
+        let scss = "$color: red;\n@function color() { @return red; }\n.a { color: $color; }\n";
         send_msg(
             &mut writer,
             &serde_json::json!({
@@ -4531,7 +4523,10 @@ mod tests {
         assert!(super::fuzzy_score("color-primary", "color").unwrap() >= 500);
         // Word boundary match → 200+ (r and g match starts of "responsive" and "grid").
         let rg_score = super::fuzzy_score("responsive-grid", "rg").unwrap();
-        assert!(rg_score >= 200, "word boundary should score 200+, got {rg_score}");
+        assert!(
+            rg_score >= 200,
+            "word boundary should score 200+, got {rg_score}"
+        );
         // Subsequence match → >0.
         assert!(super::fuzzy_score("primary", "pry").unwrap() > 0);
         // No match → None.
@@ -4560,7 +4555,7 @@ mod tests {
 
     #[test]
     fn completion_context_detection() {
-        use super::{detect_completion_context, CompletionContext, Position};
+        use super::{CompletionContext, Position, detect_completion_context};
 
         //                         0123456789...
         let text = ".a {\n  color: $\n  @include \n  @use \"\n  bor\n}\n";
@@ -4572,23 +4567,53 @@ mod tests {
         // Line 5: "}"
 
         // After `$` → Variable (line 1, char 10 = end of "  color: $")
-        let ctx = detect_completion_context(text, Position { line: 1, character: 10 });
+        let ctx = detect_completion_context(
+            text,
+            Position {
+                line: 1,
+                character: 10,
+            },
+        );
         assert!(matches!(ctx, CompletionContext::Variable));
 
         // After `@include ` → IncludeMixin (line 2, char 11 = end of "  @include ")
-        let ctx = detect_completion_context(text, Position { line: 2, character: 11 });
+        let ctx = detect_completion_context(
+            text,
+            Position {
+                line: 2,
+                character: 11,
+            },
+        );
         assert!(matches!(ctx, CompletionContext::IncludeMixin));
 
         // After `@use "` → UseModulePath (line 3, char 8 = after the quote)
-        let ctx = detect_completion_context(text, Position { line: 3, character: 8 });
+        let ctx = detect_completion_context(
+            text,
+            Position {
+                line: 3,
+                character: 8,
+            },
+        );
         assert!(matches!(ctx, CompletionContext::UseModulePath(_)));
 
         // On `bor` → PropertyName (line 4, char 5 = end of "  bor")
-        let ctx = detect_completion_context(text, Position { line: 4, character: 5 });
+        let ctx = detect_completion_context(
+            text,
+            Position {
+                line: 4,
+                character: 5,
+            },
+        );
         assert!(matches!(ctx, CompletionContext::PropertyName(_)));
 
         // After `color:` → PropertyValue (line 1, char 8 = "  color: ")
-        let ctx = detect_completion_context(text, Position { line: 1, character: 8 });
+        let ctx = detect_completion_context(
+            text,
+            Position {
+                line: 1,
+                character: 8,
+            },
+        );
         assert!(matches!(ctx, CompletionContext::PropertyValue));
     }
 

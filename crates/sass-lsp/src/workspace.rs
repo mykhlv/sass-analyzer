@@ -98,7 +98,10 @@ impl ModuleGraph {
 
     /// Move a URI to the front of the LRU list (most recently used).
     fn touch_lru(&self, uri: &Uri) {
-        let mut lru = self.tree_lru.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut lru = self
+            .tree_lru
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(pos) = lru.iter().position(|u| u == uri) {
             lru.remove(pos);
         }
@@ -107,7 +110,10 @@ impl ModuleGraph {
 
     /// Evict green trees from files beyond the LRU limit.
     fn evict_trees(&self) {
-        let mut lru = self.tree_lru.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut lru = self
+            .tree_lru
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         while lru.len() > MAX_CACHED_TREES {
             if let Some(evicted_uri) = lru.pop_back() {
                 if let Some(mut info) = self.files.get_mut(&evicted_uri) {
@@ -126,10 +132,9 @@ impl ModuleGraph {
         // Re-parse from stored text.
         let source = info.source_text.clone();
         drop(info);
-        let (green, _) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            sass_parser::parse(&source)
-        }))
-        .ok()?;
+        let (green, _) =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sass_parser::parse(&source)))
+                .ok()?;
         if let Some(mut info) = self.files.get_mut(uri) {
             info.green = Some(green.clone());
         }
@@ -261,7 +266,10 @@ impl ModuleGraph {
     pub fn remove_file(&self, uri: &Uri) {
         self.files.remove(uri);
         self.edges.remove(uri);
-        let mut lru = self.tree_lru.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut lru = self
+            .tree_lru
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(pos) = lru.iter().position(|u| u == uri) {
             lru.remove(pos);
         }
@@ -767,11 +775,16 @@ impl ModuleGraph {
                     continue;
                 }
 
-                let has_name = edge.visibility.show.as_ref().is_some_and(|list| {
-                    list.iter().any(|n| n == old_name)
-                }) || edge.visibility.hide.as_ref().is_some_and(|list| {
-                    list.iter().any(|n| n == old_name)
-                });
+                let has_name = edge
+                    .visibility
+                    .show
+                    .as_ref()
+                    .is_some_and(|list| list.iter().any(|n| n == old_name))
+                    || edge
+                        .visibility
+                        .hide
+                        .as_ref()
+                        .is_some_and(|list| list.iter().any(|n| n == old_name));
 
                 if !has_name {
                     continue;
@@ -1036,9 +1049,7 @@ fn find_name_in_forward_clauses(
             if tok.kind() == SyntaxKind::SEMICOLON {
                 break;
             }
-            if tok.kind() == SyntaxKind::IDENT
-                && (tok.text() == "as" || tok.text() == "with")
-            {
+            if tok.kind() == SyntaxKind::IDENT && (tok.text() == "as" || tok.text() == "with") {
                 break;
             }
 
@@ -1255,9 +1266,7 @@ mod tests {
         assert_eq!(ns, Namespace::Named("utils".into()));
     }
 
-    fn make_info(
-        source: &str,
-    ) -> ModuleInfo {
+    fn make_info(source: &str) -> ModuleInfo {
         let (green, _) = sass_parser::parse(source);
         let root = SyntaxNode::new_root(green.clone());
         let syms = symbols::collect_symbols(&root);
@@ -1274,7 +1283,9 @@ mod tests {
     fn module_graph_local_resolution() {
         let graph = ModuleGraph::new();
         let uri: Uri = "file:///test.scss".parse().unwrap();
-        graph.files.insert(uri.clone(), make_info("$color: red;\n@mixin btn { }"));
+        graph
+            .files
+            .insert(uri.clone(), make_info("$color: red;\n@mixin btn { }"));
 
         let result = graph.resolve_unqualified(&uri, "color", symbols::SymbolKind::Variable);
         assert!(result.is_some());
@@ -1293,7 +1304,9 @@ mod tests {
         let dep_uri: Uri = "file:///colors.scss".parse().unwrap();
 
         // Index dependency
-        graph.files.insert(dep_uri.clone(), make_info("$primary: blue;"));
+        graph
+            .files
+            .insert(dep_uri.clone(), make_info("$primary: blue;"));
 
         // Index main with manual edge
         graph.files.insert(uri.clone(), make_info("$local: red;"));
@@ -1323,7 +1336,10 @@ mod tests {
         let uri: Uri = "file:///main.scss".parse().unwrap();
         let dep_uri: Uri = "file:///colors.scss".parse().unwrap();
 
-        graph.files.insert(dep_uri.clone(), make_info("$primary: blue;\n$secondary: green;"));
+        graph.files.insert(
+            dep_uri.clone(),
+            make_info("$primary: blue;\n$secondary: green;"),
+        );
 
         graph.files.insert(uri.clone(), make_info(""));
         graph.edges.insert(
@@ -1513,7 +1529,10 @@ mod tests {
         let mid_uri: Uri = "file:///mid.scss".parse().unwrap();
         let lib_uri: Uri = "file:///lib.scss".parse().unwrap();
 
-        graph.files.insert(lib_uri.clone(), make_info("$primary: blue;\n$secondary: green;\n@mixin btn { }"));
+        graph.files.insert(
+            lib_uri.clone(),
+            make_info("$primary: blue;\n$secondary: green;\n@mixin btn { }"),
+        );
 
         graph.files.insert(mid_uri.clone(), make_info(""));
         graph.edges.insert(
@@ -1687,7 +1706,10 @@ mod tests {
         let uri: Uri = "file:///main.scss".parse().unwrap();
         let globals_uri: Uri = "file:///globals.scss".parse().unwrap();
 
-        graph.files.insert(globals_uri.clone(), make_info("$brand: red;\n@mixin container { }"));
+        graph.files.insert(
+            globals_uri.clone(),
+            make_info("$brand: red;\n@mixin container { }"),
+        );
 
         graph.files.insert(uri.clone(), make_info("$local: blue;"));
 
@@ -1715,7 +1737,9 @@ mod tests {
         let uri: Uri = "file:///main.scss".parse().unwrap();
         let globals_uri: Uri = "file:///globals.scss".parse().unwrap();
 
-        graph.files.insert(globals_uri.clone(), make_info("$brand: red;"));
+        graph
+            .files
+            .insert(globals_uri.clone(), make_info("$brand: red;"));
 
         graph.files.insert(uri.clone(), make_info(""));
 
@@ -1751,7 +1775,9 @@ mod tests {
     fn check_name_conflict_same_kind() {
         let graph = ModuleGraph::new();
         let uri: Uri = "file:///test.scss".parse().unwrap();
-        graph.files.insert(uri.clone(), make_info("$color: red;\n$primary: blue;"));
+        graph
+            .files
+            .insert(uri.clone(), make_info("$color: red;\n$primary: blue;"));
 
         assert!(graph.check_name_conflict(&uri, "primary", symbols::SymbolKind::Variable));
         assert!(!graph.check_name_conflict(&uri, "shade", symbols::SymbolKind::Variable));
@@ -1776,8 +1802,7 @@ mod tests {
         let (green, _) = sass_parser::parse(source);
         let root = SyntaxNode::new_root(green);
 
-        let ranges =
-            find_name_in_forward_clauses(&root, "primary", symbols::SymbolKind::Variable);
+        let ranges = find_name_in_forward_clauses(&root, "primary", symbols::SymbolKind::Variable);
         assert_eq!(ranges.len(), 1);
         let text = &source[usize::from(ranges[0].start())..usize::from(ranges[0].end())];
         assert_eq!(text, "primary");
@@ -1801,8 +1826,7 @@ mod tests {
         let (green, _) = sass_parser::parse(source);
         let root = SyntaxNode::new_root(green);
 
-        let ranges =
-            find_name_in_forward_clauses(&root, "internal", symbols::SymbolKind::Variable);
+        let ranges = find_name_in_forward_clauses(&root, "internal", symbols::SymbolKind::Variable);
         assert_eq!(ranges.len(), 1);
     }
 
@@ -1844,7 +1868,9 @@ mod tests {
         let main_uri: Uri = "file:///main.scss".parse().unwrap();
         let lib_uri: Uri = "file:///lib.scss".parse().unwrap();
 
-        graph.files.insert(lib_uri.clone(), make_info("$primary: blue;"));
+        graph
+            .files
+            .insert(lib_uri.clone(), make_info("$primary: blue;"));
 
         // main: @forward "lib" show $primary;
         let main_source = "@forward \"lib\" show $primary;";
@@ -1869,8 +1895,7 @@ mod tests {
         );
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].0, main_uri);
-        let text =
-            &main_source[usize::from(refs[0].1.start())..usize::from(refs[0].1.end())];
+        let text = &main_source[usize::from(refs[0].1.start())..usize::from(refs[0].1.end())];
         assert_eq!(text, "primary");
     }
 }

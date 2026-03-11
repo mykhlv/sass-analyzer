@@ -196,13 +196,10 @@ fn full_reparse_normalize_css(bencher: Bencher<'_, '_>) {
 #[divan::bench]
 fn incremental_reparse_normalize_css(bencher: Bencher<'_, '_>) {
     let offset = NORMALIZE_CSS.len() as u32 / 2;
-    let (old_green, old_errors, edit, new_source) =
-        prepare_incremental(NORMALIZE_CSS, offset, "x");
+    let (old_green, old_errors, edit, new_source) = prepare_incremental(NORMALIZE_CSS, offset, "x");
     bencher
         .with_inputs(|| (old_green.clone(), old_errors.clone(), new_source.clone()))
-        .bench_values(|(g, e, s)| {
-            sass_parser::reparse::incremental_reparse(&g, &e, &edit, &s)
-        });
+        .bench_values(|(g, e, s)| sass_parser::reparse::incremental_reparse(&g, &e, &edit, &s));
 }
 
 #[divan::bench]
@@ -227,13 +224,10 @@ fn incremental_reparse_angular_material(bencher: Bencher<'_, '_>) {
         return;
     }
     let offset = source.len() as u32 / 2;
-    let (old_green, old_errors, edit, new_source) =
-        prepare_incremental(source, offset, "x");
+    let (old_green, old_errors, edit, new_source) = prepare_incremental(source, offset, "x");
     bencher
         .with_inputs(|| (old_green.clone(), old_errors.clone(), new_source.clone()))
-        .bench_values(|(g, e, s)| {
-            sass_parser::reparse::incremental_reparse(&g, &e, &edit, &s)
-        });
+        .bench_values(|(g, e, s)| sass_parser::reparse::incremental_reparse(&g, &e, &edit, &s));
 }
 
 fn main() {
