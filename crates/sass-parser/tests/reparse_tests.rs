@@ -1,5 +1,5 @@
-use sass_parser::reparse::{incremental_reparse, TextEdit};
-use sass_parser::syntax::{debug_tree, SyntaxNode};
+use sass_parser::reparse::{TextEdit, incremental_reparse};
+use sass_parser::syntax::{SyntaxNode, debug_tree};
 use sass_parser::text_range::TextSize;
 
 fn apply_edit(source: &str, offset: u32, delete: u32, insert: &str) -> String {
@@ -83,12 +83,7 @@ fn edit_variable_name() {
 
 #[test]
 fn insert_declaration() {
-    assert!(check(
-        ".a { color: red; }",
-        16,
-        0,
-        "\n  font: bold;"
-    ));
+    assert!(check(".a { color: red; }", 16, 0, "\n  font: bold;"));
 }
 
 // ── Top-level edits ─────────────────────────────────────────────────
@@ -168,12 +163,7 @@ fn edit_in_nested_block() {
 
 #[test]
 fn edit_mixin_body() {
-    assert!(check(
-        "@mixin btn {\n  color: red;\n}",
-        20,
-        3,
-        "blue"
-    ));
+    assert!(check("@mixin btn {\n  color: red;\n}", 20, 3, "blue"));
 }
 
 #[test]
