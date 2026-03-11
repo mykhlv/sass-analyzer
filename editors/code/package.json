@@ -1,15 +1,37 @@
 {
   "name": "sass-analyzer",
   "displayName": "sass-analyzer",
-  "description": "SCSS language support powered by sass-analyzer",
+  "description": "Fast SCSS language support: diagnostics, completions, go to definition, hover, rename, and more — powered by a hand-written Rust parser.",
   "version": "0.1.0",
-  "publisher": "sass-analyzer",
+  "publisher": "mykhlv",
   "license": "MIT",
+  "icon": "icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mykhlv/sass-analyzer",
+    "directory": "editors/code"
+  },
+  "bugs": {
+    "url": "https://github.com/mykhlv/sass-analyzer/issues"
+  },
+  "homepage": "https://github.com/mykhlv/sass-analyzer",
+  "keywords": [
+    "scss",
+    "sass",
+    "css",
+    "language-server",
+    "lsp"
+  ],
+  "galleryBanner": {
+    "color": "#bf4080",
+    "theme": "dark"
+  },
   "engines": {
     "vscode": "^1.74.0"
   },
   "categories": [
-    "Programming Languages"
+    "Programming Languages",
+    "Linters"
   ],
   "activationEvents": [
     "onLanguage:scss"
