@@ -1026,6 +1026,7 @@ impl LanguageServer for Backend {
             .collect();
 
         scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.name.cmp(&b.1.name)));
+        scored.truncate(128);
         let matches: Vec<SymbolInformation> = scored.into_iter().map(|(_, si)| si).collect();
 
         if matches.is_empty() {
