@@ -1,5 +1,6 @@
 use crate::syntax_kind::SyntaxKind;
 
+/// Language tag wiring [`SyntaxKind`] into rowan's generic tree infrastructure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SassLanguage {}
 
@@ -15,8 +16,11 @@ impl rowan::Language for SassLanguage {
     }
 }
 
+/// A node (composite) in the SCSS concrete syntax tree.
 pub type SyntaxNode = rowan::SyntaxNode<SassLanguage>;
+/// A token (leaf) in the SCSS concrete syntax tree.
 pub type SyntaxToken = rowan::SyntaxToken<SassLanguage>;
+/// Either a node or a token in the SCSS concrete syntax tree.
 pub type SyntaxElement = rowan::SyntaxElement<SassLanguage>;
 
 /// Format a CST rooted at `node` as an indented debug string.

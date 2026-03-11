@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 
 /// Abstract filesystem access for testability.
 pub trait Vfs {
+    /// Check whether a file exists at `path`.
     fn file_exists(&self, path: &Path) -> bool;
+    /// Read the contents of a file at `path`.
     fn read_file(&self, path: &Path) -> io::Result<String>;
 }
 
@@ -27,12 +29,14 @@ pub struct MemoryFs {
 }
 
 impl MemoryFs {
+    /// Create an empty in-memory filesystem.
     pub fn new() -> Self {
         Self {
             files: HashMap::new(),
         }
     }
 
+    /// Insert a file into the virtual filesystem.
     pub fn add(&mut self, path: impl Into<PathBuf>, content: impl Into<String>) {
         self.files.insert(path.into(), content.into());
     }

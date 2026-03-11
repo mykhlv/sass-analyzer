@@ -24,16 +24,28 @@
 //! - [`line_index::LineIndex`] — byte offset ↔ line/column mapping
 //! - [`resolver::ModuleResolver`] — `@use` / `@forward` / `@import` resolution
 
+#![warn(missing_docs)]
+
 // ── Public API ──────────────────────────────────────────────────────
+
+/// All node and token kinds in the SCSS grammar.
 pub mod syntax_kind;
+/// Re-exports of rowan's `TextRange` / `TextSize` for span manipulation.
 pub mod text_range;
 
+/// Typed AST wrappers generated from `sass.ungram`.
 pub mod ast;
+/// Import statement extraction from the CST.
 pub mod imports;
+/// Byte offset ↔ line/column mapping.
 pub mod line_index;
+/// Incremental reparsing support.
 pub mod reparse;
+/// Module resolution for `@use` / `@forward` / `@import`.
 pub mod resolver;
+/// Rowan-backed concrete syntax tree types (`SyntaxNode`, `SyntaxToken`).
 pub mod syntax;
+/// Virtual filesystem abstraction for resolver tests and embedding.
 pub mod vfs;
 
 // ── Internal modules ────────────────────────────────────────────────
