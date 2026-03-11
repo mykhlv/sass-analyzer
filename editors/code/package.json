@@ -85,6 +85,26 @@
           "items": { "type": "string" },
           "default": [],
           "description": "Module paths to implicitly @use as * in every file (e.g. for Vite additionalData). Supports ${workspaceFolder}."
+        },
+        "sass-analyzer.maxFileSize": {
+          "type": "integer",
+          "default": 2000000,
+          "description": "Maximum file size in bytes the server will parse. Files larger than this are skipped."
+        },
+        "sass-analyzer.debounceMs": {
+          "type": "integer",
+          "default": 50,
+          "description": "Delay in milliseconds before re-parsing after an edit."
+        },
+        "sass-analyzer.maxCachedTrees": {
+          "type": "integer",
+          "default": 200,
+          "description": "Maximum number of parse trees kept in memory."
+        },
+        "sass-analyzer.maxCachedSources": {
+          "type": "integer",
+          "default": 200,
+          "description": "Maximum number of source texts kept in memory."
         }
       }
     }
