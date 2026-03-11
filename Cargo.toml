@@ -7,8 +7,8 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
-repository = "https://github.com/sass-analyzer/sass-analyzer"
-homepage = "https://github.com/sass-analyzer/sass-analyzer"
+repository = "https://github.com/mykhlv/sass-analyzer"
+homepage = "https://github.com/mykhlv/sass-analyzer"
 authors = ["sass-analyzer contributors"]
 
 [workspace.dependencies]
