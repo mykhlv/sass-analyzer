@@ -947,8 +947,17 @@ impl ModuleGraph {
     }
 
     fn index_dependency(&self, uri: &Uri, path: &Path) {
+        const MAX_DEPENDENCY_FILES: usize = 10_000;
+
         if !self.is_path_allowed(path) {
             tracing::warn!(?path, "blocked path traversal outside allowed roots");
+            return;
+        }
+        if self.files.len() >= MAX_DEPENDENCY_FILES {
+            tracing::warn!(
+                limit = MAX_DEPENDENCY_FILES,
+                "dependency file limit reached, skipping further indexing"
+            );
             return;
         }
         let Ok(source) = std::fs::read_to_string(path) else {

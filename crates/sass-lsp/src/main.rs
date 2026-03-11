@@ -247,6 +247,12 @@ impl LanguageServer for Backend {
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let doc = params.text_document;
         if doc.text.len() > MAX_FILE_SIZE {
+            tracing::warn!(
+                uri = ?doc.uri,
+                size = doc.text.len(),
+                limit = MAX_FILE_SIZE,
+                "file exceeds size limit, skipping"
+            );
             return;
         }
         self.source_texts.insert(doc.uri.clone(), doc.text.clone());
@@ -272,6 +278,7 @@ impl LanguageServer for Backend {
             // No prior text — take last full-content change if available.
             if let Some(change) = params.content_changes.into_iter().last() {
                 if change.text.len() > MAX_FILE_SIZE {
+                    tracing::warn!(?uri, size = change.text.len(), limit = MAX_FILE_SIZE, "file exceeds size limit, skipping");
                     return;
                 }
                 self.source_texts.insert(uri.clone(), change.text.clone());
@@ -301,6 +308,7 @@ impl LanguageServer for Backend {
         }
 
         if text.len() > MAX_FILE_SIZE {
+            tracing::warn!(?uri, size = text.len(), limit = MAX_FILE_SIZE, "file exceeds size limit, skipping");
             return;
         }
         self.source_texts.insert(uri.clone(), text.clone());
