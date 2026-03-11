@@ -22,8 +22,9 @@ use tokio::sync::mpsc;
 use tower_lsp_server::jsonrpc::Result;
 use tower_lsp_server::ls_types::{
     CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
-    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DidSaveTextDocumentParams, DocumentLink, DocumentLinkOptions, DocumentLinkParams,
+    DidChangeConfigurationParams, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentLink, DocumentLinkOptions,
+    DocumentLinkParams,
     DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse,
     Hover, HoverParams, InitializeParams, InitializeResult, InitializedParams, Location, OneOf,
     PrepareRenameResponse, ReferenceParams, RenameOptions, RenameParams, SemanticTokenModifier,
@@ -36,8 +37,6 @@ use tower_lsp_server::ls_types::{
 };
 use tower_lsp_server::{Client, LanguageServer, LspService, Server};
 
-const MAX_FILE_SIZE: usize = 2_000_000;
-pub(crate) const DEBOUNCE_MS: u64 = 50;
 
 pub(crate) enum Task {
     Parse {
@@ -82,6 +81,7 @@ struct Backend {
     /// Cleaned on `did_close`; may leak if the client never sends `didClose`.
     source_texts: Arc<DashMap<Uri, String>>,
     module_graph: Arc<workspace::ModuleGraph>,
+    runtime_config: Arc<config::RuntimeConfig>,
     task_tx: mpsc::UnboundedSender<Task>,
 }
 
@@ -161,6 +161,8 @@ impl LanguageServer for Backend {
             .initialization_options
             .and_then(|v| serde_json::from_value(v).ok())
             .unwrap_or_default();
+
+        self.runtime_config.apply(&lsp_config);
 
         let resolver = config::build_resolver(&lsp_config, workspace_root.as_deref());
         self.module_graph.set_resolver(resolver);
@@ -263,11 +265,11 @@ impl LanguageServer for Backend {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let doc = params.text_document;
-        if doc.text.len() > MAX_FILE_SIZE {
+        if doc.text.len() > self.runtime_config.max_file_size() {
             tracing::warn!(
                 uri = ?doc.uri,
                 size = doc.text.len(),
-                limit = MAX_FILE_SIZE,
+                limit = self.runtime_config.max_file_size(),
                 "file exceeds size limit, skipping"
             );
             return;
@@ -294,8 +296,8 @@ impl LanguageServer for Backend {
         let Some(mut text) = self.source_texts.get(&uri).map(|t| t.clone()) else {
             // No prior text — take last full-content change if available.
             if let Some(change) = params.content_changes.into_iter().last() {
-                if change.text.len() > MAX_FILE_SIZE {
-                    tracing::warn!(?uri, size = change.text.len(), limit = MAX_FILE_SIZE, "file exceeds size limit, skipping");
+                if change.text.len() > self.runtime_config.max_file_size() {
+                    tracing::warn!(?uri, size = change.text.len(), limit = self.runtime_config.max_file_size(), "file exceeds size limit, skipping");
                     return;
                 }
                 self.source_texts.insert(uri.clone(), change.text.clone());
@@ -324,8 +326,8 @@ impl LanguageServer for Backend {
             return;
         }
 
-        if text.len() > MAX_FILE_SIZE {
-            tracing::warn!(?uri, size = text.len(), limit = MAX_FILE_SIZE, "file exceeds size limit, skipping");
+        if text.len() > self.runtime_config.max_file_size() {
+            tracing::warn!(?uri, size = text.len(), limit = self.runtime_config.max_file_size(), "file exceeds size limit, skipping");
             return;
         }
         self.source_texts.insert(uri.clone(), text.clone());
@@ -341,6 +343,17 @@ impl LanguageServer for Backend {
         {
             tracing::error!("worker channel closed, parse task dropped");
         }
+    }
+
+    async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
+        let Ok(new_config) =
+            serde_json::from_value::<config::SassAnalyzerConfig>(params.settings)
+        else {
+            tracing::warn!("failed to deserialize configuration, ignoring");
+            return;
+        };
+        self.runtime_config.apply(&new_config);
+        tracing::info!("configuration updated");
     }
 
     async fn did_save(&self, _params: DidSaveTextDocumentParams) {}
@@ -991,19 +1004,22 @@ async fn main() {
 
     let (service, socket) = LspService::new(|client| {
         let documents = Arc::new(DashMap::new());
-        let module_graph = Arc::new(workspace::ModuleGraph::new());
+        let runtime_config = Arc::new(config::RuntimeConfig::default());
+        let module_graph = Arc::new(workspace::ModuleGraph::new(Arc::clone(&runtime_config)));
         let (task_tx, task_rx) = mpsc::unbounded_channel();
         tokio::spawn(run_worker(
             task_rx,
             client.clone(),
             Arc::clone(&documents),
             Arc::clone(&module_graph),
+            Arc::clone(&runtime_config),
         ));
         Backend {
             client,
             documents,
             source_texts: Arc::new(DashMap::new()),
             module_graph,
+            runtime_config,
             task_tx,
         }
     });
@@ -1092,19 +1108,23 @@ mod tests {
 
         let (service, socket) = LspService::new(|client| {
             let documents = Arc::new(DashMap::new());
-            let module_graph = Arc::new(workspace::ModuleGraph::new());
+            let runtime_config = Arc::new(config::RuntimeConfig::default());
+            let module_graph =
+                Arc::new(workspace::ModuleGraph::new(Arc::clone(&runtime_config)));
             let (task_tx, task_rx) = mpsc::unbounded_channel();
             tokio::spawn(run_worker(
                 task_rx,
                 client.clone(),
                 Arc::clone(&documents),
                 Arc::clone(&module_graph),
+                Arc::clone(&runtime_config),
             ));
             Backend {
                 client,
                 documents,
                 source_texts: Arc::new(DashMap::new()),
                 module_graph,
+                runtime_config,
                 task_tx,
             }
         });
