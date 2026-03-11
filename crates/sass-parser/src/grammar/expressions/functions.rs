@@ -118,13 +118,18 @@ pub(super) fn function_dispatch(p: &mut Parser<'_>, ctx: ParseContext) -> Comple
 /// Check if `if(...)` uses CSS conditional syntax (colon-separated) rather than
 /// Sass syntax (comma-separated). Scans ahead from current position (at IDENT "if").
 fn is_css_if(p: &Parser<'_>) -> bool {
+    const MAX_SCAN: usize = 100;
     // p.nth(0) = IDENT "if", p.nth(1) = LPAREN
     if p.nth(1) != LPAREN {
         return false;
     }
     let mut offset: usize = 2;
     let mut depth: u32 = 1;
+    let limit = offset + MAX_SCAN;
     loop {
+        if offset >= limit {
+            return false;
+        }
         let kind = p.nth(offset);
         match kind {
             LPAREN => depth += 1,
@@ -152,12 +157,17 @@ fn is_css_if(p: &Parser<'_>) -> bool {
 
 /// Check if function args contain bare `=` at depth 1 (MS filter syntax: `alpha(opacity=50)`).
 fn has_eq_in_args(p: &Parser<'_>) -> bool {
+    const MAX_SCAN: usize = 100;
     if p.nth(1) != LPAREN {
         return false;
     }
     let mut offset: usize = 2;
     let mut depth: u32 = 1;
+    let limit = offset + MAX_SCAN;
     loop {
+        if offset >= limit {
+            return false;
+        }
         let kind = p.nth(offset);
         match kind {
             LPAREN => depth += 1,
