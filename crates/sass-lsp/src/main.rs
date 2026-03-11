@@ -469,7 +469,13 @@ impl LanguageServer for Backend {
 
         match ctx {
             CompletionContext::UseModulePath(partial) => {
-                let items = self.module_graph.complete_use_paths(&uri, &partial);
+                let graph = Arc::clone(&self.module_graph);
+                let uri_clone = uri.clone();
+                let items = tokio::task::spawn_blocking(move || {
+                    graph.complete_use_paths(&uri_clone, &partial)
+                })
+                .await
+                .unwrap_or_default();
                 if items.is_empty() {
                     return Ok(None);
                 }
