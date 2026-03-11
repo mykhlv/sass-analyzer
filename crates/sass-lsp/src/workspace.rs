@@ -622,16 +622,26 @@ impl ModuleGraph {
         self.files.get(uri).map(|info| info.line_index.clone())
     }
 
-    /// Get the source text for a URI. Reconstructs from the green tree if evicted.
+    /// Get the source text for a URI. Reconstructs from the green tree if evicted,
+    /// and caches the result to avoid repeated reconstruction.
     pub fn source_text(&self, uri: &Uri) -> Option<String> {
-        let info = self.files.get(uri)?;
+        {
+            let info = self.files.get(uri)?;
+            if let Some(src) = &info.source_text {
+                return Some(src.clone());
+            }
+        }
+        // Reconstruct from green tree and cache back.
+        let mut info = self.files.get_mut(uri)?;
+        // Double-check after re-acquiring (another thread may have filled it).
         if let Some(src) = &info.source_text {
             return Some(src.clone());
         }
-        // Reconstruct from green tree (invariant: green is Some when source_text is None).
         let green = info.green.as_ref()?;
         let root = SyntaxNode::new_root(green.clone());
-        Some(root.text().to_string())
+        let text = root.text().to_string();
+        info.source_text = Some(text.clone());
+        Some(text)
     }
 
     pub fn all_symbols(&self) -> Vec<(Uri, symbols::Symbol)> {
