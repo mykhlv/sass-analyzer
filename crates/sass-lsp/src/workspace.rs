@@ -770,7 +770,11 @@ impl ModuleGraph {
     }
 
     /// Find all references to a symbol across the entire workspace.
-    /// Walks each file's CST to correctly resolve both unqualified and namespace-qualified refs.
+    ///
+    /// O(files × refs) — iterates all indexed files and checks each reference.
+    /// No reverse index is maintained. Acceptable for typical SCSS workspaces
+    /// (hundreds of files); consider a reverse index if profiling shows this as
+    /// a bottleneck in large monorepos.
     pub fn find_all_references(
         &self,
         target_uri: &Uri,
