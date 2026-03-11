@@ -118,22 +118,16 @@ fn try_incremental_or_full(
 fn errors_to_diagnostics(
     errors: &[(String, TextRange)],
     line_index: &sass_parser::line_index::LineIndex,
+    source: &str,
 ) -> Vec<Diagnostic> {
     errors
         .iter()
-        .map(|(msg, range)| {
-            let start = line_index.line_col(range.start());
-            let end = line_index.line_col(range.end());
-            Diagnostic {
-                range: Range::new(
-                    Position::new(start.line - 1, start.col - 1),
-                    Position::new(end.line - 1, end.col - 1),
-                ),
-                severity: Some(DiagnosticSeverity::ERROR),
-                source: Some("sass-analyzer".to_owned()),
-                message: msg.clone(),
-                ..Diagnostic::default()
-            }
+        .map(|(msg, range)| Diagnostic {
+            range: text_range_to_lsp(*range, line_index, source),
+            severity: Some(DiagnosticSeverity::ERROR),
+            source: Some("sass-analyzer".to_owned()),
+            message: msg.clone(),
+            ..Diagnostic::default()
         })
         .collect()
 }
@@ -490,7 +484,7 @@ async fn run_worker(
                         continue;
                     };
                     let line_index = sass_parser::line_index::LineIndex::new(&text);
-                    let diagnostics = errors_to_diagnostics(&errors, &line_index);
+                    let diagnostics = errors_to_diagnostics(&errors, &line_index, &text);
                     let file_symbols = {
                         let root = SyntaxNode::new_root(green.clone());
                         symbols::collect_symbols(&root)
@@ -742,7 +736,7 @@ impl LanguageServer for Backend {
             .symbols
             .definitions
             .iter()
-            .map(|sym| to_lsp_document_symbol(sym, &doc.line_index))
+            .map(|sym| to_lsp_document_symbol(sym, &doc.line_index, &doc.text))
             .collect();
         Ok(Some(DocumentSymbolResponse::Nested(lsp_symbols)))
     }
@@ -784,8 +778,11 @@ impl LanguageServer for Backend {
         let Some(target_line_index) = self.module_graph.line_index(&target_uri) else {
             return Ok(None);
         };
+        let Some(target_source) = self.module_graph.source_text(&target_uri) else {
+            return Ok(None);
+        };
 
-        let range = text_range_to_lsp(symbol.selection_range, &target_line_index);
+        let range = text_range_to_lsp(symbol.selection_range, &target_line_index, &target_source);
         Ok(Some(GotoDefinitionResponse::Scalar(Location {
             uri: target_uri,
             range,
@@ -829,7 +826,7 @@ impl LanguageServer for Backend {
                 continue;
             };
 
-            let range = text_range_to_lsp(string_token.text_range(), line_index);
+            let range = text_range_to_lsp(string_token.text_range(), line_index, &doc.text);
             links.push(DocumentLink {
                 range,
                 target: Some(target_uri),
@@ -923,7 +920,7 @@ impl LanguageServer for Backend {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
-        let (green, offset, file_symbols, line_index) = {
+        let (green, offset, file_symbols, line_index, doc_text) = {
             let Some(doc) = self.documents.get(&uri) else {
                 return Ok(None);
             };
@@ -935,6 +932,7 @@ impl LanguageServer for Backend {
                 offset,
                 doc.symbols.clone(),
                 doc.line_index.clone(),
+                doc.text.clone(),
             )
         };
 
@@ -956,7 +954,7 @@ impl LanguageServer for Backend {
                 } else {
                     Some(&target_uri)
                 };
-                let range = Some(text_range_to_lsp(ref_info.range, &line_index));
+                let range = Some(text_range_to_lsp(ref_info.range, &line_index, &doc_text));
                 return Ok(Some(make_hover(&symbol, source, range)));
             }
             return Ok(None);
@@ -964,7 +962,7 @@ impl LanguageServer for Backend {
 
         // 2. Try definition at cursor (hovering on a declaration name)
         if let Some(symbol) = find_definition_at_offset(&file_symbols, offset) {
-            let range = Some(text_range_to_lsp(symbol.selection_range, &line_index));
+            let range = Some(text_range_to_lsp(symbol.selection_range, &line_index, &doc_text));
             return Ok(Some(make_hover(symbol, None, range)));
         }
 
@@ -1022,9 +1020,10 @@ impl LanguageServer for Backend {
             .into_iter()
             .filter_map(|(ref_uri, range)| {
                 let li = self.module_graph.line_index(&ref_uri)?;
+                let src = self.module_graph.source_text(&ref_uri)?;
                 Some(Location {
                     uri: ref_uri,
-                    range: text_range_to_lsp(range, &li),
+                    range: text_range_to_lsp(range, &li, &src),
                 })
             })
             .collect();
@@ -1066,9 +1065,12 @@ impl LanguageServer for Backend {
             let Some(li) = self.module_graph.line_index(&uri) else {
                 return Ok(None);
             };
+            let Some(src) = self.module_graph.source_text(&uri) else {
+                return Ok(None);
+            };
             let name_range = name_only_range(ref_info.kind, ref_info.range);
             return Ok(Some(PrepareRenameResponse::RangeWithPlaceholder {
-                range: text_range_to_lsp(name_range, &li),
+                range: text_range_to_lsp(name_range, &li, &src),
                 placeholder: sym.name,
             }));
         }
@@ -1077,9 +1079,12 @@ impl LanguageServer for Backend {
             let Some(li) = self.module_graph.line_index(&uri) else {
                 return Ok(None);
             };
+            let Some(src) = self.module_graph.source_text(&uri) else {
+                return Ok(None);
+            };
             let name_range = name_only_range(sym.kind, sym.selection_range);
             return Ok(Some(PrepareRenameResponse::RangeWithPlaceholder {
-                range: text_range_to_lsp(name_range, &li),
+                range: text_range_to_lsp(name_range, &li, &src),
                 placeholder: sym.name.clone(),
             }));
         }
@@ -1167,9 +1172,12 @@ impl LanguageServer for Backend {
             let Some(li) = self.module_graph.line_index(&ref_uri) else {
                 continue;
             };
+            let Some(src) = self.module_graph.source_text(&ref_uri) else {
+                continue;
+            };
             let edit_range = name_only_range(target_kind, range);
             changes.entry(ref_uri).or_default().push(TextEdit {
-                range: text_range_to_lsp(edit_range, &li),
+                range: text_range_to_lsp(edit_range, &li, &src),
                 new_text: new_name.clone(),
             });
         }
@@ -1184,8 +1192,11 @@ impl LanguageServer for Backend {
             let Some(li) = self.module_graph.line_index(&fwd_uri) else {
                 continue;
             };
+            let Some(src) = self.module_graph.source_text(&fwd_uri) else {
+                continue;
+            };
             changes.entry(fwd_uri).or_default().push(TextEdit {
-                range: text_range_to_lsp(range, &li),
+                range: text_range_to_lsp(range, &li, &src),
                 new_text: new_name.clone(),
             });
         }
@@ -1256,7 +1267,8 @@ impl LanguageServer for Backend {
             .filter_map(|(uri, sym)| {
                 let score = fuzzy_score(&sym.name, &query)?;
                 let li = self.module_graph.line_index(&uri)?;
-                let range = text_range_to_lsp(sym.selection_range, &li);
+                let src = self.module_graph.source_text(&uri)?;
+                let range = text_range_to_lsp(sym.selection_range, &li, &src);
                 let kind = match sym.kind {
                     symbols::SymbolKind::Variable => {
                         tower_lsp_server::ls_types::SymbolKind::VARIABLE
@@ -1493,9 +1505,10 @@ fn symbol_to_completion_item(
 fn to_lsp_document_symbol(
     sym: &symbols::Symbol,
     line_index: &sass_parser::line_index::LineIndex,
+    source: &str,
 ) -> tower_lsp_server::ls_types::DocumentSymbol {
-    let range = text_range_to_lsp(sym.range, line_index);
-    let selection_range = text_range_to_lsp(sym.selection_range, line_index);
+    let range = text_range_to_lsp(sym.range, line_index, source);
+    let selection_range = text_range_to_lsp(sym.selection_range, line_index, source);
     let (kind, detail) = match sym.kind {
         symbols::SymbolKind::Variable => (tower_lsp_server::ls_types::SymbolKind::VARIABLE, None),
         symbols::SymbolKind::Function => (
@@ -1524,15 +1537,18 @@ fn to_lsp_document_symbol(
     }
 }
 
+/// Convert a `TextRange` (byte offsets) to an LSP `Range` (0-based line, UTF-16 column).
+#[allow(clippy::cast_possible_truncation)]
 fn text_range_to_lsp(
     range: sass_parser::text_range::TextRange,
     line_index: &sass_parser::line_index::LineIndex,
+    source: &str,
 ) -> Range {
-    let start = line_index.line_col(range.start());
-    let end = line_index.line_col(range.end());
+    let start = byte_to_lsp_pos(source, line_index, range.start());
+    let end = byte_to_lsp_pos(source, line_index, range.end());
     Range::new(
-        Position::new(start.line - 1, start.col - 1),
-        Position::new(end.line - 1, end.col - 1),
+        Position::new(start.0, start.1),
+        Position::new(end.0, end.1),
     )
 }
 

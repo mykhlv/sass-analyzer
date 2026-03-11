@@ -521,6 +521,10 @@ impl ModuleGraph {
         self.files.get(uri).map(|info| info.line_index.clone())
     }
 
+    pub fn source_text(&self, uri: &Uri) -> Option<String> {
+        self.files.get(uri).map(|info| info.source_text.clone())
+    }
+
     pub fn all_symbols(&self) -> Vec<(Uri, symbols::Symbol)> {
         let mut result = Vec::new();
         for entry in &self.files {

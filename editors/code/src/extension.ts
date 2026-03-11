@@ -16,14 +16,18 @@ function getServerPath(context: ExtensionContext): string {
     return customPath;
   }
 
+  const exeSuffix = process.platform === "win32" ? ".exe" : "";
+
   // Bundled binary (production VSIX)
-  const bundled = path.join(context.extensionPath, "bin", "sass-lsp");
+  const bundled = path.join(context.extensionPath, "bin", `sass-lsp${exeSuffix}`);
   if (fs.existsSync(bundled)) {
     return bundled;
   }
 
   // Dev fallback: cargo debug binary (editors/code/../../target/debug/sass-lsp)
-  const devBinary = path.join(context.extensionPath, "..", "..", "target", "debug", "sass-lsp");
+  const devBinary = path.join(
+    context.extensionPath, "..", "..", "target", "debug", `sass-lsp${exeSuffix}`,
+  );
   if (fs.existsSync(devBinary)) {
     return devBinary;
   }

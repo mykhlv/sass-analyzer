@@ -1,22 +1,32 @@
+// ── Public API ──────────────────────────────────────────────────────
 pub mod syntax_kind;
 pub mod text_range;
-pub mod token_set;
-
-pub mod event;
-pub mod input;
-pub mod lexer;
-pub mod parser;
-pub mod syntax;
 
 pub mod ast;
-pub mod grammar;
 pub mod imports;
 pub mod line_index;
+pub mod reparse;
 pub mod resolver;
+pub mod syntax;
 pub mod vfs;
 
+// ── Internal modules ────────────────────────────────────────────────
+// These are implementation details. They are `pub` only for benchmarks
+// and integration tests; downstream crates should not depend on them.
+#[doc(hidden)]
+pub mod event;
+#[doc(hidden)]
+pub mod grammar;
+#[doc(hidden)]
+pub mod input;
+#[doc(hidden)]
+pub mod lexer;
+#[doc(hidden)]
+pub mod parser;
+#[doc(hidden)]
+pub mod token_set;
+
 mod bridge;
-pub mod reparse;
 pub use bridge::build_tree;
 
 use text_range::TextRange;
