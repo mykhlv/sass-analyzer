@@ -42,7 +42,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check version consistency
         run: |
-          cargo_ver=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          cargo_ver=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml','rb'))['workspace']['package']['version'])")
           pkg_ver=$(node -p "require('./editors/code/package.json').version")
           if [ "$cargo_ver" != "$pkg_ver" ]; then
             echo "::error::Version mismatch: Cargo.toml=$cargo_ver, package.json=$pkg_ver"
