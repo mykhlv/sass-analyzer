@@ -81,14 +81,17 @@ impl DirectBuilder {
 
     #[inline]
     fn finish_node(&mut self) {
-        let (kind, first_child) = self.parents.pop().unwrap();
+        let (kind, first_child) = self
+            .parents
+            .pop()
+            .expect("finish_node called without matching start_node");
         let node = rowan::GreenNode::new(kind, self.children.drain(first_child..));
         self.children.push(rowan::NodeOrToken::Node(node));
     }
 
     fn finish(mut self) -> rowan::GreenNode {
         debug_assert_eq!(self.children.len(), 1);
-        match self.children.pop().unwrap() {
+        match self.children.pop().expect("finish called on empty builder") {
             rowan::NodeOrToken::Node(node) => node,
             rowan::NodeOrToken::Token(_) => panic!("expected node, got token"),
         }
