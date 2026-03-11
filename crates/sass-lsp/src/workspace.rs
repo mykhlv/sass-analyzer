@@ -455,6 +455,7 @@ impl ModuleGraph {
 
         // Imported symbols
         if let Some(edges) = self.edges.get(from) {
+            let mut visited = HashSet::new();
             for edge in edges.value() {
                 let prefix = match &edge.namespace {
                     Namespace::Named(n) => Some(n.clone()),
@@ -466,7 +467,6 @@ impl ModuleGraph {
                 } else {
                     prefix
                 };
-                let mut visited = HashSet::new();
                 self.collect_module_symbols(
                     &edge.target,
                     prefix.as_deref(),
