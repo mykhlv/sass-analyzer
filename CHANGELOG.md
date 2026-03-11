@@ -35,6 +35,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Silent failure when LSP worker channel drops (now logs error)
 - Path traversal protection in module resolver (reject `..` escaping workspace roots)
 - Files exceeding size limit now logged instead of silently skipped
+- Extension now forwards `didChangeConfiguration` to the server (settings changes take effect without restart)
+- Extension checks server binary exists before starting, shows actionable error instead of cryptic crash
+- Extension awaits `client.start()` so startup errors surface properly
+- Defensive string slicing in `@use`/`@forward` path extraction prevents panic on malformed tokens
+- `byte_to_lsp_pos` clamps out-of-range offsets to avoid panic on stale parse trees
+- `merge_errors` clamps negative shifted offsets to zero instead of wrapping to corrupt ranges
 
 ## 0.1.0 — 2026-03-08
 

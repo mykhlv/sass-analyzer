@@ -3,17 +3,23 @@ use sass_parser::text_range::{TextRange, TextSize};
 use tower_lsp_server::ls_types::{Position, Range, TextDocumentContentChangeEvent};
 
 /// Convert a byte offset to a 0-based (line, UTF-16 column) pair.
+///
+/// If `offset` exceeds the source length (stale parse tree), it is clamped to
+/// avoid panicking on out-of-bounds slices.
 #[allow(clippy::cast_possible_truncation)]
 pub(crate) fn byte_to_lsp_pos(
     source: &str,
     line_index: &LineIndex,
     offset: TextSize,
 ) -> (u32, u32) {
-    let lc = line_index.line_col(offset);
+    let clamped = TextSize::from((u32::from(offset) as usize).min(source.len()) as u32);
+    let lc = line_index.line_col(clamped);
     let line_0 = lc.line - 1;
-    let byte_offset = u32::from(offset) as usize;
-    let line_start_byte = byte_offset - (lc.col as usize - 1);
-    let slice = &source[line_start_byte..byte_offset];
+    let byte_offset = u32::from(clamped) as usize;
+    let col_byte = lc.col as usize - 1;
+    let line_start_byte = byte_offset.saturating_sub(col_byte);
+    let end = byte_offset.min(source.len());
+    let slice = &source[line_start_byte..end];
     let col_utf16 = slice.encode_utf16().count() as u32;
     (line_0, col_utf16)
 }
