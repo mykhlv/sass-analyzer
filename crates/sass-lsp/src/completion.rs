@@ -1,6 +1,4 @@
-use tower_lsp_server::ls_types::{
-    CompletionItem, CompletionItemKind, MarkupContent, MarkupKind, Position,
-};
+use tower_lsp_server::ls_types::{CompletionItem, CompletionItemKind, MarkupContent, MarkupKind};
 
 use crate::symbols;
 
@@ -25,14 +23,11 @@ pub(crate) enum CompletionContext {
     General,
 }
 
-pub(crate) fn detect_completion_context(text: &str, position: Position) -> CompletionContext {
-    let line_idx = position.line as usize;
-    let Some(line) = text.lines().nth(line_idx) else {
-        return CompletionContext::General;
-    };
-
-    // Get text before cursor on this line (position.character is UTF-16 offset)
-    let target_utf16 = position.character as usize;
+/// Detect completion context from a single line of text and the cursor's UTF-16
+/// character offset within that line. Avoids cloning the entire document.
+pub(crate) fn detect_completion_context(line: &str, character: u32) -> CompletionContext {
+    // Get text before cursor on this line (character is UTF-16 offset)
+    let target_utf16 = character as usize;
     let mut utf16_count = 0;
     let mut byte_offset = 0;
     for ch in line.chars() {
