@@ -1,6 +1,7 @@
+[graph]
+all-features = true
+
 [advisories]
-vulnerability = "deny"
-unmaintained = "warn"
 
 [licenses]
 allow = [
@@ -13,7 +14,6 @@ allow = [
     "ISC",
     "Zlib",
 ]
-confidence-threshold = 0.8
 
 [bans]
 multiple-versions = "warn"
