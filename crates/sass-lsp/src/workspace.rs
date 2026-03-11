@@ -66,6 +66,8 @@ pub struct ModuleGraph {
     resolver: RwLock<Arc<ModuleResolver<OsFileSystem>>>,
     builtin_symbols: DashMap<String, Vec<symbols::Symbol>>,
     prepend_imports: RwLock<Vec<String>>,
+    /// Canonicalized roots that bound filesystem reads (workspace + `load_paths` + alias targets).
+    allowed_roots: RwLock<Vec<PathBuf>>,
     /// LRU order for green tree eviction (front = most recently used).
     tree_lru: Mutex<VecDeque<Uri>>,
     /// LRU order for source text eviction (front = most recently used).
@@ -80,6 +82,7 @@ impl ModuleGraph {
             resolver: RwLock::new(Arc::new(ModuleResolver::new())),
             builtin_symbols: DashMap::new(),
             prepend_imports: RwLock::new(Vec::new()),
+            allowed_roots: RwLock::new(Vec::new()),
             tree_lru: Mutex::new(VecDeque::new()),
             source_lru: Mutex::new(VecDeque::new()),
         }
@@ -92,6 +95,43 @@ impl ModuleGraph {
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         *guard = imports;
+    }
+
+    /// Set allowed filesystem roots. Resolved paths outside these roots are rejected.
+    pub fn set_allowed_roots(&self, roots: Vec<PathBuf>) {
+        let canonical: Vec<PathBuf> = roots
+            .into_iter()
+            .filter_map(|r| std::fs::canonicalize(&r).ok())
+            .collect();
+        let mut guard = self
+            .allowed_roots
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *guard = canonical;
+    }
+
+    /// Check if a path is under one of the allowed roots.
+    /// Returns `true` if no roots are configured (permissive fallback).
+    fn is_path_allowed(&self, path: &Path) -> bool {
+        let roots = self
+            .allowed_roots
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if roots.is_empty() {
+            return true;
+        }
+        // Try canonicalizing the full path first; if the file doesn't exist yet,
+        // canonicalize the parent directory and append the file name.
+        let canonical = std::fs::canonicalize(path).or_else(|_| {
+            path.parent()
+                .and_then(|p| std::fs::canonicalize(p).ok())
+                .map(|p| p.join(path.file_name().unwrap_or_default()))
+                .ok_or(std::io::ErrorKind::NotFound)
+        });
+        let Ok(canonical) = canonical else {
+            return false;
+        };
+        roots.iter().any(|root| canonical.starts_with(root))
     }
 
     /// Replace the resolver with a configured one (called once from `initialize`).
@@ -907,6 +947,10 @@ impl ModuleGraph {
     }
 
     fn index_dependency(&self, uri: &Uri, path: &Path) {
+        if !self.is_path_allowed(path) {
+            tracing::warn!(?path, "blocked path traversal outside allowed roots");
+            return;
+        }
         let Ok(source) = std::fs::read_to_string(path) else {
             return;
         };
@@ -1985,5 +2029,37 @@ mod tests {
         assert_eq!(refs[0].0, main_uri);
         let text = &main_source[usize::from(refs[0].1.start())..usize::from(refs[0].1.end())];
         assert_eq!(text, "primary");
+    }
+
+    #[test]
+    fn path_traversal_blocked_outside_roots() {
+        let graph = ModuleGraph::new();
+        // Use a known directory as allowed root
+        let tmp = std::env::temp_dir();
+        graph.set_allowed_roots(vec![tmp.clone()]);
+
+        // Path inside the root is allowed
+        assert!(graph.is_path_allowed(&tmp.join("some_file.scss")));
+
+        // Path outside the root is blocked
+        assert!(!graph.is_path_allowed(Path::new("/etc/passwd")));
+    }
+
+    #[test]
+    fn path_traversal_permissive_without_roots() {
+        let graph = ModuleGraph::new();
+        // No roots configured → permissive fallback
+        assert!(graph.is_path_allowed(Path::new("/any/path")));
+    }
+
+    #[test]
+    fn path_traversal_dotdot_resolved() {
+        let graph = ModuleGraph::new();
+        let tmp = std::env::temp_dir();
+        graph.set_allowed_roots(vec![tmp.clone()]);
+
+        // A path that uses `..` to escape should be blocked
+        let escaped = tmp.join("subdir").join("..").join("..").join("etc");
+        assert!(!graph.is_path_allowed(&escaped));
     }
 }
