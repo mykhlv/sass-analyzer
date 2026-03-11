@@ -262,7 +262,7 @@ pub(crate) fn word_boundary_match(
 
     let mut bi = boundaries.iter();
     for qch in query_lower.chars() {
-        if bi.find(|&&c| c == qch).is_none() {
+        if !bi.any(|&c| c == qch) {
             return false;
         }
     }
