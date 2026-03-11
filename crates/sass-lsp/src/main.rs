@@ -93,7 +93,7 @@ pub(crate) struct DocumentState {
     pub(crate) errors: Vec<(String, TextRange)>,
     pub(crate) line_index: sass_parser::line_index::LineIndex,
     #[allow(dead_code)]
-    pub(crate) symbols: symbols::FileSymbols,
+    pub(crate) symbols: Arc<symbols::FileSymbols>,
 }
 
 use completion::{

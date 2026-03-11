@@ -53,7 +53,7 @@ pub struct ImportEdge {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ModuleInfo {
-    pub symbols: FileSymbols,
+    pub symbols: Arc<FileSymbols>,
     pub green: Option<rowan::GreenNode>,
     pub line_index: sass_parser::line_index::LineIndex,
     pub source_text: Option<String>,
@@ -247,7 +247,7 @@ impl ModuleGraph {
         &self,
         uri: &Uri,
         green: rowan::GreenNode,
-        symbols: FileSymbols,
+        symbols: Arc<FileSymbols>,
         line_index: sass_parser::line_index::LineIndex,
         source_text: String,
     ) {
@@ -974,7 +974,7 @@ impl ModuleGraph {
         let line_index = sass_parser::line_index::LineIndex::new(&source);
         let file_symbols = {
             let root = SyntaxNode::new_root(green.clone());
-            symbols::collect_symbols(&root)
+            Arc::new(symbols::collect_symbols(&root))
         };
         // Full indexing: also resolves imports so @forward chains are tracked.
         self.index_file(uri, green, file_symbols, line_index, source);
@@ -1415,7 +1415,7 @@ mod tests {
         let syms = symbols::collect_symbols(&root);
         let li = sass_parser::line_index::LineIndex::new(source);
         ModuleInfo {
-            symbols: syms,
+            symbols: Arc::new(syms),
             green: Some(green),
             line_index: li,
             source_text: Some(source.to_owned()),

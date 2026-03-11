@@ -113,7 +113,7 @@ pub(crate) async fn run_worker(
                     let diagnostics = errors_to_diagnostics(&errors, &line_index, &text);
                     let file_symbols = {
                         let root = SyntaxNode::new_root(green.clone());
-                        symbols::collect_symbols(&root)
+                        Arc::new(symbols::collect_symbols(&root))
                     };
 
                     let is_current = documents
