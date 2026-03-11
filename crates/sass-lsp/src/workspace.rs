@@ -292,10 +292,7 @@ impl ModuleGraph {
                     ForwardVisibility::default()
                 };
 
-                // Eagerly index the dependency if not already known
-                if !self.files.contains_key(&target_uri) {
-                    self.index_dependency(&target_uri, &target_path);
-                }
+                self.index_dependency(&target_uri, &target_path);
 
                 resolved_edges.push(ImportEdge {
                     target: target_uri,
@@ -334,10 +331,8 @@ impl ModuleGraph {
                 let resolved = resolver.resolve(spec, base);
                 if let Ok(ResolvedModule::File(target_path)) = resolved {
                     let target_uri = path_to_uri(&target_path);
-                    if !self.files.contains_key(&target_uri) {
-                        drop(resolver);
-                        self.index_dependency(&target_uri, &target_path);
-                    }
+                    drop(resolver);
+                    self.index_dependency(&target_uri, &target_path);
                     resolved_edges.push(ImportEdge {
                         target: target_uri,
                         namespace: Namespace::Star,
@@ -949,6 +944,9 @@ impl ModuleGraph {
     fn index_dependency(&self, uri: &Uri, path: &Path) {
         const MAX_DEPENDENCY_FILES: usize = 10_000;
 
+        if self.files.contains_key(uri) {
+            return;
+        }
         if !self.is_path_allowed(path) {
             tracing::warn!(?path, "blocked path traversal outside allowed roots");
             return;

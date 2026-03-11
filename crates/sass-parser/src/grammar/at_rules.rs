@@ -11,6 +11,7 @@ mod use_forward;
 use crate::parser::Parser;
 #[allow(clippy::wildcard_imports)]
 use crate::syntax_kind::*;
+use crate::token_set::TokenSet;
 
 // Re-exports for sub-modules — shortens `super::super::block` → `super::block`
 // and `crate::grammar::expressions::*` → `super::expressions::*`.
@@ -100,6 +101,32 @@ pub(super) fn eat_balanced(p: &mut Parser<'_>, open: SyntaxKind, close: SyntaxKi
             depth -= 1;
         }
         p.bump();
+    }
+}
+
+/// Consume tokens opaquely until a token in `stop` is reached at paren-depth 0.
+/// Tracks `(` / `)` nesting and handles `#{` interpolation.
+/// Used by `@media`, `@supports`, `@container`, `@scope` conditions.
+pub(super) fn eat_opaque_condition(p: &mut Parser<'_>, stop: TokenSet) {
+    let mut depth: u32 = 0;
+    while !p.at_end() {
+        if depth == 0 && stop.contains(p.current()) {
+            break;
+        }
+        match p.current() {
+            LPAREN => {
+                depth += 1;
+                p.bump();
+            }
+            RPAREN => {
+                depth = depth.saturating_sub(1);
+                p.bump();
+            }
+            HASH_LBRACE => {
+                let _ = interpolation(p);
+            }
+            _ => p.bump(),
+        }
     }
 }
 

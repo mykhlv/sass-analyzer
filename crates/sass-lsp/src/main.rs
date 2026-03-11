@@ -57,12 +57,29 @@ pub(crate) struct IncrementalEdit {
     pub(crate) edit: sass_parser::reparse::TextEdit,
 }
 
+/// LSP backend state.
+///
+/// # Eventual consistency model
+///
+/// Two maps hold per-file state at different stages of the pipeline:
+///
+/// - **`source_texts`** — updated *synchronously* in `did_open`/`did_change` on the
+///   main LSP task. Always reflects the latest editor content. Cleaned on `did_close`;
+///   entries may leak if a client never sends `textDocument/didClose`.
+///
+/// - **`documents`** — updated *asynchronously* by the debounced worker after parsing.
+///   May lag behind `source_texts` by up to `DEBOUNCE_MS`.
+///
+/// Read-only handlers (hover, completions, goto-def) read from `documents` and thus
+/// operate on a slightly stale but internally consistent snapshot.
 #[allow(dead_code)]
 struct Backend {
     client: Client,
+    /// Parsed state per file, updated asynchronously by the worker after debounce.
     documents: Arc<DashMap<Uri, DocumentState>>,
     /// Latest source text per file, updated synchronously in `did_open`/`did_change`.
     /// Needed for incremental sync: we apply text edits here before sending to worker.
+    /// Cleaned on `did_close`; may leak if the client never sends `didClose`.
     source_texts: Arc<DashMap<Uri, String>>,
     module_graph: Arc<workspace::ModuleGraph>,
     task_tx: mpsc::UnboundedSender<Task>,
