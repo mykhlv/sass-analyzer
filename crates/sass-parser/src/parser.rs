@@ -11,6 +11,11 @@ pub struct Parser<'src> {
     source: &'src str,
     pos: usize,
     events: Vec<Event>,
+    /// Error message storage, indexed by `Event::Error::msg_index`.
+    /// Kept separate from events so `Event` stays at 16 bytes. On well-formed
+    /// input this Vec is empty (zero allocations). Interning common messages
+    /// (e.g. `Cow<'static, str>`) was considered but the gain is marginal since
+    /// errors only occur on malformed input where parsing speed is not critical.
     error_messages: Vec<String>,
     depth: u32,
 }
@@ -125,8 +130,10 @@ impl<'src> Parser<'src> {
     // ── Markers ──────────────────────────────────────────────────────
 
     pub fn start(&mut self) -> Marker {
+        let len = self.events.len();
+        debug_assert!(u32::try_from(len).is_ok(), "event count overflows u32");
         #[allow(clippy::cast_possible_truncation)]
-        let pos = self.events.len() as u32;
+        let pos = len as u32;
         self.events.push(Event::Enter {
             kind: SyntaxKind::ERROR,
             forward_parent: None,
@@ -143,8 +150,13 @@ impl<'src> Parser<'src> {
         } else {
             self.input.range(self.pos)
         };
+        let msg_len = self.error_messages.len();
+        debug_assert!(
+            u32::try_from(msg_len).is_ok(),
+            "error message count overflows u32"
+        );
         #[allow(clippy::cast_possible_truncation)]
-        let msg_index = self.error_messages.len() as u32;
+        let msg_index = msg_len as u32;
         self.error_messages.push(msg.into());
         self.events.push(Event::Error { msg_index, range });
     }
@@ -255,6 +267,7 @@ impl CompletedMarker {
         new_pos
     }
 
+    #[allow(clippy::match_on_vec_items)]
     pub fn kind(&self, p: &Parser<'_>) -> SyntaxKind {
         match p.events[self.pos as usize] {
             Event::Enter { kind, .. } => kind,

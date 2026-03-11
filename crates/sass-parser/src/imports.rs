@@ -11,6 +11,7 @@ use crate::text_range::TextRange;
 /// A single import dependency extracted from the source file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportRef {
+    /// Whether this is a `@use`, `@forward`, `@import`, or `meta.load-css()`.
     pub kind: ImportKind,
     /// The unquoted module path (e.g. `sass:meta`, `./colors`).
     pub path: String,
@@ -18,10 +19,14 @@ pub struct ImportRef {
     pub range: TextRange,
 }
 
+/// The kind of import statement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImportKind {
+    /// `@use "..."`.
     Use,
+    /// `@forward "..."`.
     Forward,
+    /// `@import "..."` (legacy).
     Import,
     /// `meta.load-css()` — dynamic import, first string argument is the URL.
     LoadCss,
@@ -66,12 +71,13 @@ fn collect_rec(node: &SyntaxNode, out: &mut Vec<ImportRef>) {
             {
                 if token.kind() == SyntaxKind::QUOTED_STRING {
                     let text = token.text();
-                    let path = text[1..text.len() - 1].to_owned();
-                    out.push(ImportRef {
-                        kind: ImportKind::Import,
-                        path,
-                        range: node.text_range(),
-                    });
+                    if let Some(unquoted) = text.get(1..text.len().saturating_sub(1)) {
+                        out.push(ImportRef {
+                            kind: ImportKind::Import,
+                            path: unquoted.to_owned(),
+                            range: node.text_range(),
+                        });
+                    }
                 }
             }
         }

@@ -10,6 +10,7 @@ pub struct LineIndex {
     newlines: Vec<u32>,
 }
 
+/// A 1-based line/column position in a source file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LineCol {
     /// 1-based line number.
@@ -25,6 +26,7 @@ impl std::fmt::Display for LineCol {
 }
 
 impl LineIndex {
+    /// Build a line index from source text.
     #[allow(clippy::cast_possible_truncation)]
     pub fn new(source: &str) -> Self {
         // Source files >4 GiB are not supported; u32 offsets match text-size.

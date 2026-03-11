@@ -16,14 +16,18 @@ function getServerPath(context: ExtensionContext): string {
     return customPath;
   }
 
+  const exeSuffix = process.platform === "win32" ? ".exe" : "";
+
   // Bundled binary (production VSIX)
-  const bundled = path.join(context.extensionPath, "bin", "sass-lsp");
+  const bundled = path.join(context.extensionPath, "bin", `sass-lsp${exeSuffix}`);
   if (fs.existsSync(bundled)) {
     return bundled;
   }
 
   // Dev fallback: cargo debug binary (editors/code/../../target/debug/sass-lsp)
-  const devBinary = path.join(context.extensionPath, "..", "..", "target", "debug", "sass-lsp");
+  const devBinary = path.join(
+    context.extensionPath, "..", "..", "target", "debug", `sass-lsp${exeSuffix}`,
+  );
   if (fs.existsSync(devBinary)) {
     return devBinary;
   }
@@ -80,10 +84,17 @@ export async function activate(context: ExtensionContext): Promise<void> {
     connectionOptions: {
       maxRestartCount: 4,
     },
+    synchronize: {
+      configurationSection: "sass-analyzer",
+    },
     initializationOptions: {
       loadPaths,
       importAliases,
       prependImports,
+      maxFileSize: config.get<number>("maxFileSize"),
+      debounceMs: config.get<number>("debounceMs"),
+      maxCachedTrees: config.get<number>("maxCachedTrees"),
+      maxCachedSources: config.get<number>("maxCachedSources"),
     },
     outputChannel,
     traceOutputChannel: outputChannel,
@@ -96,7 +107,15 @@ export async function activate(context: ExtensionContext): Promise<void> {
     clientOptions,
   );
 
-  client.start();
+  if (!fs.existsSync(serverPath)) {
+    window.showErrorMessage(
+      `sass-analyzer: server binary not found at ${serverPath}. ` +
+      `Run \`cargo build -p sass-lsp\` or set sass-analyzer.server.path.`,
+    );
+    return;
+  }
+
+  await client.start();
 }
 
 export async function deactivate(): Promise<void> {

@@ -12,9 +12,8 @@ use sass_parser::vfs::OsFileSystem;
 use tower_lsp_server::ls_types::Uri;
 
 use crate::builtins;
+use crate::config::RuntimeConfig;
 use crate::symbols::{self, FileSymbols};
-
-const MAX_CACHED_TREES: usize = 200;
 
 /// Namespace binding for an `@use` rule.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,15 +43,18 @@ pub struct ImportEdge {
 }
 
 /// Parsed + analyzed info for a single file.
-/// Symbols and line index are always retained. The green tree may be evicted
-/// by the LRU cache to cap memory; it is re-parsed on demand from `source_text`.
+/// Symbols and line index are always retained. Both the green tree and
+/// source text may be evicted by their respective LRU caches to cap memory.
+/// The green tree is re-parsed on demand from `source_text`; source text
+/// is reconstructed on demand from the green tree via `green.text()`.
+/// Invariant: at least one of `green` or `source_text` is always `Some`.
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ModuleInfo {
-    pub symbols: FileSymbols,
+    pub symbols: Arc<FileSymbols>,
     pub green: Option<rowan::GreenNode>,
     pub line_index: sass_parser::line_index::LineIndex,
-    pub source_text: String,
+    pub source_text: Option<String>,
 }
 
 /// Cross-file dependency graph for the SCSS workspace.
@@ -62,19 +64,27 @@ pub struct ModuleGraph {
     resolver: RwLock<Arc<ModuleResolver<OsFileSystem>>>,
     builtin_symbols: DashMap<String, Vec<symbols::Symbol>>,
     prepend_imports: RwLock<Vec<String>>,
+    /// Canonicalized roots that bound filesystem reads (workspace + `load_paths` + alias targets).
+    allowed_roots: RwLock<Vec<PathBuf>>,
     /// LRU order for green tree eviction (front = most recently used).
     tree_lru: Mutex<VecDeque<Uri>>,
+    /// LRU order for source text eviction (front = most recently used).
+    source_lru: Mutex<VecDeque<Uri>>,
+    runtime_config: Arc<RuntimeConfig>,
 }
 
 impl ModuleGraph {
-    pub fn new() -> Self {
+    pub fn new(runtime_config: Arc<RuntimeConfig>) -> Self {
         Self {
             files: DashMap::new(),
             edges: DashMap::new(),
             resolver: RwLock::new(Arc::new(ModuleResolver::new())),
             builtin_symbols: DashMap::new(),
             prepend_imports: RwLock::new(Vec::new()),
+            allowed_roots: RwLock::new(Vec::new()),
             tree_lru: Mutex::new(VecDeque::new()),
+            source_lru: Mutex::new(VecDeque::new()),
+            runtime_config,
         }
     }
 
@@ -87,6 +97,43 @@ impl ModuleGraph {
         *guard = imports;
     }
 
+    /// Set allowed filesystem roots. Resolved paths outside these roots are rejected.
+    pub fn set_allowed_roots(&self, roots: Vec<PathBuf>) {
+        let canonical: Vec<PathBuf> = roots
+            .into_iter()
+            .filter_map(|r| std::fs::canonicalize(&r).ok())
+            .collect();
+        let mut guard = self
+            .allowed_roots
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *guard = canonical;
+    }
+
+    /// Check if a path is under one of the allowed roots.
+    /// Returns `true` if no roots are configured (permissive fallback).
+    fn is_path_allowed(&self, path: &Path) -> bool {
+        let roots = self
+            .allowed_roots
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if roots.is_empty() {
+            return true;
+        }
+        // Try canonicalizing the full path first; if the file doesn't exist yet,
+        // canonicalize the parent directory and append the file name.
+        let canonical = std::fs::canonicalize(path).or_else(|_| {
+            path.parent()
+                .and_then(|p| std::fs::canonicalize(p).ok())
+                .map(|p| p.join(path.file_name().unwrap_or_default()))
+                .ok_or(std::io::ErrorKind::NotFound)
+        });
+        let Ok(canonical) = canonical else {
+            return false;
+        };
+        roots.iter().any(|root| canonical.starts_with(root))
+    }
+
     /// Replace the resolver with a configured one (called once from `initialize`).
     pub fn set_resolver(&self, resolver: ModuleResolver<OsFileSystem>) {
         let mut guard = self
@@ -96,8 +143,8 @@ impl ModuleGraph {
         *guard = Arc::new(resolver);
     }
 
-    /// Move a URI to the front of the LRU list (most recently used).
-    fn touch_lru(&self, uri: &Uri) {
+    /// Move a URI to the front of the tree LRU list (most recently used).
+    fn touch_tree_lru(&self, uri: &Uri) {
         let mut lru = self
             .tree_lru
             .lock()
@@ -108,18 +155,67 @@ impl ModuleGraph {
         lru.push_front(uri.clone());
     }
 
+    /// Move a URI to the front of the source LRU list (most recently used).
+    fn touch_source_lru(&self, uri: &Uri) {
+        let mut lru = self
+            .source_lru
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(pos) = lru.iter().position(|u| u == uri) {
+            lru.remove(pos);
+        }
+        lru.push_front(uri.clone());
+    }
+
     /// Evict green trees from files beyond the LRU limit.
+    /// Never evicts a green tree if the file's `source_text` is also evicted.
     fn evict_trees(&self) {
         let mut lru = self
             .tree_lru
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        while lru.len() > MAX_CACHED_TREES {
-            if let Some(evicted_uri) = lru.pop_back() {
-                if let Some(mut info) = self.files.get_mut(&evicted_uri) {
+        let mut kept = Vec::new();
+        while lru.len() > self.runtime_config.max_cached_trees() {
+            let Some(evicted_uri) = lru.pop_back() else {
+                break;
+            };
+            if let Some(mut info) = self.files.get_mut(&evicted_uri) {
+                if info.source_text.is_some() {
                     info.green = None;
+                } else {
+                    kept.push(evicted_uri);
+                    continue;
                 }
             }
+        }
+        for uri in kept {
+            lru.push_back(uri);
+        }
+    }
+
+    /// Evict source text from files beyond the LRU limit.
+    /// Never evicts source text if the file's green tree is also evicted.
+    fn evict_sources(&self) {
+        let mut lru = self
+            .source_lru
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut kept = Vec::new();
+        while lru.len() > self.runtime_config.max_cached_sources() {
+            let Some(evicted_uri) = lru.pop_back() else {
+                break;
+            };
+            if let Some(mut info) = self.files.get_mut(&evicted_uri) {
+                if info.green.is_some() {
+                    info.source_text = None;
+                } else {
+                    kept.push(evicted_uri);
+                    continue;
+                }
+            }
+        }
+        for uri in kept {
+            lru.push_back(uri);
         }
     }
 
@@ -129,8 +225,8 @@ impl ModuleGraph {
         if let Some(green) = &info.green {
             return Some(green.clone());
         }
-        // Re-parse from stored text.
-        let source = info.source_text.clone();
+        // Re-parse from stored text (invariant: source_text is Some when green is None).
+        let source = info.source_text.clone()?;
         drop(info);
         let (green, _) =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sass_parser::parse(&source)))
@@ -138,7 +234,7 @@ impl ModuleGraph {
         if let Some(mut info) = self.files.get_mut(uri) {
             info.green = Some(green.clone());
         }
-        self.touch_lru(uri);
+        self.touch_tree_lru(uri);
         self.evict_trees();
         Some(green)
     }
@@ -159,7 +255,7 @@ impl ModuleGraph {
         &self,
         uri: &Uri,
         green: rowan::GreenNode,
-        symbols: FileSymbols,
+        symbols: Arc<FileSymbols>,
         line_index: sass_parser::line_index::LineIndex,
         source_text: String,
     ) {
@@ -169,11 +265,13 @@ impl ModuleGraph {
                 symbols,
                 green: Some(green.clone()),
                 line_index,
-                source_text,
+                source_text: Some(source_text),
             },
         );
-        self.touch_lru(uri);
+        self.touch_tree_lru(uri);
+        self.touch_source_lru(uri);
         self.evict_trees();
+        self.evict_sources();
 
         let root = SyntaxNode::new_root(green);
         let import_refs = imports::collect_imports(&root);
@@ -202,10 +300,7 @@ impl ModuleGraph {
                     ForwardVisibility::default()
                 };
 
-                // Eagerly index the dependency if not already known
-                if !self.files.contains_key(&target_uri) {
-                    self.index_dependency(&target_uri, &target_path);
-                }
+                self.index_dependency(&target_uri, &target_path);
 
                 resolved_edges.push(ImportEdge {
                     target: target_uri,
@@ -244,10 +339,8 @@ impl ModuleGraph {
                 let resolved = resolver.resolve(spec, base);
                 if let Ok(ResolvedModule::File(target_path)) = resolved {
                     let target_uri = path_to_uri(&target_path);
-                    if !self.files.contains_key(&target_uri) {
-                        drop(resolver);
-                        self.index_dependency(&target_uri, &target_path);
-                    }
+                    drop(resolver);
+                    self.index_dependency(&target_uri, &target_path);
                     resolved_edges.push(ImportEdge {
                         target: target_uri,
                         namespace: Namespace::Star,
@@ -266,12 +359,20 @@ impl ModuleGraph {
     pub fn remove_file(&self, uri: &Uri) {
         self.files.remove(uri);
         self.edges.remove(uri);
-        let mut lru = self
+        let mut tree_lru = self
             .tree_lru
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(pos) = lru.iter().position(|u| u == uri) {
-            lru.remove(pos);
+        if let Some(pos) = tree_lru.iter().position(|u| u == uri) {
+            tree_lru.remove(pos);
+        }
+        drop(tree_lru);
+        let mut src_lru = self
+            .source_lru
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(pos) = src_lru.iter().position(|u| u == uri) {
+            src_lru.remove(pos);
         }
     }
 
@@ -354,6 +455,7 @@ impl ModuleGraph {
 
         // Imported symbols
         if let Some(edges) = self.edges.get(from) {
+            let mut visited = HashSet::new();
             for edge in edges.value() {
                 let prefix = match &edge.namespace {
                     Namespace::Named(n) => Some(n.clone()),
@@ -365,7 +467,6 @@ impl ModuleGraph {
                 } else {
                     prefix
                 };
-                let mut visited = HashSet::new();
                 self.collect_module_symbols(
                     &edge.target,
                     prefix.as_deref(),
@@ -521,6 +622,28 @@ impl ModuleGraph {
         self.files.get(uri).map(|info| info.line_index.clone())
     }
 
+    /// Get the source text for a URI. Reconstructs from the green tree if evicted,
+    /// and caches the result to avoid repeated reconstruction.
+    pub fn source_text(&self, uri: &Uri) -> Option<String> {
+        {
+            let info = self.files.get(uri)?;
+            if let Some(src) = &info.source_text {
+                return Some(src.clone());
+            }
+        }
+        // Reconstruct from green tree and cache back.
+        let mut info = self.files.get_mut(uri)?;
+        // Double-check after re-acquiring (another thread may have filled it).
+        if let Some(src) = &info.source_text {
+            return Some(src.clone());
+        }
+        let green = info.green.as_ref()?;
+        let root = SyntaxNode::new_root(green.clone());
+        let text = root.text().to_string();
+        info.source_text = Some(text.clone());
+        Some(text)
+    }
+
     pub fn all_symbols(&self) -> Vec<(Uri, symbols::Symbol)> {
         let mut result = Vec::new();
         for entry in &self.files {
@@ -665,7 +788,11 @@ impl ModuleGraph {
     }
 
     /// Find all references to a symbol across the entire workspace.
-    /// Walks each file's CST to correctly resolve both unqualified and namespace-qualified refs.
+    ///
+    /// O(files × refs) — iterates all indexed files and checks each reference.
+    /// No reverse index is maintained. Acceptable for typical SCSS workspaces
+    /// (hundreds of files); consider a reverse index if profiling shows this as
+    /// a bottleneck in large monorepos.
     pub fn find_all_references(
         &self,
         target_uri: &Uri,
@@ -837,6 +964,22 @@ impl ModuleGraph {
     }
 
     fn index_dependency(&self, uri: &Uri, path: &Path) {
+        const MAX_DEPENDENCY_FILES: usize = 10_000;
+
+        if self.files.contains_key(uri) {
+            return;
+        }
+        if !self.is_path_allowed(path) {
+            tracing::warn!(?path, "blocked path traversal outside allowed roots");
+            return;
+        }
+        if self.files.len() >= MAX_DEPENDENCY_FILES {
+            tracing::warn!(
+                limit = MAX_DEPENDENCY_FILES,
+                "dependency file limit reached, skipping further indexing"
+            );
+            return;
+        }
         let Ok(source) = std::fs::read_to_string(path) else {
             return;
         };
@@ -849,7 +992,7 @@ impl ModuleGraph {
         let line_index = sass_parser::line_index::LineIndex::new(&source);
         let file_symbols = {
             let root = SyntaxNode::new_root(green.clone());
-            symbols::collect_symbols(&root)
+            Arc::new(symbols::collect_symbols(&root))
         };
         // Full indexing: also resolves imports so @forward chains are tracked.
         self.index_file(uri, green, file_symbols, line_index, source);
@@ -1104,8 +1247,27 @@ fn uri_to_path(uri: &Uri) -> Option<PathBuf> {
 
 fn path_to_uri(path: &Path) -> Uri {
     Uri::from_file_path(path).unwrap_or_else(|| {
-        let s = format!("file://{}", path.display());
-        s.parse().expect("failed to parse fallback URI")
+        // Percent-encode the path for URI safety (spaces, #, %, etc.)
+        let path_str = path.to_string_lossy();
+        let encoded: String = path_str
+            .bytes()
+            .flat_map(|b| match b {
+                b'/' | b'.' | b'-' | b'_' | b'~' | b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' => {
+                    vec![b as char]
+                }
+                _ => format!("%{b:02X}").chars().collect(),
+            })
+            .collect();
+        let encoded = encoded.strip_prefix('/').unwrap_or(&encoded);
+        let s = format!("file:///{encoded}");
+        match s.parse() {
+            Ok(uri) => uri,
+            Err(e) => {
+                tracing::error!(?path, %e, "failed to construct URI from path");
+                // Last-resort: return a syntactically valid but unresolvable URI
+                "file:///invalid-path".parse().unwrap()
+            }
+        }
     })
 }
 
@@ -1272,16 +1434,16 @@ mod tests {
         let syms = symbols::collect_symbols(&root);
         let li = sass_parser::line_index::LineIndex::new(source);
         ModuleInfo {
-            symbols: syms,
+            symbols: Arc::new(syms),
             green: Some(green),
             line_index: li,
-            source_text: source.to_owned(),
+            source_text: Some(source.to_owned()),
         }
     }
 
     #[test]
     fn module_graph_local_resolution() {
-        let graph = ModuleGraph::new();
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
         let uri: Uri = "file:///test.scss".parse().unwrap();
         graph
             .files
@@ -1299,7 +1461,7 @@ mod tests {
 
     #[test]
     fn module_graph_visible_symbols() {
-        let graph = ModuleGraph::new();
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
         let uri: Uri = "file:///main.scss".parse().unwrap();
         let dep_uri: Uri = "file:///colors.scss".parse().unwrap();
 
@@ -1332,7 +1494,7 @@ mod tests {
 
     #[test]
     fn qualified_resolution() {
-        let graph = ModuleGraph::new();
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
         let uri: Uri = "file:///main.scss".parse().unwrap();
         let dep_uri: Uri = "file:///colors.scss".parse().unwrap();
 
@@ -1372,7 +1534,7 @@ mod tests {
 
     /// 3-file chain: consumer @use "mid" as * → mid @forward "lib" with vis → lib defines symbols
     fn setup_forward_chain(vis: ForwardVisibility) -> (ModuleGraph, Uri, Uri, Uri) {
-        let graph = ModuleGraph::new();
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
         let consumer_uri: Uri = "file:///consumer.scss".parse().unwrap();
         let mid_uri: Uri = "file:///mid.scss".parse().unwrap();
         let lib_uri: Uri = "file:///lib.scss".parse().unwrap();
@@ -1523,7 +1685,7 @@ mod tests {
         // mid @forward "lib" show primary, btn
         // top @forward "mid" as m-*
         // consumer @use "top" as *
-        let graph = ModuleGraph::new();
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
         let consumer_uri: Uri = "file:///consumer.scss".parse().unwrap();
         let top_uri: Uri = "file:///top.scss".parse().unwrap();
         let mid_uri: Uri = "file:///mid.scss".parse().unwrap();
@@ -1606,7 +1768,7 @@ mod tests {
     // ── Builtin module tests ────────────────────────────────────────
 
     fn setup_builtin_graph(module: &str, namespace: Namespace) -> (ModuleGraph, Uri) {
-        let graph = ModuleGraph::new();
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
         let uri: Uri = "file:///main.scss".parse().unwrap();
 
         graph.files.insert(uri.clone(), make_info(""));
@@ -1702,7 +1864,7 @@ mod tests {
     #[test]
     fn prepend_import_visible_symbols() {
         // Simulate: prependImports = ["globals"] → every file gets @use "globals" as *
-        let graph = ModuleGraph::new();
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
         let uri: Uri = "file:///main.scss".parse().unwrap();
         let globals_uri: Uri = "file:///globals.scss".parse().unwrap();
 
@@ -1733,7 +1895,7 @@ mod tests {
 
     #[test]
     fn prepend_import_unqualified_resolution() {
-        let graph = ModuleGraph::new();
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
         let uri: Uri = "file:///main.scss".parse().unwrap();
         let globals_uri: Uri = "file:///globals.scss".parse().unwrap();
 
@@ -1773,7 +1935,7 @@ mod tests {
 
     #[test]
     fn check_name_conflict_same_kind() {
-        let graph = ModuleGraph::new();
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
         let uri: Uri = "file:///test.scss".parse().unwrap();
         graph
             .files
@@ -1785,7 +1947,7 @@ mod tests {
 
     #[test]
     fn check_name_conflict_different_kind_no_conflict() {
-        let graph = ModuleGraph::new();
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
         let uri: Uri = "file:///test.scss".parse().unwrap();
         graph.files.insert(
             uri.clone(),
@@ -1843,7 +2005,7 @@ mod tests {
 
     #[test]
     fn forward_reaches_direct() {
-        let graph = ModuleGraph::new();
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
         let a: Uri = "file:///a.scss".parse().unwrap();
         let b: Uri = "file:///b.scss".parse().unwrap();
 
@@ -1864,7 +2026,7 @@ mod tests {
 
     #[test]
     fn find_forward_show_hide_refs_integration() {
-        let graph = ModuleGraph::new();
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
         let main_uri: Uri = "file:///main.scss".parse().unwrap();
         let lib_uri: Uri = "file:///lib.scss".parse().unwrap();
 
@@ -1897,5 +2059,37 @@ mod tests {
         assert_eq!(refs[0].0, main_uri);
         let text = &main_source[usize::from(refs[0].1.start())..usize::from(refs[0].1.end())];
         assert_eq!(text, "primary");
+    }
+
+    #[test]
+    fn path_traversal_blocked_outside_roots() {
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
+        // Use a known directory as allowed root
+        let tmp = std::env::temp_dir();
+        graph.set_allowed_roots(vec![tmp.clone()]);
+
+        // Path inside the root is allowed
+        assert!(graph.is_path_allowed(&tmp.join("some_file.scss")));
+
+        // Path outside the root is blocked
+        assert!(!graph.is_path_allowed(Path::new("/etc/passwd")));
+    }
+
+    #[test]
+    fn path_traversal_permissive_without_roots() {
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
+        // No roots configured → permissive fallback
+        assert!(graph.is_path_allowed(Path::new("/any/path")));
+    }
+
+    #[test]
+    fn path_traversal_dotdot_resolved() {
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
+        let tmp = std::env::temp_dir();
+        graph.set_allowed_roots(vec![tmp.clone()]);
+
+        // A path that uses `..` to escape should be blocked
+        let escaped = tmp.join("subdir").join("..").join("..").join("etc");
+        assert!(!graph.is_path_allowed(&escaped));
     }
 }

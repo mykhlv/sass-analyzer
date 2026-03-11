@@ -142,11 +142,11 @@ fn cmd_lex(path: &Path) -> i32 {
     let mut has_errors = false;
     loop {
         let (kind, text) = lexer.next_token();
-        if kind == sass_parser::syntax_kind::EOF {
+        if kind == sass_parser::syntax_kind::SyntaxKind::EOF {
             println!("{kind:?}");
             break;
         }
-        if kind == sass_parser::syntax_kind::ERROR {
+        if kind == sass_parser::syntax_kind::SyntaxKind::ERROR {
             has_errors = true;
         }
         println!("{kind:?} {text:?}");

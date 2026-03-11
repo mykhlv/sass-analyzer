@@ -3,7 +3,7 @@ use sass_parser::ast::AstNode;
 use sass_parser::input::Input;
 use sass_parser::parser::Parser;
 use sass_parser::syntax::SassLanguage;
-use sass_parser::syntax_kind::*;
+use sass_parser::syntax_kind::SyntaxKind::{self, *};
 
 fn recurse_depth(p: &mut Parser<'_>, remaining: u32) {
     if remaining == 0 {

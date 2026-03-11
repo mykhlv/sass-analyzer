@@ -1,4 +1,4 @@
-use sass_parser::syntax_kind::*;
+use sass_parser::syntax_kind::SyntaxKind::{self, *};
 
 #[test]
 fn syntax_kind_round_trips_through_u16() {

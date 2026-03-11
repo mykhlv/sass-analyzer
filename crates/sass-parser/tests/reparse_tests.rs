@@ -222,3 +222,63 @@ fn edit_second_declaration() {
         "italic"
     ));
 }
+
+// ── Edits spanning blocks (cross-rule) ─────────────────────────────
+
+#[test]
+fn delete_across_two_rules() {
+    // Delete from middle of first rule to middle of second — structural change
+    let src = ".a { color: red; }\n.b { font: bold; }";
+    //         0123456789...       19
+    // Delete "red; }\n.b { font:" — spans two blocks
+    check(src, 12, 20, "");
+}
+
+#[test]
+fn replace_spanning_rule_boundary() {
+    let src = ".a { color: red; }\n.b { font: bold; }";
+    // Replace closing brace of .a through opening of .b
+    check(src, 17, 5, " ");
+}
+
+#[test]
+fn insert_rule_between_two_rules() {
+    let src = ".a { color: red; }\n.b { font: bold; }";
+    check(src, 19, 0, ".mid { z-index: 1; }\n");
+}
+
+// ── Full-reparse fallback scenarios ────────────────────────────────
+
+#[test]
+fn add_opening_brace_structural_edit() {
+    // Inserting `{` changes block structure — incremental may produce a tree
+    // that differs from full reparse (known limitation for structural edits).
+    // We only verify text round-trips and no panics.
+    let src = ".a color: red; }";
+    let new_source = apply_edit(src, 2, 0, " {");
+    let (old_green, old_errors) = sass_parser::parse(src);
+    let edit = TextEdit {
+        offset: TextSize::from(2),
+        delete: TextSize::from(0),
+        insert_len: TextSize::from(2),
+    };
+    if let Some((incr_green, _)) = incremental_reparse(&old_green, &old_errors, &edit, &new_source)
+    {
+        let tree = SyntaxNode::new_root(incr_green);
+        assert_eq!(tree.text().to_string(), new_source, "text must round-trip");
+    }
+}
+
+#[test]
+fn delete_semicolons_forces_fallback() {
+    // Remove all semicolons from a multi-decl block
+    let src = ".a { color: red; font: bold; }";
+    check(src, 15, 1, "");
+}
+
+#[test]
+fn turn_declaration_into_nested_rule() {
+    // Replace "color: red;" with a nested rule — structural change
+    let src = ".a {\n  color: red;\n  font: bold;\n}";
+    check(src, 6, 10, ".nested { z: 1; }");
+}

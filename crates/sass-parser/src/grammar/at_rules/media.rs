@@ -1,6 +1,10 @@
 use crate::parser::Parser;
 #[allow(clippy::wildcard_imports)]
 use crate::syntax_kind::*;
+use crate::token_set::TokenSet;
+
+const BLOCK_STOP: TokenSet = TokenSet::new(&[LBRACE, RBRACE, SEMICOLON]);
+const BLOCK_OR_COMMA_STOP: TokenSet = TokenSet::new(&[LBRACE, RBRACE, SEMICOLON, COMMA]);
 
 /// `@media query { }`
 pub fn media_rule(p: &mut Parser<'_>) {
@@ -29,26 +33,7 @@ fn media_query_list(p: &mut Parser<'_>) {
 /// Also handles interpolation `#{$var}`.
 fn media_query(p: &mut Parser<'_>) {
     let m = p.start();
-    // Consume tokens until `{`, `,`, `;`, `}` or EOF at depth 0
-    let mut depth: u32 = 0;
-    while !p.at_end() {
-        match p.current() {
-            LBRACE | RBRACE | SEMICOLON if depth == 0 => break,
-            COMMA if depth == 0 => break,
-            LPAREN => {
-                depth += 1;
-                p.bump();
-            }
-            RPAREN => {
-                depth = depth.saturating_sub(1);
-                p.bump();
-            }
-            HASH_LBRACE => {
-                let _ = super::interpolation(p);
-            }
-            _ => p.bump(),
-        }
-    }
+    super::eat_opaque_condition(p, BLOCK_OR_COMMA_STOP);
     let _ = m.complete(p, MEDIA_QUERY);
 }
 
@@ -69,25 +54,7 @@ pub fn supports_rule(p: &mut Parser<'_>) {
 /// Parse a @supports condition: `not`/`and`/`or` combinators with `(prop: value)`.
 fn supports_condition(p: &mut Parser<'_>) {
     let m = p.start();
-    // Consume tokens until `{`, `}`, or `;` at depth 0
-    let mut depth: u32 = 0;
-    while !p.at_end() {
-        match p.current() {
-            LBRACE | RBRACE | SEMICOLON if depth == 0 => break,
-            LPAREN => {
-                depth += 1;
-                p.bump();
-            }
-            RPAREN => {
-                depth = depth.saturating_sub(1);
-                p.bump();
-            }
-            HASH_LBRACE => {
-                let _ = super::interpolation(p);
-            }
-            _ => p.bump(),
-        }
-    }
+    super::eat_opaque_condition(p, BLOCK_STOP);
     let _ = m.complete(p, SUPPORTS_CONDITION);
 }
 

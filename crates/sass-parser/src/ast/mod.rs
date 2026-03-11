@@ -8,8 +8,11 @@ use crate::syntax_kind::SyntaxKind;
 
 /// Trait for typed AST node wrappers over rowan's `SyntaxNode`.
 pub trait AstNode: Sized {
+    /// Returns `true` if the given `SyntaxKind` can be wrapped by this type.
     fn can_cast(kind: SyntaxKind) -> bool;
+    /// Try to wrap a raw `SyntaxNode` into this typed wrapper.
     fn cast(syntax: SyntaxNode) -> Option<Self>;
+    /// Access the underlying raw `SyntaxNode`.
     fn syntax(&self) -> &SyntaxNode;
 }
 
@@ -38,13 +41,17 @@ impl<N: AstNode> Iterator for AstChildren<N> {
 
 // ── Hand-written accessors (not codegen) ────────────────────────────
 
+/// Strip surrounding quotes from a string token, returning `None` for malformed tokens.
+fn unquote(text: &str) -> Option<&str> {
+    text.get(1..text.len().checked_sub(1)?)
+}
+
 fn extract_module_path(syntax: &SyntaxNode) -> Option<String> {
     let token = syntax
         .children_with_tokens()
         .filter_map(rowan::NodeOrToken::into_token)
         .find(|t| t.kind() == SyntaxKind::QUOTED_STRING)?;
-    let text = token.text();
-    Some(text[1..text.len() - 1].to_owned())
+    unquote(token.text()).map(str::to_owned)
 }
 
 /// Extract the first IDENT token text from a syntax node.
@@ -57,12 +64,14 @@ fn first_ident_text(syntax: &SyntaxNode) -> Option<String> {
 }
 
 impl UseRule {
+    /// The quoted module path (e.g. `sass:math` from `@use "sass:math"`).
     pub fn module_path(&self) -> Option<String> {
         extract_module_path(&self.syntax)
     }
 }
 
 impl ForwardRule {
+    /// The quoted module path (e.g. `variables` from `@forward "variables"`).
     pub fn module_path(&self) -> Option<String> {
         extract_module_path(&self.syntax)
     }
@@ -90,7 +99,6 @@ impl FunctionCall {
             .descendants_with_tokens()
             .filter_map(rowan::NodeOrToken::into_token)
             .find(|t| t.kind() == SyntaxKind::QUOTED_STRING)?;
-        let text = first_token.text();
-        Some(text[1..text.len() - 1].to_owned())
+        unquote(first_token.text()).map(str::to_owned)
     }
 }

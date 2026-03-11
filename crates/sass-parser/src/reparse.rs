@@ -6,8 +6,11 @@ use rowan::{GreenNode, NodeOrToken};
 /// A single text edit: delete `delete` bytes at `offset`, then insert `insert_len` bytes.
 /// The caller must already have applied this edit to produce `new_source`.
 pub struct TextEdit {
+    /// Byte offset where the edit starts.
     pub offset: TextSize,
+    /// Number of bytes deleted at `offset`.
     pub delete: TextSize,
+    /// Number of bytes inserted at `offset` (in the new source).
     pub insert_len: TextSize,
 }
 
@@ -283,7 +286,7 @@ fn merge_errors(
         } else if range.start() >= region_old_end {
             let shift = |offset: TextSize| -> TextSize {
                 let v = i64::from(u32::from(offset)) + delta;
-                TextSize::from(v as u32)
+                TextSize::from(v.max(0) as u32)
             };
             result.push((
                 msg.clone(),

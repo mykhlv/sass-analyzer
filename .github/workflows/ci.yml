@@ -2,19 +2,53 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
 
 jobs:
   rust:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.85
+      - uses: Swatinem/rust-cache@v2
       - run: cargo build --workspace
       - run: cargo clippy --workspace -- -D warnings
       - run: cargo test --workspace
-      - run: cargo fmt --check
+      - name: Check formatting
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo fmt --check
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --workspace
+
+  cargo-deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+
+  version-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check version consistency
+        run: |
+          cargo_ver=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml','rb'))['workspace']['package']['version'])")
+          pkg_ver=$(node -p "require('./editors/code/package.json').version")
+          if [ "$cargo_ver" != "$pkg_ver" ]; then
+            echo "::error::Version mismatch: Cargo.toml=$cargo_ver, package.json=$pkg_ver"
+            exit 1
+          fi
+          echo "Versions in sync: $cargo_ver"
 
   extension:
     runs-on: ubuntu-latest
