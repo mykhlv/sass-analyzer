@@ -3260,6 +3260,28 @@ mod tests {
         }
     }
 
+    #[test]
+    fn parse_param_labels_non_ascii_utf16() {
+        // "ціна" is 8 bytes in UTF-8 but 4 UTF-16 code units
+        let params = "($ціна, $b)";
+        let sig = format!("@mixin m{params}");
+        let result = parse_param_labels(&sig, params);
+        assert_eq!(result.len(), 2);
+        // "$ціна": starts at UTF-16 offset 8 ("@mixin m("), 5 UTF-16 code units long
+        if let ParameterLabel::LabelOffsets([s, e]) = result[0].label {
+            assert_eq!(s, 9); // "@mixin m(" = 9 UTF-16 units
+            assert_eq!(e, 14); // "$ціна" = 5 UTF-16 units ($+ц+і+н+а)
+        } else {
+            panic!("expected LabelOffsets");
+        }
+        // "$b": after "$ціна, "
+        if let ParameterLabel::LabelOffsets([s, e]) = result[1].label {
+            assert_eq!(e - s, 2); // "$b" = 2 UTF-16 units
+        } else {
+            panic!("expected LabelOffsets");
+        }
+    }
+
     // ── Workspace symbol tests ──────────────────────────────────────
 
     #[tokio::test]

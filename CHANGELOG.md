@@ -43,6 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `didChangeConfiguration` now rebuilds module resolver, `loadPaths`, `importAliases`, and `prependImports` (previously only numeric settings updated live)
 - `merge_errors` clamps negative shifted offsets to zero instead of wrapping to corrupt ranges
 - Lexer now handles scientific notation in numbers (`1e3`, `2.5e-2`, `1E+3`)
+- Signature help parameter offsets now use UTF-16 code units (fixes highlight for non-ASCII parameter names)
 
 ## 0.1.0 — 2026-03-08
 
