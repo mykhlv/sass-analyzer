@@ -150,6 +150,20 @@ impl LanguageServer for Backend {
         self.module_graph
             .set_prepend_imports(lsp_config.prepend_imports);
 
+        // Build allowed roots for path traversal protection
+        if let Some(root) = &workspace_root {
+            let mut roots = vec![root.clone()];
+            for lp in &lsp_config.load_paths {
+                roots.push(root.join(lp));
+            }
+            for target in lsp_config.import_aliases.values() {
+                for p in target.paths() {
+                    roots.push(root.join(p));
+                }
+            }
+            self.module_graph.set_allowed_roots(roots);
+        }
+
         tracing::info!(?workspace_root, "configured resolver");
 
         Ok(InitializeResult {

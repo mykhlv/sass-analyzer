@@ -23,7 +23,7 @@ pub enum AliasTarget {
 }
 
 impl AliasTarget {
-    fn paths(&self) -> &[String] {
+    pub fn paths(&self) -> &[String] {
         match self {
             Self::Single(s) => std::slice::from_ref(s),
             Self::Multiple(v) => v,
