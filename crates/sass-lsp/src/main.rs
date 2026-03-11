@@ -12,7 +12,8 @@ mod worker;
 mod workspace;
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
 
 use dashmap::DashMap;
 use sass_parser::syntax::SyntaxNode;
@@ -83,6 +84,8 @@ struct Backend {
     module_graph: Arc<workspace::ModuleGraph>,
     runtime_config: Arc<config::RuntimeConfig>,
     task_tx: mpsc::UnboundedSender<Task>,
+    /// Workspace root, captured from `initialize` for use in `didChangeConfiguration`.
+    workspace_root: RwLock<Option<PathBuf>>,
 }
 
 pub(crate) struct DocumentState {
@@ -181,6 +184,15 @@ impl LanguageServer for Backend {
                 }
             }
             self.module_graph.set_allowed_roots(roots);
+        }
+
+        // Store workspace root for didChangeConfiguration.
+        {
+            let mut guard = self
+                .workspace_root
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            (*guard).clone_from(&workspace_root);
         }
 
         tracing::info!(?workspace_root, "configured resolver");
@@ -357,6 +369,31 @@ impl LanguageServer for Backend {
             return;
         };
         self.runtime_config.apply(&new_config);
+
+        // Rebuild resolver, prepend imports, and allowed roots from new config.
+        let workspace_root = self
+            .workspace_root
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let resolver =
+            config::build_resolver(&new_config, workspace_root.as_deref());
+        self.module_graph.set_resolver(resolver);
+        self.module_graph
+            .set_prepend_imports(new_config.prepend_imports);
+        if let Some(root) = &workspace_root {
+            let mut roots = vec![root.clone()];
+            for lp in &new_config.load_paths {
+                roots.push(root.join(lp));
+            }
+            for target in new_config.import_aliases.values() {
+                for p in target.paths() {
+                    roots.push(root.join(p));
+                }
+            }
+            self.module_graph.set_allowed_roots(roots);
+        }
+
         tracing::info!("configuration updated");
     }
 
@@ -1025,6 +1062,7 @@ async fn main() {
             module_graph,
             runtime_config,
             task_tx,
+            workspace_root: RwLock::new(None),
         }
     });
     Server::new(stdin, stdout, socket).serve(service).await;
@@ -1130,6 +1168,7 @@ mod tests {
                 module_graph,
                 runtime_config,
                 task_tx,
+                workspace_root: RwLock::new(None),
             }
         });
         tokio::spawn(Server::new(server_read, server_write, socket).serve(service));
