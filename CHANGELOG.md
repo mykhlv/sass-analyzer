@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dependabot for Cargo, npm, and GitHub Actions dependencies
 - `rust-toolchain.toml` pinning stable toolchain
 - Linux ARM64 (`aarch64-unknown-linux-gnu`) release target
+- `#![warn(missing_docs)]` with doc comments on all public API items in `sass-parser`
+- Expanded extension README with feature overview, monorepo example, and tuning settings
 
 ### Changed
 - Runtime constants (`maxFileSize`, `debounceMs`, `maxCachedTrees`, `maxCachedSources`) are now configurable via `initializationOptions` and `workspace/didChangeConfiguration`
