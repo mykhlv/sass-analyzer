@@ -1,6 +1,9 @@
 use crate::parser::Parser;
 #[allow(clippy::wildcard_imports)]
 use crate::syntax_kind::*;
+use crate::token_set::TokenSet;
+
+const BLOCK_STOP: TokenSet = TokenSet::new(&[LBRACE, RBRACE, SEMICOLON]);
 
 /// `@layer name { }` or `@layer name, name2;`
 pub fn layer_rule(p: &mut Parser<'_>) {
@@ -46,25 +49,7 @@ pub fn container_rule(p: &mut Parser<'_>) {
         p.bump();
     }
 
-    // Consume condition tokens until `{`, `}`, or `;` at depth 0
-    let mut depth: u32 = 0;
-    while !p.at_end() {
-        match p.current() {
-            LBRACE | RBRACE | SEMICOLON if depth == 0 => break,
-            LPAREN => {
-                depth += 1;
-                p.bump();
-            }
-            RPAREN => {
-                depth = depth.saturating_sub(1);
-                p.bump();
-            }
-            HASH_LBRACE => {
-                let _ = super::interpolation(p);
-            }
-            _ => p.bump(),
-        }
-    }
+    super::eat_opaque_condition(p, BLOCK_STOP);
 
     if p.at(LBRACE) {
         super::block(p);
@@ -80,25 +65,7 @@ pub fn scope_rule(p: &mut Parser<'_>) {
     p.bump(); // @
     p.bump(); // scope
 
-    // Consume everything until `{`, `}`, or `;` at depth 0
-    let mut depth: u32 = 0;
-    while !p.at_end() {
-        match p.current() {
-            LBRACE | RBRACE | SEMICOLON if depth == 0 => break,
-            LPAREN => {
-                depth += 1;
-                p.bump();
-            }
-            RPAREN => {
-                depth = depth.saturating_sub(1);
-                p.bump();
-            }
-            HASH_LBRACE => {
-                let _ = super::interpolation(p);
-            }
-            _ => p.bump(),
-        }
-    }
+    super::eat_opaque_condition(p, BLOCK_STOP);
 
     if p.at(LBRACE) {
         super::block(p);
