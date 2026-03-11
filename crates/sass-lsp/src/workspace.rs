@@ -15,6 +15,7 @@ use crate::builtins;
 use crate::symbols::{self, FileSymbols};
 
 const MAX_CACHED_TREES: usize = 200;
+const MAX_CACHED_SOURCES: usize = 200;
 
 /// Namespace binding for an `@use` rule.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,15 +45,18 @@ pub struct ImportEdge {
 }
 
 /// Parsed + analyzed info for a single file.
-/// Symbols and line index are always retained. The green tree may be evicted
-/// by the LRU cache to cap memory; it is re-parsed on demand from `source_text`.
+/// Symbols and line index are always retained. Both the green tree and
+/// source text may be evicted by their respective LRU caches to cap memory.
+/// The green tree is re-parsed on demand from `source_text`; source text
+/// is reconstructed on demand from the green tree via `green.text()`.
+/// Invariant: at least one of `green` or `source_text` is always `Some`.
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ModuleInfo {
     pub symbols: FileSymbols,
     pub green: Option<rowan::GreenNode>,
     pub line_index: sass_parser::line_index::LineIndex,
-    pub source_text: String,
+    pub source_text: Option<String>,
 }
 
 /// Cross-file dependency graph for the SCSS workspace.
@@ -64,6 +68,8 @@ pub struct ModuleGraph {
     prepend_imports: RwLock<Vec<String>>,
     /// LRU order for green tree eviction (front = most recently used).
     tree_lru: Mutex<VecDeque<Uri>>,
+    /// LRU order for source text eviction (front = most recently used).
+    source_lru: Mutex<VecDeque<Uri>>,
 }
 
 impl ModuleGraph {
@@ -75,6 +81,7 @@ impl ModuleGraph {
             builtin_symbols: DashMap::new(),
             prepend_imports: RwLock::new(Vec::new()),
             tree_lru: Mutex::new(VecDeque::new()),
+            source_lru: Mutex::new(VecDeque::new()),
         }
     }
 
@@ -96,8 +103,8 @@ impl ModuleGraph {
         *guard = Arc::new(resolver);
     }
 
-    /// Move a URI to the front of the LRU list (most recently used).
-    fn touch_lru(&self, uri: &Uri) {
+    /// Move a URI to the front of the tree LRU list (most recently used).
+    fn touch_tree_lru(&self, uri: &Uri) {
         let mut lru = self
             .tree_lru
             .lock()
@@ -108,7 +115,20 @@ impl ModuleGraph {
         lru.push_front(uri.clone());
     }
 
+    /// Move a URI to the front of the source LRU list (most recently used).
+    fn touch_source_lru(&self, uri: &Uri) {
+        let mut lru = self
+            .source_lru
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(pos) = lru.iter().position(|u| u == uri) {
+            lru.remove(pos);
+        }
+        lru.push_front(uri.clone());
+    }
+
     /// Evict green trees from files beyond the LRU limit.
+    /// Never evicts a green tree if the file's `source_text` is also evicted.
     fn evict_trees(&self) {
         let mut lru = self
             .tree_lru
@@ -117,7 +137,35 @@ impl ModuleGraph {
         while lru.len() > MAX_CACHED_TREES {
             if let Some(evicted_uri) = lru.pop_back() {
                 if let Some(mut info) = self.files.get_mut(&evicted_uri) {
-                    info.green = None;
+                    if info.source_text.is_some() {
+                        info.green = None;
+                    } else {
+                        // Can't evict green when source is also gone — keep it.
+                        lru.push_back(evicted_uri);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Evict source text from files beyond the LRU limit.
+    /// Never evicts source text if the file's green tree is also evicted.
+    fn evict_sources(&self) {
+        let mut lru = self
+            .source_lru
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        while lru.len() > MAX_CACHED_SOURCES {
+            if let Some(evicted_uri) = lru.pop_back() {
+                if let Some(mut info) = self.files.get_mut(&evicted_uri) {
+                    if info.green.is_some() {
+                        info.source_text = None;
+                    } else {
+                        // Can't evict source when green is also gone — keep it.
+                        lru.push_back(evicted_uri);
+                        break;
+                    }
                 }
             }
         }
@@ -129,8 +177,8 @@ impl ModuleGraph {
         if let Some(green) = &info.green {
             return Some(green.clone());
         }
-        // Re-parse from stored text.
-        let source = info.source_text.clone();
+        // Re-parse from stored text (invariant: source_text is Some when green is None).
+        let source = info.source_text.clone()?;
         drop(info);
         let (green, _) =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sass_parser::parse(&source)))
@@ -138,7 +186,7 @@ impl ModuleGraph {
         if let Some(mut info) = self.files.get_mut(uri) {
             info.green = Some(green.clone());
         }
-        self.touch_lru(uri);
+        self.touch_tree_lru(uri);
         self.evict_trees();
         Some(green)
     }
@@ -169,11 +217,13 @@ impl ModuleGraph {
                 symbols,
                 green: Some(green.clone()),
                 line_index,
-                source_text,
+                source_text: Some(source_text),
             },
         );
-        self.touch_lru(uri);
+        self.touch_tree_lru(uri);
+        self.touch_source_lru(uri);
         self.evict_trees();
+        self.evict_sources();
 
         let root = SyntaxNode::new_root(green);
         let import_refs = imports::collect_imports(&root);
@@ -266,12 +316,20 @@ impl ModuleGraph {
     pub fn remove_file(&self, uri: &Uri) {
         self.files.remove(uri);
         self.edges.remove(uri);
-        let mut lru = self
+        let mut tree_lru = self
             .tree_lru
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(pos) = lru.iter().position(|u| u == uri) {
-            lru.remove(pos);
+        if let Some(pos) = tree_lru.iter().position(|u| u == uri) {
+            tree_lru.remove(pos);
+        }
+        drop(tree_lru);
+        let mut src_lru = self
+            .source_lru
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(pos) = src_lru.iter().position(|u| u == uri) {
+            src_lru.remove(pos);
         }
     }
 
@@ -521,8 +579,16 @@ impl ModuleGraph {
         self.files.get(uri).map(|info| info.line_index.clone())
     }
 
+    /// Get the source text for a URI. Reconstructs from the green tree if evicted.
     pub fn source_text(&self, uri: &Uri) -> Option<String> {
-        self.files.get(uri).map(|info| info.source_text.clone())
+        let info = self.files.get(uri)?;
+        if let Some(src) = &info.source_text {
+            return Some(src.clone());
+        }
+        // Reconstruct from green tree (invariant: green is Some when source_text is None).
+        let green = info.green.as_ref()?;
+        let root = SyntaxNode::new_root(green.clone());
+        Some(root.text().to_string())
     }
 
     pub fn all_symbols(&self) -> Vec<(Uri, symbols::Symbol)> {
@@ -1297,7 +1363,7 @@ mod tests {
             symbols: syms,
             green: Some(green),
             line_index: li,
-            source_text: source.to_owned(),
+            source_text: Some(source.to_owned()),
         }
     }
 
