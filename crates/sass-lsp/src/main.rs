@@ -25,19 +25,18 @@ use tower_lsp_server::ls_types::{
     CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
     DidChangeConfigurationParams, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
     DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentLink, DocumentLinkOptions,
-    DocumentLinkParams,
-    DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse,
-    Hover, HoverParams, InitializeParams, InitializeResult, InitializedParams, Location, OneOf,
-    PrepareRenameResponse, ReferenceParams, RenameOptions, RenameParams, SemanticTokenModifier,
-    SemanticTokenType, SemanticTokens, SemanticTokensFullOptions, SemanticTokensLegend,
-    SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
-    SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo, SignatureHelp,
-    SignatureHelpOptions, SignatureHelpParams, SymbolInformation, TextDocumentContentChangeEvent,
-    TextDocumentPositionParams, TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Uri,
-    WorkDoneProgressOptions, WorkspaceEdit, WorkspaceSymbolParams, WorkspaceSymbolResponse,
+    DocumentLinkParams, DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams,
+    GotoDefinitionResponse, Hover, HoverParams, InitializeParams, InitializeResult,
+    InitializedParams, Location, OneOf, PrepareRenameResponse, ReferenceParams, RenameOptions,
+    RenameParams, SemanticTokenModifier, SemanticTokenType, SemanticTokens,
+    SemanticTokensFullOptions, SemanticTokensLegend, SemanticTokensOptions, SemanticTokensParams,
+    SemanticTokensResult, SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo,
+    SignatureHelp, SignatureHelpOptions, SignatureHelpParams, SymbolInformation,
+    TextDocumentContentChangeEvent, TextDocumentPositionParams, TextDocumentSyncCapability,
+    TextDocumentSyncKind, TextEdit, Uri, WorkDoneProgressOptions, WorkspaceEdit,
+    WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
 use tower_lsp_server::{Client, LanguageServer, LspService, Server};
-
 
 pub(crate) enum Task {
     Parse {
@@ -309,7 +308,12 @@ impl LanguageServer for Backend {
             // No prior text — take last full-content change if available.
             if let Some(change) = params.content_changes.into_iter().last() {
                 if change.text.len() > self.runtime_config.max_file_size() {
-                    tracing::warn!(?uri, size = change.text.len(), limit = self.runtime_config.max_file_size(), "file exceeds size limit, skipping");
+                    tracing::warn!(
+                        ?uri,
+                        size = change.text.len(),
+                        limit = self.runtime_config.max_file_size(),
+                        "file exceeds size limit, skipping"
+                    );
                     return;
                 }
                 self.source_texts.insert(uri.clone(), change.text.clone());
@@ -339,7 +343,12 @@ impl LanguageServer for Backend {
         }
 
         if text.len() > self.runtime_config.max_file_size() {
-            tracing::warn!(?uri, size = text.len(), limit = self.runtime_config.max_file_size(), "file exceeds size limit, skipping");
+            tracing::warn!(
+                ?uri,
+                size = text.len(),
+                limit = self.runtime_config.max_file_size(),
+                "file exceeds size limit, skipping"
+            );
             return;
         }
         self.source_texts.insert(uri.clone(), text.clone());
@@ -376,8 +385,7 @@ impl LanguageServer for Backend {
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
-        let resolver =
-            config::build_resolver(&new_config, workspace_root.as_deref());
+        let resolver = config::build_resolver(&new_config, workspace_root.as_deref());
         self.module_graph.set_resolver(resolver);
         self.module_graph
             .set_prepend_imports(new_config.prepend_imports);
@@ -1151,8 +1159,7 @@ mod tests {
         let (service, socket) = LspService::new(|client| {
             let documents = Arc::new(DashMap::new());
             let runtime_config = Arc::new(config::RuntimeConfig::default());
-            let module_graph =
-                Arc::new(workspace::ModuleGraph::new(Arc::clone(&runtime_config)));
+            let module_graph = Arc::new(workspace::ModuleGraph::new(Arc::clone(&runtime_config)));
             let (task_tx, task_rx) = mpsc::unbounded_channel();
             tokio::spawn(run_worker(
                 task_rx,

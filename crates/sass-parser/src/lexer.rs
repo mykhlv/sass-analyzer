@@ -394,6 +394,21 @@ impl<'src> Lexer<'src> {
             self.bump(); // .
             self.eat_while(|b| b.is_ascii_digit());
         }
+        // Scientific notation: 1e3, 1E3, 1e+3, 1e-3
+        if matches!(self.peek(), Some(b'e' | b'E')) {
+            match self.peek_at(1) {
+                Some(b'0'..=b'9') => {
+                    self.bump(); // e/E
+                    self.eat_while(|b| b.is_ascii_digit());
+                }
+                Some(b'+' | b'-') if matches!(self.peek_at(2), Some(b'0'..=b'9')) => {
+                    self.bump(); // e/E
+                    self.bump(); // +/-
+                    self.eat_while(|b| b.is_ascii_digit());
+                }
+                _ => {}
+            }
+        }
         SyntaxKind::NUMBER
     }
 
