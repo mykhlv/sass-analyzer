@@ -11,6 +11,7 @@ use crate::text_range::TextRange;
 /// A single import dependency extracted from the source file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportRef {
+    /// Whether this is a `@use`, `@forward`, `@import`, or `meta.load-css()`.
     pub kind: ImportKind,
     /// The unquoted module path (e.g. `sass:meta`, `./colors`).
     pub path: String,
@@ -18,10 +19,14 @@ pub struct ImportRef {
     pub range: TextRange,
 }
 
+/// The kind of import statement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImportKind {
+    /// `@use "..."`.
     Use,
+    /// `@forward "..."`.
     Forward,
+    /// `@import "..."` (legacy).
     Import,
     /// `meta.load-css()` — dynamic import, first string argument is the URL.
     LoadCss,

@@ -8,8 +8,11 @@ use crate::syntax_kind::SyntaxKind;
 
 /// Trait for typed AST node wrappers over rowan's `SyntaxNode`.
 pub trait AstNode: Sized {
+    /// Returns `true` if the given `SyntaxKind` can be wrapped by this type.
     fn can_cast(kind: SyntaxKind) -> bool;
+    /// Try to wrap a raw `SyntaxNode` into this typed wrapper.
     fn cast(syntax: SyntaxNode) -> Option<Self>;
+    /// Access the underlying raw `SyntaxNode`.
     fn syntax(&self) -> &SyntaxNode;
 }
 
@@ -57,12 +60,14 @@ fn first_ident_text(syntax: &SyntaxNode) -> Option<String> {
 }
 
 impl UseRule {
+    /// The quoted module path (e.g. `sass:math` from `@use "sass:math"`).
     pub fn module_path(&self) -> Option<String> {
         extract_module_path(&self.syntax)
     }
 }
 
 impl ForwardRule {
+    /// The quoted module path (e.g. `variables` from `@forward "variables"`).
     pub fn module_path(&self) -> Option<String> {
         extract_module_path(&self.syntax)
     }

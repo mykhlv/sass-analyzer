@@ -16,6 +16,7 @@ pub enum ResolvedModule {
 
 /// Built-in Sass modules available via `@use "sass:..."`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(missing_docs)]
 pub enum BuiltinModule {
     Math,
     Color,
@@ -27,6 +28,7 @@ pub enum BuiltinModule {
 }
 
 impl BuiltinModule {
+    /// The canonical name of this module (e.g. `"math"`, `"color"`).
     pub fn name(self) -> &'static str {
         match self {
             Self::Math => "math",
@@ -83,6 +85,7 @@ pub struct ModuleResolver<V: Vfs = OsFileSystem> {
 }
 
 impl ModuleResolver {
+    /// Create a resolver backed by the real filesystem.
     pub fn new() -> Self {
         Self {
             vfs: OsFileSystem,
@@ -100,6 +103,7 @@ impl Default for ModuleResolver {
 }
 
 impl<V: Vfs> ModuleResolver<V> {
+    /// Create a resolver backed by a custom virtual filesystem.
     pub fn with_vfs(vfs: V) -> Self {
         Self {
             vfs,
@@ -109,10 +113,12 @@ impl<V: Vfs> ModuleResolver<V> {
         }
     }
 
+    /// Add a directory to the load path search list.
     pub fn add_load_path(&mut self, path: impl Into<PathBuf>) {
         self.load_paths.push(path.into());
     }
 
+    /// The configured load paths.
     pub fn load_paths(&self) -> &[PathBuf] {
         &self.load_paths
     }
@@ -127,6 +133,7 @@ impl<V: Vfs> ModuleResolver<V> {
             .sort_by(|a, b| b.0.len().cmp(&a.0.len()));
     }
 
+    /// Enable `node_modules` resolution (walks up the directory tree).
     pub fn enable_node_modules(&mut self) {
         self.node_modules_enabled = true;
     }

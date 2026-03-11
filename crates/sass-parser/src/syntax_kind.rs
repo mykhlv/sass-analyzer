@@ -3,7 +3,7 @@
 /// Single enum for the entire grammar. Tokens occupy the lower range,
 /// nodes the upper range. `is_token()` / `is_node()` discriminate.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-#[allow(non_camel_case_types)]
+#[allow(non_camel_case_types, missing_docs)]
 #[repr(u16)]
 #[rustfmt::skip]
 pub enum SyntaxKind {
@@ -160,14 +160,17 @@ pub enum SyntaxKind {
 }
 
 impl SyntaxKind {
+    /// Returns `true` if this kind represents a leaf token (not a composite node).
     pub fn is_token(self) -> bool {
         (self as u16) < __LAST_TOKEN as u16
     }
 
+    /// Returns `true` if this kind represents a composite node (not a leaf token).
     pub fn is_node(self) -> bool {
         (self as u16) > __LAST_TOKEN as u16
     }
 
+    /// Returns `true` if this kind is trivia (whitespace or comments).
     pub fn is_trivia(self) -> bool {
         matches!(self, WHITESPACE | SINGLE_LINE_COMMENT | MULTI_LINE_COMMENT)
     }
