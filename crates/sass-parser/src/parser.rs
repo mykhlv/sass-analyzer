@@ -11,6 +11,11 @@ pub struct Parser<'src> {
     source: &'src str,
     pos: usize,
     events: Vec<Event>,
+    /// Error message storage, indexed by `Event::Error::msg_index`.
+    /// Kept separate from events so `Event` stays at 16 bytes. On well-formed
+    /// input this Vec is empty (zero allocations). Interning common messages
+    /// (e.g. `Cow<'static, str>`) was considered but the gain is marginal since
+    /// errors only occur on malformed input where parsing speed is not critical.
     error_messages: Vec<String>,
     depth: u32,
 }
