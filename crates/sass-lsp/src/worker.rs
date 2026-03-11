@@ -71,8 +71,7 @@ pub(crate) async fn run_worker(
     runtime_config: Arc<RuntimeConfig>,
 ) {
     let mut pending: HashMap<Uri, (i32, String, Option<IncrementalEdit>)> = HashMap::new();
-    let debounce = Duration::from_millis(runtime_config.debounce_ms());
-    let sleep = tokio::time::sleep(debounce);
+    let sleep = tokio::time::sleep(Duration::from_millis(runtime_config.debounce_ms()));
     tokio::pin!(sleep);
     let mut has_pending = false;
 
@@ -90,6 +89,7 @@ pub(crate) async fn run_worker(
                             incremental
                         };
                         pending.insert(uri, (version, text, incremental));
+                        let debounce = Duration::from_millis(runtime_config.debounce_ms());
                         sleep.as_mut().reset(tokio::time::Instant::now() + debounce);
                         has_pending = true;
                     }
