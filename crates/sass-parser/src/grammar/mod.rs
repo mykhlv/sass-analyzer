@@ -28,33 +28,52 @@ pub enum ParseContext {
 pub fn source_file(p: &mut Parser<'_>) {
     let m = p.start();
     while !p.at_end() {
-        if p.at(AT) {
-            at_rules::at_rule(p);
-        } else if p.at(DOLLAR) {
-            expressions::variable_declaration(p);
-        } else if at_namespace_var_assignment(p) {
-            namespace_variable_assignment(p);
-        } else if p.at_ts(selectors::SELECTOR_START) || p.at_ts(selectors::COMBINATOR_TOKEN) {
-            rule_set(p);
-        } else if p.at(SEMICOLON) {
-            p.bump();
-        } else {
-            let m = p.start();
-            p.error("expected rule");
-            p.bump();
-            while !p.at_end()
-                && !p.at(AT)
-                && !p.at_ts(selectors::SELECTOR_START)
-                && !p.at_ts(selectors::COMBINATOR_TOKEN)
-                && !p.at(SEMICOLON)
-                && !p.at(DOLLAR)
-            {
-                p.bump();
-            }
-            let _ = m.complete(p, SyntaxKind::ERROR);
-        }
+        top_level_item(p);
     }
     let _ = m.complete(p, SOURCE_FILE);
+}
+
+/// Parse a single top-level item with error recovery.
+fn top_level_item(p: &mut Parser<'_>) {
+    if p.at(AT) {
+        at_rules::at_rule(p);
+    } else if p.at(DOLLAR) {
+        expressions::variable_declaration(p);
+    } else if at_namespace_var_assignment(p) {
+        namespace_variable_assignment(p);
+    } else if p.at_ts(selectors::SELECTOR_START) || p.at_ts(selectors::COMBINATOR_TOKEN) {
+        rule_set(p);
+    } else if p.at(SEMICOLON) {
+        p.bump();
+    } else {
+        let m = p.start();
+        p.error("expected rule");
+        p.bump();
+        while !p.at_end()
+            && !p.at(AT)
+            && !p.at_ts(selectors::SELECTOR_START)
+            && !p.at_ts(selectors::COMBINATOR_TOKEN)
+            && !p.at(SEMICOLON)
+            && !p.at(DOLLAR)
+        {
+            p.bump();
+        }
+        let _ = m.complete(p, SyntaxKind::ERROR);
+    }
+}
+
+/// Reparse a sequence of block-body items (for incremental reparsing).
+/// Wraps results in a `BLOCK` node (without `{` / `}`).
+pub fn reparse_block_body(p: &mut Parser<'_>) {
+    let m = p.start();
+    while !p.at_end() {
+        if p.at(SEMICOLON) {
+            p.bump();
+        } else {
+            block_item(p);
+        }
+    }
+    let _ = m.complete(p, BLOCK);
 }
 
 /// Check for `ns.$var: value` — namespace variable assignment.

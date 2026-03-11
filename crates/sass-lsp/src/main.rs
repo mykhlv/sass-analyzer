@@ -12,7 +12,7 @@ use std::time::Duration;
 use dashmap::DashMap;
 use sass_parser::syntax::{SyntaxNode, SyntaxToken};
 use sass_parser::syntax_kind::SyntaxKind;
-use sass_parser::text_range::TextRange;
+use sass_parser::text_range::{TextRange, TextSize};
 use tokio::sync::mpsc;
 use tower_lsp_server::jsonrpc::Result;
 use tower_lsp_server::ls_types::{
@@ -51,10 +51,17 @@ enum Task {
         uri: Uri,
         version: i32,
         text: String,
+        incremental: Option<IncrementalEdit>,
     },
     Close {
         uri: Uri,
     },
+}
+
+struct IncrementalEdit {
+    old_green: rowan::GreenNode,
+    old_errors: Vec<(String, TextRange)>,
+    edit: sass_parser::reparse::TextEdit,
 }
 
 #[allow(dead_code)]
@@ -81,6 +88,31 @@ struct DocumentState {
 
 fn parse_document(text: &str) -> Option<(rowan::GreenNode, Vec<(String, TextRange)>)> {
     std::panic::catch_unwind(AssertUnwindSafe(|| sass_parser::parse(text))).ok()
+}
+
+fn try_incremental_or_full(
+    incremental: Option<IncrementalEdit>,
+    text: &str,
+    uri: &Uri,
+) -> Option<(rowan::GreenNode, Vec<(String, TextRange)>)> {
+    if let Some(inc) = incremental {
+        let result = sass_parser::reparse::incremental_reparse(
+            &inc.old_green,
+            &inc.old_errors,
+            &inc.edit,
+            text,
+        );
+        if let Some(result) = result {
+            tracing::debug!(?uri, "incremental reparse");
+            return Some(result);
+        }
+        tracing::debug!(?uri, "incremental reparse fell back");
+    }
+    let result = parse_document(text);
+    if result.is_none() {
+        tracing::error!(?uri, "parser panic");
+    }
+    result
 }
 
 fn errors_to_diagnostics(
@@ -161,6 +193,36 @@ fn apply_content_changes(text: &mut String, changes: Vec<TextDocumentContentChan
         }
     }
     true
+}
+
+#[allow(clippy::cast_possible_truncation)]
+fn compute_incremental_edit(
+    documents: &DashMap<Uri, DocumentState>,
+    uri: &Uri,
+    old_text: &str,
+    changes: &[TextDocumentContentChangeEvent],
+) -> Option<IncrementalEdit> {
+    if changes.len() != 1 {
+        return None;
+    }
+    let range = changes[0].range?;
+    let doc = documents.get(uri)?;
+    let start = lsp_pos_to_byte(old_text, range.start)?;
+    let end = lsp_pos_to_byte(old_text, range.end)?;
+    if start > end || end > old_text.len() {
+        return None;
+    }
+    let delete = u32::try_from(end - start).ok()?;
+    let insert_len = u32::try_from(changes[0].text.len()).ok()?;
+    Some(IncrementalEdit {
+        old_green: doc.green.clone(),
+        old_errors: doc.errors.clone(),
+        edit: sass_parser::reparse::TextEdit {
+            offset: TextSize::from(start as u32),
+            delete: TextSize::from(delete),
+            insert_len: TextSize::from(insert_len),
+        },
+    })
 }
 
 #[allow(clippy::cast_possible_truncation)]
@@ -386,7 +448,7 @@ async fn run_worker(
     documents: Arc<DashMap<Uri, DocumentState>>,
     module_graph: Arc<workspace::ModuleGraph>,
 ) {
-    let mut pending: HashMap<Uri, (i32, String)> = HashMap::new();
+    let mut pending: HashMap<Uri, (i32, String, Option<IncrementalEdit>)> = HashMap::new();
     let debounce = Duration::from_millis(DEBOUNCE_MS);
     let sleep = tokio::time::sleep(debounce);
     tokio::pin!(sleep);
@@ -397,8 +459,15 @@ async fn run_worker(
             task = rx.recv() => {
                 let Some(task) = task else { break };
                 match task {
-                    Task::Parse { uri, version, text } => {
-                        pending.insert(uri, (version, text));
+                    Task::Parse { uri, version, text, incremental } => {
+                        // If a previous edit is already pending, the old green is
+                        // stale — discard incremental info and fall back to full parse.
+                        let incremental = if pending.contains_key(&uri) {
+                            None
+                        } else {
+                            incremental
+                        };
+                        pending.insert(uri, (version, text, incremental));
                         sleep.as_mut().reset(tokio::time::Instant::now() + debounce);
                         has_pending = true;
                     }
@@ -414,9 +483,10 @@ async fn run_worker(
                 }
             }
             () = &mut sleep, if has_pending => {
-                for (uri, (version, text)) in pending.drain() {
-                    let Some((green, errors)) = parse_document(&text) else {
-                        tracing::error!("parser panic for {uri:?}");
+                for (uri, (version, text, incremental)) in pending.drain() {
+                    let Some((green, errors)) = try_incremental_or_full(
+                        incremental, &text, &uri,
+                    ) else {
                         continue;
                     };
                     let line_index = sass_parser::line_index::LineIndex::new(&text);
@@ -588,6 +658,7 @@ impl LanguageServer for Backend {
             uri: doc.uri,
             version: doc.version,
             text: doc.text,
+            incremental: None,
         });
     }
 
@@ -606,10 +677,15 @@ impl LanguageServer for Backend {
                     uri,
                     version,
                     text: change.text,
+                    incremental: None,
                 });
             }
             return;
         };
+
+        // Compute incremental edit info before apply_content_changes consumes changes.
+        let incremental =
+            compute_incremental_edit(&self.documents, &uri, &text, &params.content_changes);
 
         if !apply_content_changes(&mut text, params.content_changes) {
             tracing::warn!(?uri, "incremental edit failed, dropping change");
@@ -624,6 +700,7 @@ impl LanguageServer for Backend {
             uri,
             version,
             text,
+            incremental,
         });
     }
 

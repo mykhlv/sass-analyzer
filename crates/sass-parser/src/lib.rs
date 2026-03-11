@@ -16,6 +16,7 @@ pub mod resolver;
 pub mod vfs;
 
 mod bridge;
+pub mod reparse;
 pub use bridge::build_tree;
 
 use text_range::TextRange;
