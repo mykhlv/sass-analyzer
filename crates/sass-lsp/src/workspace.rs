@@ -15,7 +15,6 @@ use crate::builtins;
 use crate::config::RuntimeConfig;
 use crate::symbols::{self, FileSymbols};
 
-
 /// Namespace binding for an `@use` rule.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Namespace {

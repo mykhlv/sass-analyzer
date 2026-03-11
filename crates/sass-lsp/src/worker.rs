@@ -11,10 +11,10 @@ use tokio::sync::mpsc;
 use tower_lsp_server::Client;
 use tower_lsp_server::ls_types::{Diagnostic, DiagnosticSeverity, Uri};
 
+use crate::config::RuntimeConfig;
 use crate::convert::text_range_to_lsp;
 use crate::symbols;
 use crate::workspace;
-use crate::config::RuntimeConfig;
 use crate::{DocumentState, IncrementalEdit, Task};
 
 pub(crate) fn parse_document(text: &str) -> Option<(rowan::GreenNode, Vec<(String, TextRange)>)> {

@@ -202,6 +202,33 @@ fn number_dot_no_digit_is_number_dot() {
     );
 }
 
+// ── Scientific notation ──────────────────────────────────────────────
+
+#[test]
+fn scientific_notation_integer() {
+    assert_eq!(lex("1e3"), vec![(NUMBER, "1e3")]);
+}
+
+#[test]
+fn scientific_notation_uppercase() {
+    assert_eq!(lex("1E3"), vec![(NUMBER, "1E3")]);
+}
+
+#[test]
+fn scientific_notation_positive_exponent() {
+    assert_eq!(lex("1e+3"), vec![(NUMBER, "1e+3")]);
+}
+
+#[test]
+fn scientific_notation_negative_exponent() {
+    assert_eq!(lex("2.5e-2"), vec![(NUMBER, "2.5e-2")]);
+}
+
+#[test]
+fn scientific_notation_no_digits_after_e_is_number_ident() {
+    assert_eq!(lex("1em"), vec![(NUMBER, "1"), (IDENT, "em")]);
+}
+
 // ── Single-char operators (1.9) ───────────────────────────────────────
 
 #[test]

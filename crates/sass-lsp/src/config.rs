@@ -99,7 +99,9 @@ impl RuntimeConfig {
             Ordering::Relaxed,
         );
         self.max_cached_sources.store(
-            config.max_cached_sources.unwrap_or(DEFAULT_MAX_CACHED_SOURCES),
+            config
+                .max_cached_sources
+                .unwrap_or(DEFAULT_MAX_CACHED_SOURCES),
             Ordering::Relaxed,
         );
     }
