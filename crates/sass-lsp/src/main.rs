@@ -458,14 +458,18 @@ impl LanguageServer for Backend {
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
 
-        let text = {
+        let cursor_line = {
             let Some(doc) = self.documents.get(&uri) else {
                 return Ok(None);
             };
-            doc.text.clone()
+            let line_idx = position.line as usize;
+            match doc.text.lines().nth(line_idx) {
+                Some(line) => line.to_owned(),
+                None => return Ok(None),
+            }
         };
 
-        let ctx = detect_completion_context(&text, position);
+        let ctx = detect_completion_context(&cursor_line, position.character);
 
         match ctx {
             CompletionContext::UseModulePath(partial) => {
@@ -3361,65 +3365,25 @@ mod tests {
     #[test]
     fn completion_context_detection() {
         use crate::completion::{CompletionContext, detect_completion_context};
-        use tower_lsp_server::ls_types::Position;
 
-        //                         0123456789...
-        let text = ".a {\n  color: $\n  @include \n  @use \"\n  bor\n}\n";
-        // Line 0: ".a {"
-        // Line 1: "  color: $"       (len=10)
-        // Line 2: "  @include "      (len=11)
-        // Line 3: "  @use \""        (len=8)
-        // Line 4: "  bor"            (len=5)
-        // Line 5: "}"
-
-        // After `$` → Variable (line 1, char 10 = end of "  color: $")
-        let ctx = detect_completion_context(
-            text,
-            Position {
-                line: 1,
-                character: 10,
-            },
-        );
+        // After `$` → Variable
+        let ctx = detect_completion_context("  color: $", 10);
         assert!(matches!(ctx, CompletionContext::Variable));
 
-        // After `@include ` → IncludeMixin (line 2, char 11 = end of "  @include ")
-        let ctx = detect_completion_context(
-            text,
-            Position {
-                line: 2,
-                character: 11,
-            },
-        );
+        // After `@include ` → IncludeMixin
+        let ctx = detect_completion_context("  @include ", 11);
         assert!(matches!(ctx, CompletionContext::IncludeMixin));
 
-        // After `@use "` → UseModulePath (line 3, char 8 = after the quote)
-        let ctx = detect_completion_context(
-            text,
-            Position {
-                line: 3,
-                character: 8,
-            },
-        );
+        // After `@use "` → UseModulePath
+        let ctx = detect_completion_context("  @use \"", 8);
         assert!(matches!(ctx, CompletionContext::UseModulePath(_)));
 
-        // On `bor` → PropertyName (line 4, char 5 = end of "  bor")
-        let ctx = detect_completion_context(
-            text,
-            Position {
-                line: 4,
-                character: 5,
-            },
-        );
+        // On `bor` → PropertyName
+        let ctx = detect_completion_context("  bor", 5);
         assert!(matches!(ctx, CompletionContext::PropertyName(_)));
 
-        // After `color:` → PropertyValue (line 1, char 8 = "  color: ")
-        let ctx = detect_completion_context(
-            text,
-            Position {
-                line: 1,
-                character: 8,
-            },
-        );
+        // After `color:` → PropertyValue
+        let ctx = detect_completion_context("  color: ", 8);
         assert!(matches!(ctx, CompletionContext::PropertyValue));
     }
 
