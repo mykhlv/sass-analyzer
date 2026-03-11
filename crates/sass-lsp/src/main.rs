@@ -1,52 +1,45 @@
+mod ast_helpers;
 mod builtins;
+mod completion;
 mod config;
+mod convert;
 mod css_properties;
+mod navigation;
+mod semantic_tokens;
+mod signature_help;
 mod symbols;
+mod worker;
 mod workspace;
 
 use std::collections::HashMap;
-use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
-use std::time::Duration;
 
 use dashmap::DashMap;
-use sass_parser::syntax::{SyntaxNode, SyntaxToken};
+use sass_parser::syntax::SyntaxNode;
 use sass_parser::syntax_kind::SyntaxKind;
 use sass_parser::text_range::{TextRange, TextSize};
 use tokio::sync::mpsc;
 use tower_lsp_server::jsonrpc::Result;
 use tower_lsp_server::ls_types::{
     CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
-    Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentLink, DocumentLinkOptions,
-    DocumentLinkParams, DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams,
-    GotoDefinitionResponse, Hover, HoverContents, HoverParams, InitializeParams, InitializeResult,
-    InitializedParams, Location, MarkupContent, MarkupKind, OneOf, ParameterInformation,
-    ParameterLabel, Position, PrepareRenameResponse, Range, ReferenceParams, RenameOptions,
-    RenameParams, SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokens,
-    SemanticTokensFullOptions, SemanticTokensLegend, SemanticTokensOptions, SemanticTokensParams,
-    SemanticTokensResult, SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo,
-    SignatureHelp, SignatureHelpOptions, SignatureHelpParams, SignatureInformation,
-    SymbolInformation, TextDocumentContentChangeEvent, TextDocumentPositionParams,
-    TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Uri, WorkDoneProgressOptions,
-    WorkspaceEdit, WorkspaceSymbolParams, WorkspaceSymbolResponse,
+    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
+    DidSaveTextDocumentParams, DocumentLink, DocumentLinkOptions, DocumentLinkParams,
+    DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse,
+    Hover, HoverParams, InitializeParams, InitializeResult, InitializedParams, Location, OneOf,
+    PrepareRenameResponse, ReferenceParams, RenameOptions, RenameParams, SemanticTokenModifier,
+    SemanticTokenType, SemanticTokens, SemanticTokensFullOptions, SemanticTokensLegend,
+    SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
+    SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo, SignatureHelp,
+    SignatureHelpOptions, SignatureHelpParams, SymbolInformation, TextDocumentContentChangeEvent,
+    TextDocumentPositionParams, TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Uri,
+    WorkDoneProgressOptions, WorkspaceEdit, WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
 use tower_lsp_server::{Client, LanguageServer, LspService, Server};
 
 const MAX_FILE_SIZE: usize = 2_000_000;
-const DEBOUNCE_MS: u64 = 50;
+pub(crate) const DEBOUNCE_MS: u64 = 50;
 
-// Semantic token type indices (must match legend order in initialize)
-const TOK_VARIABLE: u32 = 0;
-const TOK_FUNCTION: u32 = 1;
-const TOK_MIXIN: u32 = 2;
-const TOK_PARAMETER: u32 = 3;
-const TOK_PROPERTY: u32 = 4;
-const TOK_TYPE: u32 = 5;
-
-const MOD_DECLARATION: u32 = 1 << 0;
-
-enum Task {
+pub(crate) enum Task {
     Parse {
         uri: Uri,
         version: i32,
@@ -58,10 +51,10 @@ enum Task {
     },
 }
 
-struct IncrementalEdit {
-    old_green: rowan::GreenNode,
-    old_errors: Vec<(String, TextRange)>,
-    edit: sass_parser::reparse::TextEdit,
+pub(crate) struct IncrementalEdit {
+    pub(crate) old_green: rowan::GreenNode,
+    pub(crate) old_errors: Vec<(String, TextRange)>,
+    pub(crate) edit: sass_parser::reparse::TextEdit,
 }
 
 #[allow(dead_code)]
@@ -75,119 +68,27 @@ struct Backend {
     task_tx: mpsc::UnboundedSender<Task>,
 }
 
-struct DocumentState {
-    version: i32,
-    text: String,
-    green: rowan::GreenNode,
+pub(crate) struct DocumentState {
+    pub(crate) version: i32,
+    pub(crate) text: String,
+    pub(crate) green: rowan::GreenNode,
     #[allow(dead_code)]
-    errors: Vec<(String, TextRange)>,
-    line_index: sass_parser::line_index::LineIndex,
+    pub(crate) errors: Vec<(String, TextRange)>,
+    pub(crate) line_index: sass_parser::line_index::LineIndex,
     #[allow(dead_code)]
-    symbols: symbols::FileSymbols,
+    pub(crate) symbols: symbols::FileSymbols,
 }
 
-fn parse_document(text: &str) -> Option<(rowan::GreenNode, Vec<(String, TextRange)>)> {
-    std::panic::catch_unwind(AssertUnwindSafe(|| sass_parser::parse(text))).ok()
-}
-
-fn try_incremental_or_full(
-    incremental: Option<IncrementalEdit>,
-    text: &str,
-    uri: &Uri,
-) -> Option<(rowan::GreenNode, Vec<(String, TextRange)>)> {
-    if let Some(inc) = incremental {
-        let result = sass_parser::reparse::incremental_reparse(
-            &inc.old_green,
-            &inc.old_errors,
-            &inc.edit,
-            text,
-        );
-        if let Some(result) = result {
-            tracing::debug!(?uri, "incremental reparse");
-            return Some(result);
-        }
-        tracing::debug!(?uri, "incremental reparse fell back");
-    }
-    let result = parse_document(text);
-    if result.is_none() {
-        tracing::error!(?uri, "parser panic");
-    }
-    result
-}
-
-fn errors_to_diagnostics(
-    errors: &[(String, TextRange)],
-    line_index: &sass_parser::line_index::LineIndex,
-    source: &str,
-) -> Vec<Diagnostic> {
-    errors
-        .iter()
-        .map(|(msg, range)| Diagnostic {
-            range: text_range_to_lsp(*range, line_index, source),
-            severity: Some(DiagnosticSeverity::ERROR),
-            source: Some("sass-analyzer".to_owned()),
-            message: msg.clone(),
-            ..Diagnostic::default()
-        })
-        .collect()
-}
-
-// ── Semantic tokens ─────────────────────────────────────────────────
-
-struct RawSemanticToken {
-    start: u32,
-    len: u32,
-    token_type: u32,
-    modifiers: u32,
-}
-
-/// Convert byte offset → (0-based line, 0-based UTF-16 column).
-#[allow(clippy::cast_possible_truncation)]
-fn byte_to_lsp_pos(
-    source: &str,
-    line_index: &sass_parser::line_index::LineIndex,
-    offset: sass_parser::text_range::TextSize,
-) -> (u32, u32) {
-    let lc = line_index.line_col(offset);
-    let line_0 = lc.line - 1;
-    let byte_offset = u32::from(offset) as usize;
-    let line_start_byte = byte_offset - (lc.col as usize - 1);
-    let slice = &source[line_start_byte..byte_offset];
-    let col_utf16 = slice.encode_utf16().count() as u32;
-    (line_0, col_utf16)
-}
-
-/// UTF-16 length of a string slice.
-#[allow(clippy::cast_possible_truncation)]
-fn utf16_len(s: &str) -> u32 {
-    s.encode_utf16().count() as u32
-}
-
-/// Apply incremental text edits from LSP to a source string.
-/// Converts LSP positions (0-based line, UTF-16 column) to byte offsets via linear scan.
-/// Returns `false` if any position is out of bounds.
-fn apply_content_changes(text: &mut String, changes: Vec<TextDocumentContentChangeEvent>) -> bool {
-    for change in changes {
-        match change.range {
-            Some(range) => {
-                let Some(start) = lsp_pos_to_byte(text, range.start) else {
-                    return false;
-                };
-                let Some(end) = lsp_pos_to_byte(text, range.end) else {
-                    return false;
-                };
-                if start > end || end > text.len() {
-                    return false;
-                }
-                text.replace_range(start..end, &change.text);
-            }
-            None => {
-                *text = change.text;
-            }
-        }
-    }
-    true
-}
+use completion::{
+    CompletionContext, detect_completion_context, fuzzy_score, symbol_to_completion_item,
+};
+use convert::{apply_content_changes, lsp_pos_to_byte, lsp_position_to_offset, text_range_to_lsp};
+use navigation::{
+    find_definition_at_offset, find_reference_at_offset, make_hover, to_lsp_document_symbol,
+};
+use semantic_tokens::{collect_semantic_tokens, delta_encode};
+use signature_help::{build_signature_info, count_active_parameter, find_call_at_offset};
+use worker::run_worker;
 
 #[allow(clippy::cast_possible_truncation)]
 fn compute_incremental_edit(
@@ -219,320 +120,7 @@ fn compute_incremental_edit(
     })
 }
 
-#[allow(clippy::cast_possible_truncation)]
-fn lsp_pos_to_byte(text: &str, pos: Position) -> Option<usize> {
-    let mut byte_offset = 0usize;
-    for _ in 0..pos.line {
-        let remaining = &text[byte_offset..];
-        let nl = remaining.find('\n')?;
-        byte_offset += nl + 1;
-    }
-    let mut utf16_count = 0u32;
-    for ch in text[byte_offset..].chars() {
-        if utf16_count >= pos.character || ch == '\n' {
-            break;
-        }
-        utf16_count += ch.len_utf16() as u32;
-        byte_offset += ch.len_utf8();
-    }
-    Some(byte_offset)
-}
-
-/// Find the first IDENT token among direct children.
-fn first_ident_token(node: &SyntaxNode) -> Option<SyntaxToken> {
-    node.children_with_tokens()
-        .filter_map(rowan::NodeOrToken::into_token)
-        .find(|t| t.kind() == SyntaxKind::IDENT)
-}
-
-/// Find the Nth IDENT token (0-indexed) among direct children.
-fn nth_ident_token(node: &SyntaxNode, n: usize) -> Option<SyntaxToken> {
-    node.children_with_tokens()
-        .filter_map(rowan::NodeOrToken::into_token)
-        .filter(|t| t.kind() == SyntaxKind::IDENT)
-        .nth(n)
-}
-
-/// Compute combined range from DOLLAR to the following IDENT in direct children.
-fn dollar_ident_range(node: &SyntaxNode) -> Option<(TextRange, u32)> {
-    let mut dollar_start = None;
-    let mut ident_end = None;
-    let mut ident_len_utf16 = 0u32;
-    for element in node.children_with_tokens() {
-        if let Some(token) = element.into_token() {
-            match token.kind() {
-                SyntaxKind::DOLLAR => dollar_start = Some(token.text_range().start()),
-                SyntaxKind::IDENT if dollar_start.is_some() => {
-                    ident_end = Some(token.text_range().end());
-                    // $name → UTF-16 length = 1 (for $) + ident chars
-                    ident_len_utf16 = 1 + utf16_len(token.text());
-                    break;
-                }
-                _ => {}
-            }
-        }
-    }
-    let start = dollar_start?;
-    let end = ident_end?;
-    Some((TextRange::new(start, end), ident_len_utf16))
-}
-
-fn collect_semantic_tokens(root: &SyntaxNode) -> Vec<RawSemanticToken> {
-    let mut tokens = Vec::new();
-
-    for node in root.descendants() {
-        match node.kind() {
-            SyntaxKind::VARIABLE_DECL => {
-                if let Some((range, len)) = dollar_ident_range(&node) {
-                    tokens.push(RawSemanticToken {
-                        start: range.start().into(),
-                        len,
-                        token_type: TOK_VARIABLE,
-                        modifiers: MOD_DECLARATION,
-                    });
-                }
-            }
-            SyntaxKind::VARIABLE_REF => {
-                if let Some((range, len)) = dollar_ident_range(&node) {
-                    tokens.push(RawSemanticToken {
-                        start: range.start().into(),
-                        len,
-                        token_type: TOK_VARIABLE,
-                        modifiers: 0,
-                    });
-                }
-            }
-            SyntaxKind::FUNCTION_CALL => {
-                if let Some(ident) = first_ident_token(&node) {
-                    tokens.push(RawSemanticToken {
-                        start: ident.text_range().start().into(),
-                        len: utf16_len(ident.text()),
-                        token_type: TOK_FUNCTION,
-                        modifiers: 0,
-                    });
-                }
-            }
-            SyntaxKind::FUNCTION_RULE => {
-                // Skip first IDENT ("function"), take second (the name)
-                if let Some(ident) = nth_ident_token(&node, 1) {
-                    tokens.push(RawSemanticToken {
-                        start: ident.text_range().start().into(),
-                        len: utf16_len(ident.text()),
-                        token_type: TOK_FUNCTION,
-                        modifiers: MOD_DECLARATION,
-                    });
-                }
-            }
-            SyntaxKind::MIXIN_RULE => {
-                if let Some(ident) = nth_ident_token(&node, 1) {
-                    tokens.push(RawSemanticToken {
-                        start: ident.text_range().start().into(),
-                        len: utf16_len(ident.text()),
-                        token_type: TOK_MIXIN,
-                        modifiers: MOD_DECLARATION,
-                    });
-                }
-            }
-            SyntaxKind::INCLUDE_RULE => {
-                if let Some(ident) = nth_ident_token(&node, 1) {
-                    tokens.push(RawSemanticToken {
-                        start: ident.text_range().start().into(),
-                        len: utf16_len(ident.text()),
-                        token_type: TOK_MIXIN,
-                        modifiers: 0,
-                    });
-                }
-            }
-            SyntaxKind::PARAM => {
-                if let Some((range, len)) = dollar_ident_range(&node) {
-                    tokens.push(RawSemanticToken {
-                        start: range.start().into(),
-                        len,
-                        token_type: TOK_PARAMETER,
-                        modifiers: 0,
-                    });
-                }
-            }
-            SyntaxKind::PROPERTY => {
-                if let Some(ident) = first_ident_token(&node) {
-                    tokens.push(RawSemanticToken {
-                        start: ident.text_range().start().into(),
-                        len: utf16_len(ident.text()),
-                        token_type: TOK_PROPERTY,
-                        modifiers: 0,
-                    });
-                }
-            }
-            SyntaxKind::SIMPLE_SELECTOR => {
-                // %placeholder → TYPE
-                let mut has_percent = false;
-                let mut pct_start = None;
-                let mut ident_text = None;
-                for element in node.children_with_tokens() {
-                    if let Some(token) = element.into_token() {
-                        match token.kind() {
-                            SyntaxKind::PERCENT => {
-                                has_percent = true;
-                                pct_start = Some(token.text_range().start());
-                            }
-                            SyntaxKind::IDENT if has_percent => {
-                                ident_text = Some(token.text().to_string());
-                                break;
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                if let (Some(start), Some(text)) = (pct_start, ident_text) {
-                    tokens.push(RawSemanticToken {
-                        start: start.into(),
-                        len: 1 + utf16_len(&text), // % + name
-                        token_type: TOK_TYPE,
-                        modifiers: 0,
-                    });
-                }
-            }
-            _ => {}
-        }
-    }
-
-    tokens.sort_by_key(|t| t.start);
-    tokens
-}
-
-fn delta_encode(
-    raw: &[RawSemanticToken],
-    source: &str,
-    line_index: &sass_parser::line_index::LineIndex,
-) -> Vec<SemanticToken> {
-    let mut result = Vec::with_capacity(raw.len());
-    let mut prev_line: u32 = 0;
-    let mut prev_col: u32 = 0;
-
-    for tok in raw {
-        let (line, col) = byte_to_lsp_pos(
-            source,
-            line_index,
-            sass_parser::text_range::TextSize::from(tok.start),
-        );
-
-        let delta_line = line - prev_line;
-        let delta_start = if delta_line == 0 { col - prev_col } else { col };
-
-        result.push(SemanticToken {
-            delta_line,
-            delta_start,
-            length: tok.len,
-            token_type: tok.token_type,
-            token_modifiers_bitset: tok.modifiers,
-        });
-
-        prev_line = line;
-        prev_col = col;
-    }
-
-    result
-}
-
-// ── Worker ──────────────────────────────────────────────────────────
-
-async fn run_worker(
-    mut rx: mpsc::UnboundedReceiver<Task>,
-    client: Client,
-    documents: Arc<DashMap<Uri, DocumentState>>,
-    module_graph: Arc<workspace::ModuleGraph>,
-) {
-    let mut pending: HashMap<Uri, (i32, String, Option<IncrementalEdit>)> = HashMap::new();
-    let debounce = Duration::from_millis(DEBOUNCE_MS);
-    let sleep = tokio::time::sleep(debounce);
-    tokio::pin!(sleep);
-    let mut has_pending = false;
-
-    loop {
-        tokio::select! {
-            task = rx.recv() => {
-                let Some(task) = task else { break };
-                match task {
-                    Task::Parse { uri, version, text, incremental } => {
-                        // If a previous edit is already pending, the old green is
-                        // stale — discard incremental info and fall back to full parse.
-                        let incremental = if pending.contains_key(&uri) {
-                            None
-                        } else {
-                            incremental
-                        };
-                        pending.insert(uri, (version, text, incremental));
-                        sleep.as_mut().reset(tokio::time::Instant::now() + debounce);
-                        has_pending = true;
-                    }
-                    Task::Close { uri } => {
-                        pending.remove(&uri);
-                        documents.remove(&uri);
-                        // Don't remove from module_graph: the file may still be a
-                        // dependency of other files (indexed via index_dependency).
-                        // VS Code sends didClose for peek previews after
-                        // go-to-definition, which would destroy indexed dependencies.
-                        client.publish_diagnostics(uri, vec![], None).await;
-                    }
-                }
-            }
-            () = &mut sleep, if has_pending => {
-                for (uri, (version, text, incremental)) in pending.drain() {
-                    let Some((green, errors)) = try_incremental_or_full(
-                        incremental, &text, &uri,
-                    ) else {
-                        continue;
-                    };
-                    let line_index = sass_parser::line_index::LineIndex::new(&text);
-                    let diagnostics = errors_to_diagnostics(&errors, &line_index, &text);
-                    let file_symbols = {
-                        let root = SyntaxNode::new_root(green.clone());
-                        symbols::collect_symbols(&root)
-                    };
-
-                    let is_current = documents
-                        .get(&uri)
-                        .is_none_or(|state| state.version <= version);
-
-                    module_graph.index_file(
-                        &uri,
-                        green.clone(),
-                        file_symbols.clone(),
-                        line_index.clone(),
-                        text.clone(),
-                    );
-
-                    documents.insert(
-                        uri.clone(),
-                        DocumentState {
-                            version,
-                            text,
-                            green,
-                            errors,
-                            line_index,
-                            symbols: file_symbols,
-                        },
-                    );
-
-                    if is_current {
-                        client
-                            .publish_diagnostics(uri, diagnostics, Some(version))
-                            .await;
-                    }
-                }
-                // Tell VS Code to re-request semantic tokens for all open editors.
-                // Without this, tokens requested before parsing finishes get a null
-                // response and are never refreshed.  Fire-and-forget so the
-                // worker loop is never blocked by a slow or absent client.
-                {
-                    let c = client.clone();
-                    tokio::spawn(async move { let _ = c.semantic_tokens_refresh().await; });
-                }
-                has_pending = false;
-            }
-        }
-    }
-}
+use ast_helpers::name_only_range;
 
 // ── LanguageServer impl ─────────────────────────────────────────────
 
@@ -648,12 +236,16 @@ impl LanguageServer for Backend {
             return;
         }
         self.source_texts.insert(doc.uri.clone(), doc.text.clone());
-        if self.task_tx.send(Task::Parse {
-            uri: doc.uri,
-            version: doc.version,
-            text: doc.text,
-            incremental: None,
-        }).is_err() {
+        if self
+            .task_tx
+            .send(Task::Parse {
+                uri: doc.uri,
+                version: doc.version,
+                text: doc.text,
+                incremental: None,
+            })
+            .is_err()
+        {
             tracing::error!("worker channel closed, parse task dropped");
         }
     }
@@ -669,12 +261,16 @@ impl LanguageServer for Backend {
                     return;
                 }
                 self.source_texts.insert(uri.clone(), change.text.clone());
-                if self.task_tx.send(Task::Parse {
-                    uri,
-                    version,
-                    text: change.text,
-                    incremental: None,
-                }).is_err() {
+                if self
+                    .task_tx
+                    .send(Task::Parse {
+                        uri,
+                        version,
+                        text: change.text,
+                        incremental: None,
+                    })
+                    .is_err()
+                {
                     tracing::error!("worker channel closed, parse task dropped");
                 }
             }
@@ -694,12 +290,16 @@ impl LanguageServer for Backend {
             return;
         }
         self.source_texts.insert(uri.clone(), text.clone());
-        if self.task_tx.send(Task::Parse {
-            uri,
-            version,
-            text,
-            incremental,
-        }).is_err() {
+        if self
+            .task_tx
+            .send(Task::Parse {
+                uri,
+                version,
+                text,
+                incremental,
+            })
+            .is_err()
+        {
             tracing::error!("worker channel closed, parse task dropped");
         }
     }
@@ -708,9 +308,13 @@ impl LanguageServer for Backend {
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         self.source_texts.remove(&params.text_document.uri);
-        if self.task_tx.send(Task::Close {
-            uri: params.text_document.uri,
-        }).is_err() {
+        if self
+            .task_tx
+            .send(Task::Close {
+                uri: params.text_document.uri,
+            })
+            .is_err()
+        {
             tracing::error!("worker channel closed, close task dropped");
         }
     }
@@ -970,7 +574,11 @@ impl LanguageServer for Backend {
 
         // 2. Try definition at cursor (hovering on a declaration name)
         if let Some(symbol) = find_definition_at_offset(&file_symbols, offset) {
-            let range = Some(text_range_to_lsp(symbol.selection_range, &line_index, &doc_text));
+            let range = Some(text_range_to_lsp(
+                symbol.selection_range,
+                &line_index,
+                &doc_text,
+            ));
             return Ok(Some(make_hover(symbol, None, range)));
         }
 
@@ -1317,855 +925,6 @@ impl LanguageServer for Backend {
     }
 }
 
-// ── Completion context detection ─────────────────────────────────
-
-enum CompletionContext {
-    /// After `$` — only variables
-    Variable,
-    /// After `@include ` — only mixins
-    IncludeMixin,
-    /// After `@extend %` — only placeholders
-    Extend,
-    /// After `ns.` — only symbols from that namespace
-    Namespace(String),
-    /// After `@use "` or `@forward "` — module path completions
-    UseModulePath(String),
-    /// In property-name position (start of line or after `;`/`{`)
-    PropertyName(String),
-    /// After `:` in a declaration — property value context (variables + functions)
-    PropertyValue,
-    /// Default — show all symbols
-    General,
-}
-
-fn detect_completion_context(text: &str, position: Position) -> CompletionContext {
-    let line_idx = position.line as usize;
-    let Some(line) = text.lines().nth(line_idx) else {
-        return CompletionContext::General;
-    };
-
-    // Get text before cursor on this line (position.character is UTF-16 offset)
-    let target_utf16 = position.character as usize;
-    let mut utf16_count = 0;
-    let mut byte_offset = 0;
-    for ch in line.chars() {
-        if utf16_count >= target_utf16 {
-            break;
-        }
-        utf16_count += ch.len_utf16();
-        byte_offset += ch.len_utf8();
-    }
-    let before = &line[..byte_offset];
-    let trimmed = before.trim_start();
-
-    // @use "path" or @forward "path" → module path completion
-    if let Some(rest) = trimmed
-        .strip_prefix("@use")
-        .or_else(|| trimmed.strip_prefix("@forward"))
-    {
-        let rest = rest.trim_start();
-        if let Some(partial) = rest.strip_prefix('"') {
-            return CompletionContext::UseModulePath(partial.to_owned());
-        }
-        if let Some(partial) = rest.strip_prefix('\'') {
-            return CompletionContext::UseModulePath(partial.to_owned());
-        }
-    }
-
-    // @include name — mixin completion
-    if let Some(rest) = trimmed.strip_prefix("@include") {
-        let partial = rest.trim_start();
-        // Only if we haven't started the argument list
-        if !partial.contains('(') {
-            return CompletionContext::IncludeMixin;
-        }
-    }
-
-    // @extend % — placeholder completion
-    if trimmed.starts_with("@extend") {
-        return CompletionContext::Extend;
-    }
-
-    // namespace.member — after `ns.`
-    if let Some(dot_pos) = before.rfind('.') {
-        let before_dot = &before[..dot_pos];
-        // Extract the namespace identifier (last word before dot)
-        let ns: String = before_dot
-            .chars()
-            .rev()
-            .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect();
-        if !ns.is_empty() {
-            return CompletionContext::Namespace(ns);
-        }
-    }
-
-    // After `$` — variable completion
-    if before.ends_with('$') || before.contains('$') && !before.ends_with(' ') {
-        if let Some(dollar_pos) = before.rfind('$') {
-            let after_dollar = &before[dollar_pos + 1..];
-            if after_dollar
-                .chars()
-                .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
-            {
-                return CompletionContext::Variable;
-            }
-        }
-    }
-
-    // Property value position: after `property:` (with possible whitespace)
-    if trimmed.contains(':') && !trimmed.starts_with('@') && !trimmed.starts_with('$') {
-        return CompletionContext::PropertyValue;
-    }
-
-    // Property name position: line starts with a letter/hyphen (typical for properties)
-    // or after `{` or `;`
-    if !trimmed.is_empty()
-        && !trimmed.starts_with('$')
-        && !trimmed.starts_with('@')
-        && !trimmed.starts_with('.')
-        && !trimmed.starts_with('#')
-        && !trimmed.starts_with('&')
-        && !trimmed.starts_with('%')
-        && !trimmed.starts_with('>')
-        && !trimmed.starts_with('+')
-        && !trimmed.starts_with('~')
-        && !trimmed.starts_with('/')
-        && !trimmed.starts_with('*')
-        && !trimmed.contains(':')
-    {
-        // Could be a property name if we're inside a block
-        // Simple heuristic: if the line starts with a lowercase letter or hyphen
-        if trimmed.starts_with(|c: char| c.is_ascii_lowercase() || c == '-') {
-            return CompletionContext::PropertyName(trimmed.to_owned());
-        }
-    }
-
-    CompletionContext::General
-}
-
-fn symbol_to_completion_item(
-    prefix: Option<&str>,
-    sym: &symbols::Symbol,
-    is_builtin: bool,
-) -> CompletionItem {
-    let (label, insert_text, kind, detail) = match sym.kind {
-        symbols::SymbolKind::Variable => {
-            let label = if let Some(ns) = prefix {
-                format!("{ns}.${}", sym.name)
-            } else {
-                format!("${}", sym.name)
-            };
-            let detail = sym.value.clone();
-            (label, None, CompletionItemKind::VARIABLE, detail)
-        }
-        symbols::SymbolKind::Function => {
-            let label = if let Some(ns) = prefix {
-                format!("{ns}.{}", sym.name)
-            } else {
-                sym.name.clone()
-            };
-            let detail = sym.params.clone();
-            (label, None, CompletionItemKind::FUNCTION, detail)
-        }
-        symbols::SymbolKind::Mixin => {
-            let label = if let Some(ns) = prefix {
-                format!("{ns}.{}", sym.name)
-            } else {
-                sym.name.clone()
-            };
-            let detail = Some(
-                sym.params
-                    .as_ref()
-                    .map_or_else(|| "@mixin".to_owned(), |p| format!("@mixin{p}")),
-            );
-            (label, None, CompletionItemKind::METHOD, detail)
-        }
-        symbols::SymbolKind::Placeholder => {
-            let label = format!("%{}", sym.name);
-            (label, None, CompletionItemKind::CLASS, None)
-        }
-    };
-
-    // 3-tier sort: 0_ local, 1_ imported, 2_ builtin
-    let tier = if is_builtin {
-        "2"
-    } else if prefix.is_some() {
-        "1"
-    } else {
-        "0"
-    };
-    let sort_text = Some(format!("{tier}_{label}"));
-
-    let documentation = sym.doc.as_ref().map(|doc| {
-        tower_lsp_server::ls_types::Documentation::MarkupContent(MarkupContent {
-            kind: MarkupKind::Markdown,
-            value: doc.clone(),
-        })
-    });
-
-    CompletionItem {
-        label,
-        kind: Some(kind),
-        detail,
-        insert_text,
-        sort_text,
-        documentation,
-        ..CompletionItem::default()
-    }
-}
-
-#[allow(deprecated)]
-fn to_lsp_document_symbol(
-    sym: &symbols::Symbol,
-    line_index: &sass_parser::line_index::LineIndex,
-    source: &str,
-) -> tower_lsp_server::ls_types::DocumentSymbol {
-    let range = text_range_to_lsp(sym.range, line_index, source);
-    let selection_range = text_range_to_lsp(sym.selection_range, line_index, source);
-    let (kind, detail) = match sym.kind {
-        symbols::SymbolKind::Variable => (tower_lsp_server::ls_types::SymbolKind::VARIABLE, None),
-        symbols::SymbolKind::Function => (
-            tower_lsp_server::ls_types::SymbolKind::FUNCTION,
-            sym.params.clone(),
-        ),
-        symbols::SymbolKind::Mixin => (
-            tower_lsp_server::ls_types::SymbolKind::FUNCTION,
-            Some(
-                sym.params
-                    .as_ref()
-                    .map_or_else(|| "@mixin".to_owned(), |p| format!("@mixin{p}")),
-            ),
-        ),
-        symbols::SymbolKind::Placeholder => (tower_lsp_server::ls_types::SymbolKind::CLASS, None),
-    };
-    tower_lsp_server::ls_types::DocumentSymbol {
-        name: sym.name.clone(),
-        detail,
-        kind,
-        tags: None,
-        deprecated: None,
-        range,
-        selection_range,
-        children: None,
-    }
-}
-
-/// Convert a `TextRange` (byte offsets) to an LSP `Range` (0-based line, UTF-16 column).
-#[allow(clippy::cast_possible_truncation)]
-fn text_range_to_lsp(
-    range: sass_parser::text_range::TextRange,
-    line_index: &sass_parser::line_index::LineIndex,
-    source: &str,
-) -> Range {
-    let start = byte_to_lsp_pos(source, line_index, range.start());
-    let end = byte_to_lsp_pos(source, line_index, range.end());
-    Range::new(
-        Position::new(start.0, start.1),
-        Position::new(end.0, end.1),
-    )
-}
-
-// ── Go-to-definition ────────────────────────────────────────────────
-
-/// Convert an LSP Position (0-based line, 0-based UTF-16 col) to a byte offset.
-#[allow(clippy::cast_possible_truncation)]
-fn lsp_position_to_offset(
-    source: &str,
-    line_index: &sass_parser::line_index::LineIndex,
-    position: Position,
-) -> Option<sass_parser::text_range::TextSize> {
-    let line_start = line_index.line_start(position.line)? as usize;
-    let remaining = &source[line_start..];
-    let line_text = remaining.split('\n').next().unwrap_or(remaining);
-
-    let target_utf16 = position.character;
-    let mut byte_offset = 0usize;
-    let mut utf16_offset = 0u32;
-
-    for ch in line_text.chars() {
-        if utf16_offset >= target_utf16 {
-            break;
-        }
-        byte_offset += ch.len_utf8();
-        utf16_offset += ch.len_utf16() as u32;
-    }
-
-    Some(sass_parser::text_range::TextSize::from(
-        (line_start + byte_offset) as u32,
-    ))
-}
-
-struct ReferenceInfo {
-    namespace: Option<String>,
-    name: String,
-    kind: symbols::SymbolKind,
-    range: TextRange,
-}
-
-fn find_reference_at_offset(
-    root: &SyntaxNode,
-    offset: sass_parser::text_range::TextSize,
-) -> Option<ReferenceInfo> {
-    let token = root.token_at_offset(offset).right_biased()?;
-
-    for node in token.parent()?.ancestors() {
-        match node.kind() {
-            SyntaxKind::NAMESPACE_REF => {
-                return extract_namespace_ref_info(&node);
-            }
-            SyntaxKind::VARIABLE_REF => {
-                if node
-                    .parent()
-                    .is_some_and(|p| p.kind() == SyntaxKind::VARIABLE_DECL)
-                {
-                    return None;
-                }
-                let (name, range) = dollar_ident_name_range(&node)?;
-                return Some(ReferenceInfo {
-                    namespace: None,
-                    name,
-                    kind: symbols::SymbolKind::Variable,
-                    range,
-                });
-            }
-            SyntaxKind::FUNCTION_CALL => {
-                if node
-                    .parent()
-                    .is_some_and(|p| p.kind() == SyntaxKind::NAMESPACE_REF)
-                {
-                    continue;
-                }
-                let (name, range) = ident_text_range_of(&node)?;
-                return Some(ReferenceInfo {
-                    namespace: None,
-                    name,
-                    kind: symbols::SymbolKind::Function,
-                    range,
-                });
-            }
-            SyntaxKind::INCLUDE_RULE => {
-                if node
-                    .children()
-                    .any(|c| c.kind() == SyntaxKind::NAMESPACE_REF)
-                {
-                    return None;
-                }
-                let (name, range) = nth_ident_text_range_of(&node, 1)?;
-                return Some(ReferenceInfo {
-                    namespace: None,
-                    name,
-                    kind: symbols::SymbolKind::Mixin,
-                    range,
-                });
-            }
-            SyntaxKind::EXTEND_RULE => {
-                let (name, range) = percent_ident_name_range(&node)?;
-                return Some(ReferenceInfo {
-                    namespace: None,
-                    name,
-                    kind: symbols::SymbolKind::Placeholder,
-                    range,
-                });
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
-fn extract_namespace_ref_info(node: &SyntaxNode) -> Option<ReferenceInfo> {
-    let tokens: Vec<_> = node
-        .children_with_tokens()
-        .filter_map(rowan::NodeOrToken::into_token)
-        .collect();
-
-    let namespace = tokens
-        .iter()
-        .find(|t| t.kind() == SyntaxKind::IDENT)?
-        .text()
-        .to_string();
-
-    // ns.$var pattern: IDENT DOT DOLLAR IDENT
-    if let Some(dollar) = tokens.iter().find(|t| t.kind() == SyntaxKind::DOLLAR) {
-        let ident = tokens
-            .iter()
-            .skip_while(|t| t.kind() != SyntaxKind::DOLLAR)
-            .find(|t| t.kind() == SyntaxKind::IDENT)?;
-        let range = TextRange::new(dollar.text_range().start(), ident.text_range().end());
-        return Some(ReferenceInfo {
-            namespace: Some(namespace),
-            name: ident.text().to_string(),
-            kind: symbols::SymbolKind::Variable,
-            range,
-        });
-    }
-
-    // ns.func() pattern: has FUNCTION_CALL child
-    if let Some(func_call) = node
-        .children()
-        .find(|c| c.kind() == SyntaxKind::FUNCTION_CALL)
-    {
-        let (name, range) = ident_text_range_of(&func_call)?;
-        return Some(ReferenceInfo {
-            namespace: Some(namespace),
-            name,
-            kind: symbols::SymbolKind::Function,
-            range,
-        });
-    }
-
-    // ns.mixin pattern: IDENT DOT IDENT (inside @include)
-    let dot_pos = tokens.iter().position(|t| t.kind() == SyntaxKind::DOT)?;
-    let ident = tokens[dot_pos + 1..]
-        .iter()
-        .find(|t| t.kind() == SyntaxKind::IDENT)?;
-
-    let is_mixin = node
-        .parent()
-        .is_some_and(|p| p.kind() == SyntaxKind::INCLUDE_RULE);
-
-    Some(ReferenceInfo {
-        namespace: Some(namespace),
-        name: ident.text().to_string(),
-        kind: if is_mixin {
-            symbols::SymbolKind::Mixin
-        } else {
-            symbols::SymbolKind::Function
-        },
-        range: ident.text_range(),
-    })
-}
-
-/// Extract `$name` → (name, DOLLAR..IDENT range) from direct children.
-fn dollar_ident_name_range(node: &SyntaxNode) -> Option<(String, TextRange)> {
-    let mut dollar_start = None;
-    for element in node.children_with_tokens() {
-        if let Some(token) = element.into_token() {
-            match token.kind() {
-                SyntaxKind::DOLLAR => dollar_start = Some(token.text_range().start()),
-                SyntaxKind::IDENT if dollar_start.is_some() => {
-                    let range = TextRange::new(dollar_start.unwrap(), token.text_range().end());
-                    return Some((token.text().to_string(), range));
-                }
-                _ => {}
-            }
-        }
-    }
-    None
-}
-
-/// Extract first IDENT → (text, range).
-fn ident_text_range_of(node: &SyntaxNode) -> Option<(String, TextRange)> {
-    node.children_with_tokens()
-        .filter_map(rowan::NodeOrToken::into_token)
-        .find(|t| t.kind() == SyntaxKind::IDENT)
-        .map(|t| (t.text().to_string(), t.text_range()))
-}
-
-/// Extract nth IDENT → (text, range).
-fn nth_ident_text_range_of(node: &SyntaxNode, n: usize) -> Option<(String, TextRange)> {
-    node.children_with_tokens()
-        .filter_map(rowan::NodeOrToken::into_token)
-        .filter(|t| t.kind() == SyntaxKind::IDENT)
-        .nth(n)
-        .map(|t| (t.text().to_string(), t.text_range()))
-}
-
-/// Extract `%name` → (name, PERCENT..IDENT range) from direct children.
-fn percent_ident_name_range(node: &SyntaxNode) -> Option<(String, TextRange)> {
-    let mut pct_start = None;
-    for element in node.children_with_tokens() {
-        if let Some(token) = element.into_token() {
-            match token.kind() {
-                SyntaxKind::PERCENT => pct_start = Some(token.text_range().start()),
-                SyntaxKind::IDENT if pct_start.is_some() => {
-                    let range = TextRange::new(pct_start.unwrap(), token.text_range().end());
-                    return Some((token.text().to_string(), range));
-                }
-                _ => {}
-            }
-        }
-    }
-    None
-}
-
-/// For variables (`$name`) and placeholders (`%name`), strip the sigil
-/// to get just the IDENT range. For functions/mixins, the range is already
-/// just the IDENT.
-fn name_only_range(kind: symbols::SymbolKind, range: TextRange) -> TextRange {
-    match kind {
-        symbols::SymbolKind::Variable | symbols::SymbolKind::Placeholder => {
-            // Skip 1-byte sigil ($ or %)
-            let start = range.start() + sass_parser::text_range::TextSize::from(1u32);
-            if start < range.end() {
-                TextRange::new(start, range.end())
-            } else {
-                range
-            }
-        }
-        symbols::SymbolKind::Function | symbols::SymbolKind::Mixin => range,
-    }
-}
-
-// ── Hover ───────────────────────────────────────────────────────────
-
-fn find_definition_at_offset(
-    symbols: &symbols::FileSymbols,
-    offset: sass_parser::text_range::TextSize,
-) -> Option<&symbols::Symbol> {
-    symbols
-        .definitions
-        .iter()
-        .find(|s| s.selection_range.contains(offset))
-}
-
-fn make_hover(sym: &symbols::Symbol, source_uri: Option<&Uri>, range: Option<Range>) -> Hover {
-    Hover {
-        contents: HoverContents::Markup(MarkupContent {
-            kind: MarkupKind::Markdown,
-            value: format_hover_markdown(sym, source_uri),
-        }),
-        range,
-    }
-}
-
-fn format_hover_markdown(sym: &symbols::Symbol, source_uri: Option<&Uri>) -> String {
-    let signature = match sym.kind {
-        symbols::SymbolKind::Variable => {
-            if let Some(value) = &sym.value {
-                format!("${}: {value}", sym.name)
-            } else {
-                format!("${}", sym.name)
-            }
-        }
-        symbols::SymbolKind::Function => {
-            let params = sym.params.as_deref().unwrap_or("()");
-            format!("@function {}{params}", sym.name)
-        }
-        symbols::SymbolKind::Mixin => {
-            let params = sym.params.as_deref().unwrap_or("");
-            format!("@mixin {}{params}", sym.name)
-        }
-        symbols::SymbolKind::Placeholder => format!("%{}", sym.name),
-    };
-
-    let mut parts = vec![format!("```scss\n{signature}\n```")];
-
-    if let Some(doc) = &sym.doc {
-        parts.push(doc.clone());
-    }
-
-    if let Some(uri) = source_uri {
-        if let Some(module) = builtins::builtin_name_from_uri(uri.as_str()) {
-            let anchor = match sym.kind {
-                symbols::SymbolKind::Variable => format!("%24{}", sym.name),
-                _ => sym.name.clone(),
-            };
-            let url = format!("https://sass-lang.com/documentation/modules/{module}/#{anchor}");
-            parts.push(format!("`sass:{module}` · [docs]({url})"));
-        } else if let Some(path) = uri.to_file_path() {
-            if let Some(name) = path.file_name() {
-                parts.push(format!("Defined in `{}`", name.to_string_lossy()));
-            }
-        }
-    }
-
-    parts.join("\n\n")
-}
-
-// ── Signature help ──────────────────────────────────────────────────
-
-struct CallInfo {
-    namespace: Option<String>,
-    name: String,
-    kind: symbols::SymbolKind,
-    arg_list_start: sass_parser::text_range::TextSize,
-}
-
-fn find_call_at_offset(
-    root: &SyntaxNode,
-    offset: sass_parser::text_range::TextSize,
-) -> Option<CallInfo> {
-    let token = root.token_at_offset(offset).left_biased()?;
-
-    for node in token.parent()?.ancestors() {
-        match node.kind() {
-            SyntaxKind::FUNCTION_CALL => {
-                let arg_list = node.children().find(|c| c.kind() == SyntaxKind::ARG_LIST)?;
-                if !arg_list.text_range().contains(offset) {
-                    continue;
-                }
-
-                // Check if inside a NAMESPACE_REF parent
-                if let Some(ns_ref) = node
-                    .parent()
-                    .filter(|p| p.kind() == SyntaxKind::NAMESPACE_REF)
-                {
-                    let ns_name = ns_ref
-                        .children_with_tokens()
-                        .filter_map(rowan::NodeOrToken::into_token)
-                        .find(|t| t.kind() == SyntaxKind::IDENT)?
-                        .text()
-                        .to_string();
-                    let func_name = ident_text_range_of(&node)?.0;
-                    return Some(CallInfo {
-                        namespace: Some(ns_name),
-                        name: func_name,
-                        kind: symbols::SymbolKind::Function,
-                        arg_list_start: arg_list.text_range().start(),
-                    });
-                }
-
-                let func_name = ident_text_range_of(&node)?.0;
-                return Some(CallInfo {
-                    namespace: None,
-                    name: func_name,
-                    kind: symbols::SymbolKind::Function,
-                    arg_list_start: arg_list.text_range().start(),
-                });
-            }
-            SyntaxKind::INCLUDE_RULE => {
-                let arg_list = node.children().find(|c| c.kind() == SyntaxKind::ARG_LIST)?;
-                if !arg_list.text_range().contains(offset) {
-                    continue;
-                }
-
-                // Check if has a NAMESPACE_REF child
-                if let Some(ns_ref) = node
-                    .children()
-                    .find(|c| c.kind() == SyntaxKind::NAMESPACE_REF)
-                {
-                    let tokens: Vec<_> = ns_ref
-                        .children_with_tokens()
-                        .filter_map(rowan::NodeOrToken::into_token)
-                        .collect();
-                    let ns_name = tokens
-                        .iter()
-                        .find(|t| t.kind() == SyntaxKind::IDENT)?
-                        .text()
-                        .to_string();
-                    let dot_pos = tokens.iter().position(|t| t.kind() == SyntaxKind::DOT)?;
-                    let mixin_name = tokens[dot_pos + 1..]
-                        .iter()
-                        .find(|t| t.kind() == SyntaxKind::IDENT)?
-                        .text()
-                        .to_string();
-                    return Some(CallInfo {
-                        namespace: Some(ns_name),
-                        name: mixin_name,
-                        kind: symbols::SymbolKind::Mixin,
-                        arg_list_start: arg_list.text_range().start(),
-                    });
-                }
-
-                let mixin_name = nth_ident_text_range_of(&node, 1)?.0;
-                return Some(CallInfo {
-                    namespace: None,
-                    name: mixin_name,
-                    kind: symbols::SymbolKind::Mixin,
-                    arg_list_start: arg_list.text_range().start(),
-                });
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
-#[allow(clippy::cast_possible_truncation)]
-fn count_active_parameter(
-    source: &str,
-    call_info: &CallInfo,
-    cursor: sass_parser::text_range::TextSize,
-) -> u32 {
-    let start = u32::from(call_info.arg_list_start) as usize;
-    let cursor_pos = u32::from(cursor) as usize;
-    if cursor_pos <= start {
-        return 0;
-    }
-
-    let slice = &source[start..cursor_pos];
-
-    // Count commas that are not inside nested parens/brackets
-    let mut depth = 0u32;
-    let mut commas = 0u32;
-    for ch in slice.chars() {
-        match ch {
-            '(' | '[' => depth += 1,
-            ')' | ']' => depth = depth.saturating_sub(1),
-            ',' if depth == 1 => commas += 1,
-            _ => {}
-        }
-    }
-    commas
-}
-
-fn build_signature_info(sym: &symbols::Symbol, params_text: &str) -> SignatureInformation {
-    let label = match sym.kind {
-        symbols::SymbolKind::Function => format!("@function {}{params_text}", sym.name),
-        symbols::SymbolKind::Mixin => format!("@mixin {}{params_text}", sym.name),
-        _ => {
-            return SignatureInformation {
-                label: sym.name.clone(),
-                documentation: None,
-                parameters: None,
-                active_parameter: None,
-            };
-        }
-    };
-
-    let parameters = parse_param_labels(&label, params_text);
-
-    let documentation = sym.doc.as_ref().map(|d| {
-        tower_lsp_server::ls_types::Documentation::MarkupContent(MarkupContent {
-            kind: MarkupKind::Markdown,
-            value: d.clone(),
-        })
-    });
-
-    SignatureInformation {
-        label,
-        documentation,
-        parameters: Some(parameters),
-        active_parameter: None,
-    }
-}
-
-#[allow(clippy::cast_possible_truncation)]
-fn parse_param_labels(signature: &str, params_text: &str) -> Vec<ParameterInformation> {
-    // Find the offset of params_text within the signature
-    let Some(params_offset) = signature.find(params_text) else {
-        return Vec::new();
-    };
-
-    // Strip outer parens
-    let inner = params_text
-        .strip_prefix('(')
-        .and_then(|s| s.strip_suffix(')'))
-        .unwrap_or(params_text);
-
-    if inner.is_empty() {
-        return Vec::new();
-    }
-
-    let mut result = Vec::new();
-    // +1 for the opening paren
-    let content_offset = params_offset + 1;
-
-    // Split by commas at depth 0 (handle nested parens in defaults)
-    let mut depth = 0u32;
-    let mut segment_start = 0;
-
-    for (i, ch) in inner.char_indices() {
-        match ch {
-            '(' | '[' => depth += 1,
-            ')' | ']' => depth = depth.saturating_sub(1),
-            ',' if depth == 0 => {
-                let param = inner[segment_start..i].trim();
-                if !param.is_empty() {
-                    let abs_start = content_offset + segment_start;
-                    let abs_end = content_offset + segment_start + param.len();
-                    result.push(ParameterInformation {
-                        label: ParameterLabel::LabelOffsets([abs_start as u32, abs_end as u32]),
-                        documentation: None,
-                    });
-                }
-                segment_start = i + 1;
-                // Skip whitespace after comma
-                for (j, c) in inner[segment_start..].char_indices() {
-                    if c != ' ' {
-                        segment_start += j;
-                        break;
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
-    // Last segment
-    let param = inner[segment_start..].trim();
-    if !param.is_empty() {
-        let abs_start = content_offset + segment_start;
-        let abs_end = content_offset + segment_start + param.len();
-        result.push(ParameterInformation {
-            label: ParameterLabel::LabelOffsets([abs_start as u32, abs_end as u32]),
-            documentation: None,
-        });
-    }
-
-    result
-}
-
-// ── Workspace symbol search ─────────────────────────────────────────
-
-/// Fuzzy-score a symbol name against a query. Returns `None` if no match.
-/// Higher score = better match. Scoring tiers:
-///   - Exact match: 1000
-///   - Prefix match: 500 + (100 × coverage ratio)
-///   - Word-boundary match: 200 + (100 × coverage ratio)
-///   - Subsequence match: 100 × coverage ratio
-#[allow(clippy::cast_possible_truncation)]
-fn fuzzy_score(name: &str, query: &str) -> Option<u32> {
-    if query.is_empty() {
-        return Some(0);
-    }
-    let name_lower = name.to_lowercase();
-    let query_lower = query.to_lowercase();
-
-    // Exact match.
-    if name_lower == query_lower {
-        return Some(1000);
-    }
-
-    // Prefix match.
-    if name_lower.starts_with(&query_lower) {
-        let coverage = (query.len() * 100 / name.len()) as u32;
-        return Some(500 + coverage);
-    }
-
-    // Word-boundary match: query chars align with starts of words (after `-`, `_`, or camelCase).
-    if word_boundary_match(&name_lower, name, &query_lower) {
-        let coverage = (query.len() * 100 / name.len()) as u32;
-        return Some(200 + coverage);
-    }
-
-    // Subsequence match.
-    let mut name_chars = name_lower.chars();
-    for qch in query_lower.chars() {
-        name_chars.find(|&c| c == qch)?;
-    }
-    let coverage = (query.len() * 100 / name.len()) as u32;
-    Some(coverage)
-}
-
-fn word_boundary_match(name_lower: &str, name_original: &str, query_lower: &str) -> bool {
-    let boundaries: Vec<char> = std::iter::once(name_lower.chars().next())
-        .flatten()
-        .chain(
-            name_original
-                .chars()
-                .zip(name_original.chars().skip(1))
-                .filter(|&(prev, cur)| {
-                    prev == '-' || prev == '_' || (prev.is_lowercase() && cur.is_uppercase())
-                })
-                .map(|(_, cur)| cur.to_lowercase().next().unwrap_or(cur)),
-        )
-        .collect();
-
-    let mut bi = boundaries.iter();
-    for qch in query_lower.chars() {
-        if bi.find(|&&c| c == qch).is_none() {
-            return false;
-        }
-    }
-    true
-}
-
 // ── Main ────────────────────────────────────────────────────────────
 
 #[tokio::main]
@@ -2207,8 +966,15 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
+
     use serde_json::Value;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tower_lsp_server::ls_types::{ParameterLabel, Position, Range};
+
+    use crate::convert::byte_to_lsp_pos;
+    use crate::semantic_tokens::{MOD_DECLARATION, TOK_VARIABLE};
+    use crate::signature_help::parse_param_labels;
 
     /// Send a JSON-RPC message with Content-Length framing.
     async fn send_msg(writer: &mut (impl AsyncWriteExt + Unpin), msg: &Value) {
@@ -4359,17 +3125,17 @@ mod tests {
     fn parse_param_labels_offsets() {
         let params = "($a, $b: 1px)";
         let sig = format!("@function f{params}");
-        let result = super::parse_param_labels(&sig, params);
+        let result = parse_param_labels(&sig, params);
         assert_eq!(result.len(), 2);
         // "$a" starts at offset 12 (after "@function f("), ends at 14
-        if let ParameterLabel::LabelOffsets([s, e]) = &result[0].label {
-            assert_eq!(&sig[*s as usize..*e as usize], "$a");
+        if let ParameterLabel::LabelOffsets([s, e]) = result[0].label {
+            assert_eq!(&sig[s as usize..e as usize], "$a");
         } else {
             panic!("expected LabelOffsets");
         }
         // "$b: 1px" starts at 16 (after "$a, "), ends at 23
-        if let ParameterLabel::LabelOffsets([s, e]) = &result[1].label {
-            assert_eq!(&sig[*s as usize..*e as usize], "$b: 1px");
+        if let ParameterLabel::LabelOffsets([s, e]) = result[1].label {
+            assert_eq!(&sig[s as usize..e as usize], "$b: 1px");
         } else {
             panic!("expected LabelOffsets");
         }
@@ -4588,7 +3354,8 @@ mod tests {
 
     #[test]
     fn completion_context_detection() {
-        use super::{CompletionContext, Position, detect_completion_context};
+        use crate::completion::{CompletionContext, detect_completion_context};
+        use tower_lsp_server::ls_types::Position;
 
         //                         0123456789...
         let text = ".a {\n  color: $\n  @include \n  @use \"\n  bor\n}\n";
