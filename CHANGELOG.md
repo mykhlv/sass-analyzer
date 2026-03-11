@@ -45,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Lexer now handles scientific notation in numbers (`1e3`, `2.5e-2`, `1E+3`)
 - Signature help parameter offsets now use UTF-16 code units (fixes highlight for non-ASCII parameter names)
 - `path_to_uri` fallback no longer produces `file:////path` (4 slashes) on Unix
+- Extension now declares `extensionKind: ["workspace"]` for SSH/WSL/Container remote dev
 
 ## 0.1.0 — 2026-03-08
 
