@@ -33,7 +33,6 @@ pub struct ForwardVisibility {
 }
 
 /// A resolved import edge in the module graph.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ImportEdge {
     pub target: Uri,
@@ -48,7 +47,6 @@ pub struct ImportEdge {
 /// The green tree is re-parsed on demand from `source_text`; source text
 /// is reconstructed on demand from the green tree via `green.text()`.
 /// Invariant: at least one of `green` or `source_text` is always `Some`.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ModuleInfo {
     pub symbols: Arc<FileSymbols>,
@@ -388,6 +386,22 @@ impl ModuleGraph {
 
     /// Resolve a qualified name (`namespace.$name` or `namespace.func()`)
     /// from a given source file. Returns the target URI and matching Symbol.
+    /// Resolve a reference — dispatches to `resolve_qualified` or `resolve_unqualified`
+    /// depending on whether a namespace is present.
+    pub fn resolve_reference(
+        &self,
+        from: &Uri,
+        namespace: Option<&str>,
+        name: &str,
+        kind: symbols::SymbolKind,
+    ) -> Option<(Uri, symbols::Symbol)> {
+        if let Some(ns) = namespace {
+            self.resolve_qualified(from, ns, name, kind)
+        } else {
+            self.resolve_unqualified(from, name, kind)
+        }
+    }
+
     pub fn resolve_qualified(
         &self,
         from: &Uri,
@@ -2101,5 +2115,134 @@ mod tests {
         // A path that uses `..` to escape should be blocked
         let escaped = tmp.join("subdir").join("..").join("..").join("etc");
         assert!(!graph.is_path_allowed(&escaped));
+    }
+
+    // ── Circular import handling ──────────────────────────────────────
+
+    #[test]
+    fn circular_use_does_not_loop() {
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
+        let a: Uri = "file:///a.scss".parse().unwrap();
+        let b: Uri = "file:///b.scss".parse().unwrap();
+
+        graph.files.insert(a.clone(), make_info("$from_a: red;"));
+        graph.files.insert(b.clone(), make_info("$from_b: blue;"));
+
+        // a → b (star import)
+        graph.edges.insert(
+            a.clone(),
+            vec![ImportEdge {
+                target: b.clone(),
+                namespace: Namespace::Star,
+                kind: ImportKind::Use,
+                visibility: ForwardVisibility::default(),
+            }],
+        );
+        // b → a (star import — circular)
+        graph.edges.insert(
+            b.clone(),
+            vec![ImportEdge {
+                target: a.clone(),
+                namespace: Namespace::Star,
+                kind: ImportKind::Use,
+                visibility: ForwardVisibility::default(),
+            }],
+        );
+
+        // Should terminate, not infinite loop
+        let r = graph.resolve_unqualified(&a, "from_b", symbols::SymbolKind::Variable);
+        assert!(r.is_some());
+        assert_eq!(r.unwrap().1.name, "from_b");
+
+        let r = graph.resolve_unqualified(&b, "from_a", symbols::SymbolKind::Variable);
+        assert!(r.is_some());
+        assert_eq!(r.unwrap().1.name, "from_a");
+    }
+
+    #[test]
+    fn circular_forward_does_not_loop() {
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
+        let a: Uri = "file:///a.scss".parse().unwrap();
+        let b: Uri = "file:///b.scss".parse().unwrap();
+        let c: Uri = "file:///c.scss".parse().unwrap();
+
+        graph.files.insert(a.clone(), make_info("$a_var: 1;"));
+        graph.files.insert(b.clone(), make_info(""));
+        graph.files.insert(c.clone(), make_info("$c_var: 3;"));
+
+        // a → b (forward), b → c (forward), c → a (forward — cycle)
+        graph.edges.insert(
+            a.clone(),
+            vec![ImportEdge {
+                target: b.clone(),
+                namespace: Namespace::Star,
+                kind: ImportKind::Forward,
+                visibility: ForwardVisibility::default(),
+            }],
+        );
+        graph.edges.insert(
+            b.clone(),
+            vec![ImportEdge {
+                target: c.clone(),
+                namespace: Namespace::Star,
+                kind: ImportKind::Forward,
+                visibility: ForwardVisibility::default(),
+            }],
+        );
+        graph.edges.insert(
+            c.clone(),
+            vec![ImportEdge {
+                target: a.clone(),
+                namespace: Namespace::Star,
+                kind: ImportKind::Forward,
+                visibility: ForwardVisibility::default(),
+            }],
+        );
+
+        // Consumer uses a as *
+        let consumer: Uri = "file:///consumer.scss".parse().unwrap();
+        graph.files.insert(consumer.clone(), make_info(""));
+        graph.edges.insert(
+            consumer.clone(),
+            vec![ImportEdge {
+                target: a.clone(),
+                namespace: Namespace::Star,
+                kind: ImportKind::Use,
+                visibility: ForwardVisibility::default(),
+            }],
+        );
+
+        // Should resolve through forward chain without infinite loop
+        let r = graph.resolve_unqualified(&consumer, "c_var", symbols::SymbolKind::Variable);
+        assert!(r.is_some());
+        assert_eq!(r.unwrap().1.name, "c_var");
+
+        // visible_symbols should also terminate
+        let visible = graph.visible_symbols(&consumer);
+        let names: Vec<&str> = visible.iter().map(|(_, _, s)| s.name.as_str()).collect();
+        assert!(names.contains(&"a_var"));
+        assert!(names.contains(&"c_var"));
+    }
+
+    #[test]
+    fn self_import_does_not_loop() {
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
+        let a: Uri = "file:///a.scss".parse().unwrap();
+
+        graph.files.insert(a.clone(), make_info("$x: 1;"));
+
+        // a imports itself
+        graph.edges.insert(
+            a.clone(),
+            vec![ImportEdge {
+                target: a.clone(),
+                namespace: Namespace::Star,
+                kind: ImportKind::Use,
+                visibility: ForwardVisibility::default(),
+            }],
+        );
+
+        let r = graph.resolve_unqualified(&a, "x", symbols::SymbolKind::Variable);
+        assert!(r.is_some());
     }
 }

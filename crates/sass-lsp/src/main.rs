@@ -78,7 +78,6 @@ pub(crate) struct IncrementalEdit {
 ///
 /// Read-only handlers (hover, completions, goto-def) read from `documents` and thus
 /// operate on a slightly stale but internally consistent snapshot.
-#[allow(dead_code)]
 struct Backend {
     client: Client,
     /// Parsed state per file, updated asynchronously by the worker after debounce.
@@ -98,10 +97,8 @@ pub(crate) struct DocumentState {
     pub(crate) version: i32,
     pub(crate) text: String,
     pub(crate) green: rowan::GreenNode,
-    #[allow(dead_code)]
     pub(crate) errors: Vec<(String, TextRange)>,
     pub(crate) line_index: sass_parser::line_index::LineIndex,
-    #[allow(dead_code)]
     pub(crate) symbols: Arc<symbols::FileSymbols>,
 }
 
@@ -546,13 +543,12 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        let resolved = if let Some(namespace) = &ref_info.namespace {
-            self.module_graph
-                .resolve_qualified(&uri, namespace, &ref_info.name, ref_info.kind)
-        } else {
-            self.module_graph
-                .resolve_unqualified(&uri, &ref_info.name, ref_info.kind)
-        };
+        let resolved = self.module_graph.resolve_reference(
+            &uri,
+            ref_info.namespace.as_deref(),
+            &ref_info.name,
+            ref_info.kind,
+        );
 
         let Some((target_uri, symbol)) = resolved else {
             return Ok(None);
@@ -733,13 +729,12 @@ impl LanguageServer for Backend {
 
         // 1. Try reference at cursor → resolve to definition
         if let Some(ref_info) = find_reference_at_offset(&root, offset) {
-            let resolved = if let Some(namespace) = &ref_info.namespace {
-                self.module_graph
-                    .resolve_qualified(&uri, namespace, &ref_info.name, ref_info.kind)
-            } else {
-                self.module_graph
-                    .resolve_unqualified(&uri, &ref_info.name, ref_info.kind)
-            };
+            let resolved = self.module_graph.resolve_reference(
+                &uri,
+                ref_info.namespace.as_deref(),
+                &ref_info.name,
+                ref_info.kind,
+            );
 
             if let Some((target_uri, symbol)) = resolved {
                 let source = if target_uri == uri {
@@ -782,25 +777,23 @@ impl LanguageServer for Backend {
 
         let root = SyntaxNode::new_root(green);
 
-        let (target_uri, target_name, target_kind) = if let Some(ref_info) =
-            find_reference_at_offset(&root, offset)
-        {
-            let resolved = if let Some(namespace) = &ref_info.namespace {
-                self.module_graph
-                    .resolve_qualified(&uri, namespace, &ref_info.name, ref_info.kind)
+        let (target_uri, target_name, target_kind) =
+            if let Some(ref_info) = find_reference_at_offset(&root, offset) {
+                let resolved = self.module_graph.resolve_reference(
+                    &uri,
+                    ref_info.namespace.as_deref(),
+                    &ref_info.name,
+                    ref_info.kind,
+                );
+                let Some((target_uri, sym)) = resolved else {
+                    return Ok(None);
+                };
+                (target_uri, sym.name, sym.kind)
+            } else if let Some(sym) = find_definition_at_offset(&file_symbols, offset) {
+                (uri.clone(), sym.name.clone(), sym.kind)
             } else {
-                self.module_graph
-                    .resolve_unqualified(&uri, &ref_info.name, ref_info.kind)
-            };
-            let Some((target_uri, sym)) = resolved else {
                 return Ok(None);
             };
-            (target_uri, sym.name, sym.kind)
-        } else if let Some(sym) = find_definition_at_offset(&file_symbols, offset) {
-            (uri.clone(), sym.name.clone(), sym.kind)
-        } else {
-            return Ok(None);
-        };
 
         let refs = self.module_graph.find_all_references(
             &target_uri,
@@ -849,13 +842,12 @@ impl LanguageServer for Backend {
 
         // Check if cursor is on a reference or definition
         if let Some(ref_info) = find_reference_at_offset(&root, offset) {
-            let resolved = if let Some(namespace) = &ref_info.namespace {
-                self.module_graph
-                    .resolve_qualified(&uri, namespace, &ref_info.name, ref_info.kind)
-            } else {
-                self.module_graph
-                    .resolve_unqualified(&uri, &ref_info.name, ref_info.kind)
-            };
+            let resolved = self.module_graph.resolve_reference(
+                &uri,
+                ref_info.namespace.as_deref(),
+                &ref_info.name,
+                ref_info.kind,
+            );
             let Some((_, sym)) = resolved else {
                 return Ok(None);
             };
@@ -906,25 +898,23 @@ impl LanguageServer for Backend {
 
         let root = SyntaxNode::new_root(green);
 
-        let (target_uri, target_name, target_kind) = if let Some(ref_info) =
-            find_reference_at_offset(&root, offset)
-        {
-            let resolved = if let Some(namespace) = &ref_info.namespace {
-                self.module_graph
-                    .resolve_qualified(&uri, namespace, &ref_info.name, ref_info.kind)
+        let (target_uri, target_name, target_kind) =
+            if let Some(ref_info) = find_reference_at_offset(&root, offset) {
+                let resolved = self.module_graph.resolve_reference(
+                    &uri,
+                    ref_info.namespace.as_deref(),
+                    &ref_info.name,
+                    ref_info.kind,
+                );
+                let Some((target_uri, sym)) = resolved else {
+                    return Ok(None);
+                };
+                (target_uri, sym.name, sym.kind)
+            } else if let Some(sym) = find_definition_at_offset(&file_symbols, offset) {
+                (uri.clone(), sym.name.clone(), sym.kind)
             } else {
-                self.module_graph
-                    .resolve_unqualified(&uri, &ref_info.name, ref_info.kind)
-            };
-            let Some((target_uri, sym)) = resolved else {
                 return Ok(None);
             };
-            (target_uri, sym.name, sym.kind)
-        } else if let Some(sym) = find_definition_at_offset(&file_symbols, offset) {
-            (uri.clone(), sym.name.clone(), sym.kind)
-        } else {
-            return Ok(None);
-        };
 
         // Conflict detection: check if new_name already exists in the target file
         if self
@@ -1024,13 +1014,12 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        let resolved = if let Some(namespace) = &call_info.namespace {
-            self.module_graph
-                .resolve_qualified(&uri, namespace, &call_info.name, call_info.kind)
-        } else {
-            self.module_graph
-                .resolve_unqualified(&uri, &call_info.name, call_info.kind)
-        };
+        let resolved = self.module_graph.resolve_reference(
+            &uri,
+            call_info.namespace.as_deref(),
+            &call_info.name,
+            call_info.kind,
+        );
 
         let Some((_target_uri, symbol)) = resolved else {
             return Ok(None);
@@ -4156,5 +4145,141 @@ mod tests {
         let result = resp["result"].as_array().unwrap();
         assert_eq!(result.len(), 1, "should still have the original symbol");
         assert_eq!(result[0]["name"], "open");
+    }
+
+    // ── Empty file handling ───────────────────────────────────────────
+
+    #[tokio::test]
+    async fn hover_on_empty_file() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///empty.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": ""
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
+
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 900,
+                "method": "textDocument/hover",
+                "params": {
+                    "textDocument": { "uri": "file:///empty.scss" },
+                    "position": { "line": 0, "character": 0 }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader, &mut writer).await;
+        assert!(
+            resp["result"].is_null(),
+            "hover on empty file should be null"
+        );
+    }
+
+    #[tokio::test]
+    async fn completion_on_empty_file() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///empty_comp.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": ""
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
+
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 901,
+                "method": "textDocument/completion",
+                "params": {
+                    "textDocument": { "uri": "file:///empty_comp.scss" },
+                    "position": { "line": 0, "character": 0 }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader, &mut writer).await;
+        // Should return either null or an empty/valid list, not crash
+        let result = &resp["result"];
+        assert!(
+            result.is_null() || result.is_array() || result.is_object(),
+            "completion on empty file should not crash"
+        );
+    }
+
+    #[tokio::test]
+    async fn semantic_tokens_on_empty_file() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///empty_tokens.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": ""
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
+
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 902,
+                "method": "textDocument/semanticTokens/full",
+                "params": {
+                    "textDocument": { "uri": "file:///empty_tokens.scss" }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader, &mut writer).await;
+        let result = &resp["result"];
+        if !result.is_null() {
+            let data = result["data"].as_array().unwrap();
+            assert!(data.is_empty(), "empty file should have no semantic tokens");
+        }
     }
 }

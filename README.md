@@ -2,7 +2,7 @@
 
 A hand-written recursive descent SCSS parser in Rust, built for IDE tooling.
 
-**62+ MB/s** parse throughput | **99.11%** sass-spec compatibility | **687 tests** | **0 panics** on 668 real-world files
+**62+ MB/s** parse throughput | **99.11%** sass-spec compatibility | **693 tests** | **0 panics** on 668 real-world files
 
 ## Why
 
