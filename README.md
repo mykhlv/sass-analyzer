@@ -2,7 +2,7 @@
 
 A hand-written recursive descent SCSS parser in Rust, built for IDE tooling.
 
-**62+ MB/s** parse throughput | **99.11%** sass-spec compatibility | **684 tests** | **0 panics** on 668 real-world files
+**62+ MB/s** parse throughput | **99.11%** sass-spec compatibility | **687 tests** | **0 panics** on 668 real-world files
 
 ## Why
 
@@ -64,6 +64,7 @@ Install from the VS Code Marketplace or build from source (see `editors/code/`).
 - Signature help for functions and `@include`
 - Document/workspace symbols
 - Document links for `@use`, `@forward`, `@import`
+- File watcher — automatically re-indexes when SCSS/Sass files are created, changed, or deleted outside the editor
 
 ## Performance
 
@@ -186,7 +187,7 @@ sass-analyzer/
 │   │   │   ├── resolver.rs       # Module path resolution
 │   │   │   ├── syntax_kind.rs    # 129 token/node kinds
 │   │   │   └── token_set.rs      # [u64; 4] bit set
-│   │   ├── tests/            # 554 tests (expect-test snapshots)
+│   │   ├── tests/            # 547 tests (expect-test snapshots)
 │   │   ├── benches/          # divan benchmarks
 │   │   └── fuzz/             # 4 libfuzzer targets
 │   ├── sass-lsp/             # LSP server (tower-lsp-server)
