@@ -1,14 +1,23 @@
+use std::collections::HashMap;
+
+use dashmap::DashMap;
 use sass_parser::syntax::SyntaxNode;
 use sass_parser::syntax_kind::SyntaxKind;
 use sass_parser::text_range::TextRange;
-use tower_lsp_server::ls_types::{Hover, HoverContents, MarkupContent, MarkupKind, Range, Uri};
-
-use crate::ast_helpers::{
-    dollar_ident_name_range, ident_text_range_of, nth_ident_text_range_of, percent_ident_name_range,
+use tower_lsp_server::ls_types::{
+    DocumentLink, DocumentLinkParams, GotoDefinitionParams, GotoDefinitionResponse, Location,
+    PrepareRenameResponse, ReferenceParams, RenameParams, TextDocumentPositionParams, TextEdit,
+    Uri, WorkspaceEdit,
 };
-use crate::builtins;
-use crate::convert::text_range_to_lsp;
+
+use crate::DocumentState;
+use crate::ast_helpers::{
+    dollar_ident_name_range, ident_text_range_of, name_only_range, nth_ident_text_range_of,
+    percent_ident_name_range,
+};
+use crate::convert::{lsp_position_to_offset, text_range_to_lsp};
 use crate::symbols;
+use crate::workspace::ModuleGraph;
 
 pub(crate) struct ReferenceInfo {
     pub(crate) namespace: Option<String>,
@@ -151,8 +160,6 @@ pub(crate) fn extract_namespace_ref_info(node: &SyntaxNode) -> Option<ReferenceI
     })
 }
 
-// ── Hover ───────────────────────────────────────────────────────────
-
 pub(crate) fn find_definition_at_offset(
     symbols: &symbols::FileSymbols,
     offset: sass_parser::text_range::TextSize,
@@ -163,62 +170,309 @@ pub(crate) fn find_definition_at_offset(
         .find(|s| s.selection_range.contains(offset))
 }
 
-pub(crate) fn make_hover(
-    sym: &symbols::Symbol,
-    source_uri: Option<&Uri>,
-    range: Option<Range>,
-) -> Hover {
-    Hover {
-        contents: HoverContents::Markup(MarkupContent {
-            kind: MarkupKind::Markdown,
-            value: format_hover_markdown(sym, source_uri),
-        }),
-        range,
-    }
-}
+// ── Handlers ────────────────────────────────────────────────────────
 
-pub(crate) fn format_hover_markdown(sym: &symbols::Symbol, source_uri: Option<&Uri>) -> String {
-    let signature = match sym.kind {
-        symbols::SymbolKind::Variable => {
-            if let Some(value) = &sym.value {
-                format!("${}: {value}", sym.name)
-            } else {
-                format!("${}", sym.name)
-            }
-        }
-        symbols::SymbolKind::Function => {
-            let params = sym.params.as_deref().unwrap_or("()");
-            format!("@function {}{params}", sym.name)
-        }
-        symbols::SymbolKind::Mixin => {
-            let params = sym.params.as_deref().unwrap_or("");
-            format!("@mixin {}{params}", sym.name)
-        }
-        symbols::SymbolKind::Placeholder => format!("%{}", sym.name),
+pub(crate) fn handle_goto_definition(
+    documents: &DashMap<Uri, DocumentState>,
+    module_graph: &ModuleGraph,
+    params: GotoDefinitionParams,
+) -> Option<GotoDefinitionResponse> {
+    let uri = params.text_document_position_params.text_document.uri;
+    let position = params.text_document_position_params.position;
+
+    let (green, offset) = {
+        let doc = documents.get(&uri)?;
+        let offset = lsp_position_to_offset(&doc.text, &doc.line_index, position)?;
+        (doc.green.clone(), offset)
     };
 
-    let mut parts = vec![format!("```scss\n{signature}\n```")];
+    let root = SyntaxNode::new_root(green);
+    let ref_info = find_reference_at_offset(&root, offset)?;
 
-    if let Some(doc) = &sym.doc {
-        parts.push(doc.clone());
-    }
+    let resolved = module_graph.resolve_reference(
+        &uri,
+        ref_info.namespace.as_deref(),
+        &ref_info.name,
+        ref_info.kind,
+    );
 
-    if let Some(uri) = source_uri {
-        if let Some(module) = builtins::builtin_name_from_uri(uri.as_str()) {
-            let anchor = match sym.kind {
-                symbols::SymbolKind::Variable => format!("%24{}", sym.name),
-                _ => sym.name.clone(),
-            };
-            let url = format!("https://sass-lang.com/documentation/modules/{module}/#{anchor}");
-            parts.push(format!("`sass:{module}` · [docs]({url})"));
-        } else if let Some(path) = uri.to_file_path() {
-            if let Some(name) = path.file_name() {
-                parts.push(format!("Defined in `{}`", name.to_string_lossy()));
-            }
+    let (target_uri, symbol) = resolved?;
+
+    let target_line_index = module_graph.line_index(&target_uri)?;
+    let target_source = module_graph.source_text(&target_uri)?;
+
+    let range = text_range_to_lsp(symbol.selection_range, &target_line_index, &target_source);
+    Some(GotoDefinitionResponse::Scalar(Location {
+        uri: target_uri,
+        range,
+    }))
+}
+
+pub(crate) fn handle_document_link(
+    documents: &DashMap<Uri, DocumentState>,
+    module_graph: &ModuleGraph,
+    params: DocumentLinkParams,
+) -> Option<Vec<DocumentLink>> {
+    let uri = params.text_document.uri;
+    let doc = documents.get(&uri)?;
+
+    let root = SyntaxNode::new_root(doc.green.clone());
+    let line_index = &doc.line_index;
+    let mut links = Vec::new();
+
+    for node in root.descendants() {
+        let kind = node.kind();
+        if kind != SyntaxKind::USE_RULE
+            && kind != SyntaxKind::FORWARD_RULE
+            && kind != SyntaxKind::IMPORT_RULE
+        {
+            continue;
         }
+
+        let Some(string_token) = node
+            .children_with_tokens()
+            .filter_map(rowan::NodeOrToken::into_token)
+            .find(|t| t.kind() == SyntaxKind::QUOTED_STRING)
+        else {
+            continue;
+        };
+
+        let text = string_token.text();
+        if text.len() < 2 {
+            continue;
+        }
+        let spec = &text[1..text.len() - 1];
+
+        let Some(target_uri) = module_graph.resolve_import(&uri, spec) else {
+            continue;
+        };
+
+        let range = text_range_to_lsp(string_token.text_range(), line_index, &doc.text);
+        links.push(DocumentLink {
+            range,
+            target: Some(target_uri),
+            tooltip: Some(spec.to_owned()),
+            data: None,
+        });
     }
 
-    parts.join("\n\n")
+    if links.is_empty() { None } else { Some(links) }
+}
+
+pub(crate) fn handle_references(
+    documents: &DashMap<Uri, DocumentState>,
+    module_graph: &ModuleGraph,
+    params: ReferenceParams,
+) -> Option<Vec<Location>> {
+    let uri = params.text_document_position.text_document.uri;
+    let position = params.text_document_position.position;
+
+    let (green, offset, file_symbols) = {
+        let doc = documents.get(&uri)?;
+        let offset = lsp_position_to_offset(&doc.text, &doc.line_index, position)?;
+        (doc.green.clone(), offset, doc.symbols.clone())
+    };
+
+    let root = SyntaxNode::new_root(green);
+
+    let (target_uri, target_name, target_kind) =
+        if let Some(ref_info) = find_reference_at_offset(&root, offset) {
+            let resolved = module_graph.resolve_reference(
+                &uri,
+                ref_info.namespace.as_deref(),
+                &ref_info.name,
+                ref_info.kind,
+            );
+            let (target_uri, sym) = resolved?;
+            (target_uri, sym.name, sym.kind)
+        } else if let Some(sym) = find_definition_at_offset(&file_symbols, offset) {
+            (uri.clone(), sym.name.clone(), sym.kind)
+        } else {
+            return None;
+        };
+
+    let refs = module_graph.find_all_references(
+        &target_uri,
+        &target_name,
+        target_kind,
+        params.context.include_declaration,
+    );
+
+    if refs.is_empty() {
+        return None;
+    }
+
+    let locations: Vec<Location> = refs
+        .into_iter()
+        .filter_map(|(ref_uri, range)| {
+            let li = module_graph.line_index(&ref_uri)?;
+            let src = module_graph.source_text(&ref_uri)?;
+            Some(Location {
+                uri: ref_uri,
+                range: text_range_to_lsp(range, &li, &src),
+            })
+        })
+        .collect();
+
+    Some(locations)
+}
+
+pub(crate) fn handle_prepare_rename(
+    documents: &DashMap<Uri, DocumentState>,
+    module_graph: &ModuleGraph,
+    params: TextDocumentPositionParams,
+) -> Option<PrepareRenameResponse> {
+    let uri = params.text_document.uri;
+    let position = params.position;
+
+    let (green, offset, file_symbols) = {
+        let doc = documents.get(&uri)?;
+        let offset = lsp_position_to_offset(&doc.text, &doc.line_index, position)?;
+        (doc.green.clone(), offset, doc.symbols.clone())
+    };
+
+    let root = SyntaxNode::new_root(green);
+
+    // Check if cursor is on a reference or definition
+    if let Some(ref_info) = find_reference_at_offset(&root, offset) {
+        let resolved = module_graph.resolve_reference(
+            &uri,
+            ref_info.namespace.as_deref(),
+            &ref_info.name,
+            ref_info.kind,
+        );
+        let (_, sym) = resolved?;
+        let li = module_graph.line_index(&uri)?;
+        let src = module_graph.source_text(&uri)?;
+        let nr = name_only_range(ref_info.kind, ref_info.range);
+        return Some(PrepareRenameResponse::RangeWithPlaceholder {
+            range: text_range_to_lsp(nr, &li, &src),
+            placeholder: sym.name,
+        });
+    }
+
+    if let Some(sym) = find_definition_at_offset(&file_symbols, offset) {
+        let li = module_graph.line_index(&uri)?;
+        let src = module_graph.source_text(&uri)?;
+        let nr = name_only_range(sym.kind, sym.selection_range);
+        return Some(PrepareRenameResponse::RangeWithPlaceholder {
+            range: text_range_to_lsp(nr, &li, &src),
+            placeholder: sym.name.clone(),
+        });
+    }
+
+    None
+}
+
+pub(crate) fn handle_rename(
+    documents: &DashMap<Uri, DocumentState>,
+    module_graph: &ModuleGraph,
+    params: RenameParams,
+) -> tower_lsp_server::jsonrpc::Result<Option<WorkspaceEdit>> {
+    let uri = params.text_document_position.text_document.uri;
+    let position = params.text_document_position.position;
+    let new_name = params.new_name;
+
+    let (green, offset, file_symbols) = {
+        let Some(doc) = documents.get(&uri) else {
+            return Ok(None);
+        };
+        let Some(offset) = lsp_position_to_offset(&doc.text, &doc.line_index, position) else {
+            return Ok(None);
+        };
+        (doc.green.clone(), offset, doc.symbols.clone())
+    };
+
+    let root = SyntaxNode::new_root(green);
+
+    let (target_uri, target_name, target_kind) =
+        if let Some(ref_info) = find_reference_at_offset(&root, offset) {
+            let resolved = module_graph.resolve_reference(
+                &uri,
+                ref_info.namespace.as_deref(),
+                &ref_info.name,
+                ref_info.kind,
+            );
+            let Some((target_uri, sym)) = resolved else {
+                return Ok(None);
+            };
+            (target_uri, sym.name, sym.kind)
+        } else if let Some(sym) = find_definition_at_offset(&file_symbols, offset) {
+            (uri.clone(), sym.name.clone(), sym.kind)
+        } else {
+            return Ok(None);
+        };
+
+    // Conflict detection: check if new_name already exists in the target file
+    if module_graph.check_name_conflict(&target_uri, &new_name, target_kind) {
+        let kind_label = match target_kind {
+            symbols::SymbolKind::Variable => "variable",
+            symbols::SymbolKind::Function => "function",
+            symbols::SymbolKind::Mixin => "mixin",
+            symbols::SymbolKind::Placeholder => "placeholder",
+        };
+        let sigil = if target_kind == symbols::SymbolKind::Variable {
+            "$"
+        } else if target_kind == symbols::SymbolKind::Placeholder {
+            "%"
+        } else {
+            ""
+        };
+        return Err(tower_lsp_server::jsonrpc::Error {
+            code: tower_lsp_server::jsonrpc::ErrorCode::InvalidParams,
+            message: format!("A {kind_label} '{sigil}{new_name}' already exists in this scope")
+                .into(),
+            data: None,
+        });
+    }
+
+    // Find all references + declaration
+    let refs = module_graph.find_all_references(
+        &target_uri,
+        &target_name,
+        target_kind,
+        true, // always include declaration for rename
+    );
+
+    if refs.is_empty() {
+        return Ok(None);
+    }
+
+    let mut changes: HashMap<Uri, Vec<TextEdit>> = HashMap::new();
+    for (ref_uri, range) in refs {
+        let Some(li) = module_graph.line_index(&ref_uri) else {
+            continue;
+        };
+        let Some(src) = module_graph.source_text(&ref_uri) else {
+            continue;
+        };
+        let edit_range = name_only_range(target_kind, range);
+        changes.entry(ref_uri).or_default().push(TextEdit {
+            range: text_range_to_lsp(edit_range, &li, &src),
+            new_text: new_name.clone(),
+        });
+    }
+
+    // Update @forward show/hide clauses that mention the old name
+    let forward_refs =
+        module_graph.find_forward_show_hide_references(&target_uri, &target_name, target_kind);
+    for (fwd_uri, range) in forward_refs {
+        let Some(li) = module_graph.line_index(&fwd_uri) else {
+            continue;
+        };
+        let Some(src) = module_graph.source_text(&fwd_uri) else {
+            continue;
+        };
+        changes.entry(fwd_uri).or_default().push(TextEdit {
+            range: text_range_to_lsp(range, &li, &src),
+            new_text: new_name.clone(),
+        });
+    }
+
+    Ok(Some(WorkspaceEdit {
+        changes: Some(changes),
+        ..WorkspaceEdit::default()
+    }))
 }
 
 #[allow(deprecated)]
