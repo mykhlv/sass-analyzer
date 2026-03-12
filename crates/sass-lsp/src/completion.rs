@@ -1,6 +1,15 @@
-use tower_lsp_server::ls_types::{CompletionItem, CompletionItemKind, MarkupContent, MarkupKind};
+use std::sync::Arc;
 
+use dashmap::DashMap;
+use tower_lsp_server::ls_types::{
+    CompletionItem, CompletionItemKind, CompletionParams, CompletionResponse, MarkupContent,
+    MarkupKind, Uri,
+};
+
+use crate::DocumentState;
+use crate::css_properties;
 use crate::symbols;
+use crate::workspace::ModuleGraph;
 
 // ── Completion context detection ─────────────────────────────────
 
@@ -198,6 +207,95 @@ pub(crate) fn symbol_to_completion_item(
         documentation,
         ..CompletionItem::default()
     }
+}
+
+// ── Handler ─────────────────────────────────────────────────────────
+
+pub(crate) async fn handle(
+    documents: &DashMap<Uri, DocumentState>,
+    module_graph: &Arc<ModuleGraph>,
+    params: CompletionParams,
+) -> tower_lsp_server::jsonrpc::Result<Option<CompletionResponse>> {
+    let uri = params.text_document_position.text_document.uri;
+    let position = params.text_document_position.position;
+
+    let cursor_line = {
+        let Some(doc) = documents.get(&uri) else {
+            return Ok(None);
+        };
+        let line_idx = position.line as usize;
+        match doc.text.lines().nth(line_idx) {
+            Some(line) => line.to_owned(),
+            None => return Ok(None),
+        }
+    };
+
+    let ctx = detect_completion_context(&cursor_line, position.character);
+
+    match ctx {
+        CompletionContext::UseModulePath(partial) => {
+            let graph = Arc::clone(module_graph);
+            let uri_clone = uri.clone();
+            let items =
+                tokio::task::spawn_blocking(move || graph.complete_use_paths(&uri_clone, &partial))
+                    .await
+                    .unwrap_or_default();
+            if items.is_empty() {
+                return Ok(None);
+            }
+            return Ok(Some(CompletionResponse::Array(items)));
+        }
+        CompletionContext::PropertyName(partial) => {
+            let mut scored: Vec<(u32, &str)> = css_properties::CSS_PROPERTIES
+                .iter()
+                .filter_map(|p| {
+                    let score = fuzzy_score(p, &partial)?;
+                    Some((score, *p))
+                })
+                .collect();
+            scored.sort_by(|a, b| b.0.cmp(&a.0));
+            let items: Vec<CompletionItem> = scored
+                .into_iter()
+                .map(|(score, p)| CompletionItem {
+                    label: p.to_owned(),
+                    kind: Some(CompletionItemKind::PROPERTY),
+                    sort_text: Some(format!("0_{:04}_{p}", 1000 - score)),
+                    ..CompletionItem::default()
+                })
+                .collect();
+            if items.is_empty() {
+                return Ok(None);
+            }
+            return Ok(Some(CompletionResponse::Array(items)));
+        }
+        _ => {}
+    }
+
+    let visible = module_graph.visible_symbols(&uri);
+    if visible.is_empty() {
+        return Ok(None);
+    }
+
+    let items: Vec<CompletionItem> = visible
+        .into_iter()
+        .filter(|(prefix, _, sym)| match &ctx {
+            CompletionContext::Variable => sym.kind == symbols::SymbolKind::Variable,
+            CompletionContext::IncludeMixin => sym.kind == symbols::SymbolKind::Mixin,
+            CompletionContext::Namespace(ns) => prefix.as_ref().is_some_and(|p| p == ns),
+            CompletionContext::Extend => sym.kind == symbols::SymbolKind::Placeholder,
+            CompletionContext::General | CompletionContext::PropertyValue => true,
+            CompletionContext::PropertyName(_) | CompletionContext::UseModulePath(_) => false,
+        })
+        .map(|(prefix, sym_uri, sym)| {
+            let is_builtin = crate::builtins::is_builtin_uri(sym_uri.as_str());
+            symbol_to_completion_item(prefix.as_deref(), &sym, is_builtin)
+        })
+        .collect();
+
+    if items.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(CompletionResponse::Array(items)))
 }
 
 // ── Workspace symbol search ─────────────────────────────────────────
