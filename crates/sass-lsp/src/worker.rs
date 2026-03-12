@@ -102,6 +102,37 @@ pub(crate) async fn run_worker(
                         // go-to-definition, which would destroy indexed dependencies.
                         client.publish_diagnostics(uri, vec![], None).await;
                     }
+                    Task::ExternalChange { uri, text } => {
+                        let Some((green, _errors)) = parse_document(&text) else {
+                            continue;
+                        };
+                        let line_index = LineIndex::new(&text);
+                        let file_symbols = {
+                            let root = SyntaxNode::new_root(green.clone());
+                            Arc::new(symbols::collect_symbols(&root))
+                        };
+
+                        module_graph.index_file(
+                            &uri,
+                            green,
+                            file_symbols,
+                            line_index,
+                            text,
+                        );
+
+                        // Re-publish diagnostics for open files that import
+                        // the changed file, since their cross-file references
+                        // may now resolve differently.
+                        refresh_dependents(
+                            &module_graph, &documents, &client, &uri,
+                        ).await;
+                    }
+                    Task::ExternalDelete { uri } => {
+                        module_graph.remove_file(&uri);
+                        refresh_dependents(
+                            &module_graph, &documents, &client, &uri,
+                        ).await;
+                    }
                 }
             }
             () = &mut sleep, if has_pending => {
@@ -160,4 +191,25 @@ pub(crate) async fn run_worker(
             }
         }
     }
+}
+
+/// Re-publish diagnostics for open files that depend on a changed/deleted file.
+async fn refresh_dependents(
+    module_graph: &workspace::ModuleGraph,
+    documents: &DashMap<Uri, DocumentState>,
+    client: &Client,
+    changed_uri: &Uri,
+) {
+    for dep_uri in module_graph.dependents_of(changed_uri) {
+        if let Some(doc) = documents.get(&dep_uri) {
+            let diagnostics = errors_to_diagnostics(&doc.errors, &doc.line_index, &doc.text);
+            client
+                .publish_diagnostics(dep_uri.clone(), diagnostics, Some(doc.version))
+                .await;
+        }
+    }
+    let c = client.clone();
+    tokio::spawn(async move {
+        let _ = c.semantic_tokens_refresh().await;
+    });
 }

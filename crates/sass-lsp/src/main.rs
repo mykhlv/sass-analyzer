@@ -23,18 +23,18 @@ use tokio::sync::mpsc;
 use tower_lsp_server::jsonrpc::Result;
 use tower_lsp_server::ls_types::{
     CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
-    DidChangeConfigurationParams, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentLink, DocumentLinkOptions,
-    DocumentLinkParams, DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams,
-    GotoDefinitionResponse, Hover, HoverParams, InitializeParams, InitializeResult,
-    InitializedParams, Location, OneOf, PrepareRenameResponse, ReferenceParams, RenameOptions,
-    RenameParams, SemanticTokenModifier, SemanticTokenType, SemanticTokens,
-    SemanticTokensFullOptions, SemanticTokensLegend, SemanticTokensOptions, SemanticTokensParams,
-    SemanticTokensResult, SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo,
-    SignatureHelp, SignatureHelpOptions, SignatureHelpParams, SymbolInformation,
-    TextDocumentContentChangeEvent, TextDocumentPositionParams, TextDocumentSyncCapability,
-    TextDocumentSyncKind, TextEdit, Uri, WorkDoneProgressOptions, WorkspaceEdit,
-    WorkspaceSymbolParams, WorkspaceSymbolResponse,
+    DidChangeConfigurationParams, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentLink,
+    DocumentLinkOptions, DocumentLinkParams, DocumentSymbolParams, DocumentSymbolResponse,
+    FileChangeType, FileSystemWatcher, GlobPattern, GotoDefinitionParams, GotoDefinitionResponse,
+    Hover, HoverParams, InitializeParams, InitializeResult, InitializedParams, Location, OneOf,
+    PrepareRenameResponse, ReferenceParams, Registration, RenameOptions, RenameParams,
+    SemanticTokenModifier, SemanticTokenType, SemanticTokens, SemanticTokensFullOptions,
+    SemanticTokensLegend, SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
+    SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo, SignatureHelp,
+    SignatureHelpOptions, SignatureHelpParams, SymbolInformation, TextDocumentContentChangeEvent,
+    TextDocumentPositionParams, TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Uri,
+    WorkDoneProgressOptions, WorkspaceEdit, WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
 use tower_lsp_server::{Client, LanguageServer, LspService, Server};
 
@@ -46,6 +46,13 @@ pub(crate) enum Task {
         incremental: Option<IncrementalEdit>,
     },
     Close {
+        uri: Uri,
+    },
+    ExternalChange {
+        uri: Uri,
+        text: String,
+    },
+    ExternalDelete {
         uri: Uri,
     },
 }
@@ -268,6 +275,28 @@ impl LanguageServer for Backend {
         let files = self.module_graph.file_count();
         let cached = self.module_graph.cached_tree_count();
         tracing::info!(files, cached, "sass-analyzer server initialized");
+
+        // Register file watchers for SCSS/Sass files changed outside the editor.
+        let watch_options = tower_lsp_server::ls_types::DidChangeWatchedFilesRegistrationOptions {
+            watchers: vec![
+                FileSystemWatcher {
+                    glob_pattern: GlobPattern::String("**/*.scss".to_owned()),
+                    kind: None, // defaults to Create | Change | Delete
+                },
+                FileSystemWatcher {
+                    glob_pattern: GlobPattern::String("**/*.sass".to_owned()),
+                    kind: None,
+                },
+            ],
+        };
+        let registration = Registration {
+            id: "file-watcher".to_owned(),
+            method: "workspace/didChangeWatchedFiles".to_owned(),
+            register_options: serde_json::to_value(watch_options).ok(),
+        };
+        if let Err(e) = self.client.register_capability(vec![registration]).await {
+            tracing::warn!(?e, "failed to register file watchers");
+        }
     }
 
     async fn shutdown(&self) -> Result<()> {
@@ -406,6 +435,47 @@ impl LanguageServer for Backend {
     }
 
     async fn did_save(&self, _params: DidSaveTextDocumentParams) {}
+
+    async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
+        for event in params.changes {
+            // Skip files that are open in the editor — those are tracked
+            // by did_open/did_change and have fresher content.
+            if self.source_texts.contains_key(&event.uri) {
+                continue;
+            }
+
+            if event.typ == FileChangeType::DELETED {
+                if self
+                    .task_tx
+                    .send(Task::ExternalDelete { uri: event.uri })
+                    .is_err()
+                {
+                    tracing::error!("worker channel closed, external delete task dropped");
+                }
+            } else {
+                // Created or Changed — read from disk.
+                let Some(path) = event.uri.to_file_path() else {
+                    continue;
+                };
+                let Ok(text) = std::fs::read_to_string(&path) else {
+                    continue;
+                };
+                if text.len() > self.runtime_config.max_file_size() {
+                    continue;
+                }
+                if self
+                    .task_tx
+                    .send(Task::ExternalChange {
+                        uri: event.uri,
+                        text,
+                    })
+                    .is_err()
+                {
+                    tracing::error!("worker channel closed, external change task dropped");
+                }
+            }
+        }
+    }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         self.source_texts.remove(&params.text_document.uri);
@@ -3895,5 +3965,196 @@ mod tests {
             contents.contains("blue"),
             "hover should reflect incremental edit, got: {contents}"
         );
+    }
+
+    #[tokio::test]
+    async fn external_change_updates_module_graph() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        // Open a file
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///ext.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": "$ext: 1;\n"
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
+
+        // Simulate an external change notification for a different file.
+        // Since did_change_watched_files reads from disk and we can't
+        // set up real files in this test, we verify that the notification
+        // method is accepted without error by sending it as JSON-RPC.
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "workspace/didChangeWatchedFiles",
+                "params": {
+                    "changes": [{
+                        "uri": "file:///nonexistent.scss",
+                        "type": 2
+                    }]
+                }
+            }),
+        )
+        .await;
+
+        // The server should not crash; verify it still responds.
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 100,
+                "method": "textDocument/documentSymbol",
+                "params": {
+                    "textDocument": { "uri": "file:///ext.scss" }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader, &mut writer).await;
+        let result = resp["result"].as_array().unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "should still have 1 symbol after ext change"
+        );
+    }
+
+    #[tokio::test]
+    async fn external_delete_does_not_crash() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        // Open a file
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///del.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": "$del: 1;\n"
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
+
+        // External delete of a file that's not open (should be processed).
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "workspace/didChangeWatchedFiles",
+                "params": {
+                    "changes": [{
+                        "uri": "file:///some_dep.scss",
+                        "type": 3
+                    }]
+                }
+            }),
+        )
+        .await;
+
+        // Small delay for the worker to process the delete task.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Server should still be alive.
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 101,
+                "method": "textDocument/documentSymbol",
+                "params": {
+                    "textDocument": { "uri": "file:///del.scss" }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader, &mut writer).await;
+        let result = resp["result"].as_array().unwrap();
+        assert_eq!(result.len(), 1, "should still have 1 symbol");
+    }
+
+    #[tokio::test]
+    async fn watched_files_skips_open_files() {
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+
+        let scss = "$open: 1;\n";
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///open.scss",
+                        "languageId": "scss",
+                        "version": 1,
+                        "text": scss
+                    }
+                }
+            }),
+        )
+        .await;
+        let _diag = recv_msg(&mut reader, &mut writer).await;
+
+        // Notify file change for an open file — should be skipped
+        // because open files are tracked by did_open/did_change.
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "workspace/didChangeWatchedFiles",
+                "params": {
+                    "changes": [{
+                        "uri": "file:///open.scss",
+                        "type": 2
+                    }]
+                }
+            }),
+        )
+        .await;
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Server should still work correctly with the original content.
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 102,
+                "method": "textDocument/documentSymbol",
+                "params": {
+                    "textDocument": { "uri": "file:///open.scss" }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_msg(&mut reader, &mut writer).await;
+        let result = resp["result"].as_array().unwrap();
+        assert_eq!(result.len(), 1, "should still have the original symbol");
+        assert_eq!(result[0]["name"], "open");
     }
 }

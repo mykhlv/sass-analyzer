@@ -354,8 +354,18 @@ impl ModuleGraph {
         self.edges.insert(uri.clone(), resolved_edges);
     }
 
+    /// Find all files that directly import the given URI.
+    pub fn dependents_of(&self, uri: &Uri) -> Vec<Uri> {
+        let mut result = Vec::new();
+        for entry in &self.edges {
+            if entry.value().iter().any(|edge| &edge.target == uri) {
+                result.push(entry.key().clone());
+            }
+        }
+        result
+    }
+
     /// Remove a file from the graph (used by file watcher for deleted files).
-    #[allow(dead_code)]
     pub fn remove_file(&self, uri: &Uri) {
         self.files.remove(uri);
         self.edges.remove(uri);
