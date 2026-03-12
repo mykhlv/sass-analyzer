@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Added
+- Color decorators: inline color swatches for hex (`#rgb`, `#rrggbb`, `#rrggbbaa`), `rgb()`/`rgba()`, `hsl()`/`hsla()`, `transparent`, and 148 CSS named colors
+- Color picker: click a swatch to adjust colors; presents hex, rgb, and hsl formats
 - File watcher support: non-open SCSS/Sass files modified, created, or deleted on disk are now detected and re-indexed automatically
 
 ## 0.1.1 — 2026-03-12
