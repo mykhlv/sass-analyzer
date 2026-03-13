@@ -684,6 +684,14 @@ impl ModuleGraph {
         Some(text)
     }
 
+    pub fn get_symbols(&self, uri: &Uri) -> Option<std::sync::Arc<symbols::FileSymbols>> {
+        self.files.get(uri).map(|info| info.symbols.clone())
+    }
+
+    pub fn get_green(&self, uri: &Uri) -> Option<rowan::GreenNode> {
+        self.get_or_reparse_green(uri)
+    }
+
     pub fn all_symbols(&self) -> Vec<(Uri, symbols::Symbol)> {
         let mut result = Vec::new();
         for entry in &self.files {
