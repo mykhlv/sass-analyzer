@@ -6,6 +6,7 @@ mod completion;
 mod config;
 mod convert;
 mod css_properties;
+mod css_values;
 mod diagnostics;
 mod folding;
 mod highlights;

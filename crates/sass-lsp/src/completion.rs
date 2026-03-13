@@ -1,18 +1,24 @@
 use std::sync::Arc;
 
 use dashmap::DashMap;
+use sass_parser::syntax::SyntaxNode;
+use sass_parser::syntax_kind::SyntaxKind;
+use sass_parser::text_range::TextSize;
 use tower_lsp_server::ls_types::{
     CompletionItem, CompletionItemKind, CompletionParams, CompletionResponse, MarkupContent,
     MarkupKind, Uri,
 };
 
 use crate::DocumentState;
+use crate::convert::lsp_position_to_offset;
 use crate::css_properties;
+use crate::css_values;
 use crate::symbols;
 use crate::workspace::ModuleGraph;
 
 // ── Completion context detection ─────────────────────────────────
 
+#[derive(Debug)]
 pub(crate) enum CompletionContext {
     /// After `$` — only variables
     Variable,
@@ -26,8 +32,9 @@ pub(crate) enum CompletionContext {
     UseModulePath(String),
     /// In property-name position (start of line or after `;`/`{`)
     PropertyName(String),
-    /// After `:` in a declaration — property value context (variables + functions)
-    PropertyValue,
+    /// After `:` in a declaration — property value context.
+    /// Contains (`property_name`, `partial_value`) for keyword lookup + fuzzy filtering.
+    PropertyValue(String, String),
     /// Default — show all symbols
     General,
 }
@@ -63,11 +70,18 @@ pub(crate) fn detect_completion_context(line: &str, character: u32) -> Completio
         }
     }
 
-    // @include name — mixin completion
+    // @include name — mixin completion (but check for namespace first)
     if let Some(rest) = trimmed.strip_prefix("@include") {
         let partial = rest.trim_start();
         // Only if we haven't started the argument list
         if !partial.contains('(') {
+            // Check for namespace prefix: `@include ns.` → Namespace context
+            if let Some(dot_pos) = partial.rfind('.') {
+                let ns = &partial[..dot_pos];
+                if !ns.is_empty() && ns.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
+                    return CompletionContext::Namespace(ns.to_owned());
+                }
+            }
             return CompletionContext::IncludeMixin;
         }
     }
@@ -89,13 +103,14 @@ pub(crate) fn detect_completion_context(line: &str, character: u32) -> Completio
             .into_iter()
             .rev()
             .collect();
-        if !ns.is_empty() {
+        // Must start with a letter or underscore (not a digit — avoids `1.5` false positive)
+        if ns.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
             return CompletionContext::Namespace(ns);
         }
     }
 
     // After `$` — variable completion
-    if before.ends_with('$') || before.contains('$') && !before.ends_with(' ') {
+    if before.ends_with('$') || (before.contains('$') && !before.ends_with(' ')) {
         if let Some(dollar_pos) = before.rfind('$') {
             let after_dollar = &before[dollar_pos + 1..];
             if after_dollar
@@ -107,9 +122,28 @@ pub(crate) fn detect_completion_context(line: &str, character: u32) -> Completio
         }
     }
 
-    // Property value position: after `property:` (with possible whitespace)
-    if trimmed.contains(':') && !trimmed.starts_with('@') && !trimmed.starts_with('$') {
-        return CompletionContext::PropertyValue;
+    // Property value position: after `property:` (with possible whitespace).
+    // Guard against pseudo-selectors (`a:hover`, `&:focus`, `:root`) by requiring
+    // the text before `:` to look like a CSS property name — must contain a hyphen
+    // or be at least 2 chars long (excludes single-letter tag selectors like `a:hover`).
+    if let Some(colon_pos) = trimmed.find(':') {
+        if !trimmed.starts_with('@')
+            && !trimmed.starts_with('$')
+            && !trimmed.starts_with('&')
+            && !trimmed.starts_with(':')
+            && colon_pos > 0
+        {
+            let prop_candidate = trimmed[..colon_pos].trim();
+            let looks_like_property = prop_candidate.len() >= 2
+                && prop_candidate
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+            if looks_like_property {
+                let prop = prop_candidate.to_owned();
+                let partial = trimmed[colon_pos + 1..].trim_start().to_owned();
+                return CompletionContext::PropertyValue(prop, partial);
+            }
+        }
     }
 
     // Property name position: line starts with a letter/hyphen (typical for properties)
@@ -136,6 +170,128 @@ pub(crate) fn detect_completion_context(line: &str, character: u32) -> Completio
     }
 
     CompletionContext::General
+}
+
+/// Refine line-based completion context using the parsed CST. Corrects two cases:
+/// 1. Map entries misdetected as `PropertyValue` → `General`
+/// 2. Multi-line values misdetected as `PropertyName` → `PropertyValue`
+///
+/// Returns `Some(corrected)` when the AST overrides line-based, `None` to keep it.
+fn ast_refine_context(
+    root: &SyntaxNode,
+    offset: TextSize,
+    line_ctx: &CompletionContext,
+) -> Option<CompletionContext> {
+    let token = root.token_at_offset(offset).left_biased()?;
+
+    for ancestor in token.parent_ancestors() {
+        match ancestor.kind() {
+            SyntaxKind::MAP_ENTRY | SyntaxKind::MAP_EXPR => {
+                // Line-based detected PropertyValue but we're inside a map — suppress.
+                if matches!(line_ctx, CompletionContext::PropertyValue(..)) {
+                    return Some(CompletionContext::General);
+                }
+                return None;
+            }
+            SyntaxKind::VALUE => {
+                // Inside a VALUE node — check if it belongs to a declaration.
+                // VALUE nodes can be nested; only act when parent is a declaration.
+                let Some(parent) = ancestor.parent() else {
+                    continue;
+                };
+                if !is_declaration_kind(parent.kind()) {
+                    continue;
+                }
+                // Only override if line-based missed it (PropertyName or General).
+                if matches!(
+                    line_ctx,
+                    CompletionContext::PropertyName(_) | CompletionContext::General
+                ) {
+                    let prop_name = extract_property_name(&parent)?;
+                    let partial = partial_value_at_offset(&ancestor, offset);
+                    return Some(CompletionContext::PropertyValue(prop_name, partial));
+                }
+                return None;
+            }
+            k if is_declaration_kind(k) => {
+                // Cursor in declaration after colon but no VALUE node yet (empty value).
+                if matches!(
+                    line_ctx,
+                    CompletionContext::PropertyName(_) | CompletionContext::General
+                ) {
+                    let colon_end = ancestor.children_with_tokens().find_map(|child| {
+                        if child.kind() == SyntaxKind::COLON {
+                            Some(child.text_range().end())
+                        } else {
+                            None
+                        }
+                    })?;
+                    if offset >= colon_end {
+                        let prop_name = extract_property_name(&ancestor)?;
+                        return Some(CompletionContext::PropertyValue(prop_name, String::new()));
+                    }
+                }
+                return None;
+            }
+            SyntaxKind::BLOCK => {
+                // Cursor in whitespace after a declaration that has no VALUE
+                // (e.g., `display:\n    |`). Find the last declaration before offset
+                // that is missing a VALUE child.
+                if !matches!(
+                    line_ctx,
+                    CompletionContext::PropertyName(_) | CompletionContext::General
+                ) {
+                    continue;
+                }
+                let prev_decl = ancestor
+                    .children()
+                    .filter(|c| is_declaration_kind(c.kind()))
+                    .filter(|c| c.text_range().end() <= offset)
+                    .last();
+                if let Some(decl) = prev_decl {
+                    let has_value = decl.children().any(|c| c.kind() == SyntaxKind::VALUE);
+                    if !has_value {
+                        let prop_name = extract_property_name(&decl)?;
+                        return Some(CompletionContext::PropertyValue(prop_name, String::new()));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn is_declaration_kind(kind: SyntaxKind) -> bool {
+    matches!(
+        kind,
+        SyntaxKind::DECLARATION | SyntaxKind::CUSTOM_PROPERTY_DECL | SyntaxKind::NESTED_PROPERTY
+    )
+}
+
+fn extract_property_name(decl: &SyntaxNode) -> Option<String> {
+    decl.children()
+        .find(|c| c.kind() == SyntaxKind::PROPERTY)
+        .map(|prop| prop.text().to_string().trim().to_owned())
+}
+
+fn partial_value_at_offset(value_node: &SyntaxNode, offset: TextSize) -> String {
+    let value_text = value_node.text().to_string();
+    let start = value_node.text_range().start();
+    // Guard against offset before the node (can happen at token boundaries).
+    let byte_offset: usize = offset.checked_sub(start).map_or(0, Into::into);
+    let clamped = byte_offset.min(value_text.len());
+    // Retreat to a char boundary to avoid panics on multi-byte UTF-8.
+    let mut safe = clamped;
+    while safe > 0 && !value_text.is_char_boundary(safe) {
+        safe -= 1;
+    }
+    let before = &value_text[..safe];
+    // Take the last "word" (non-whitespace run) as the partial
+    before
+        .rsplit_once(char::is_whitespace)
+        .map_or(before, |(_, w)| w)
+        .to_owned()
 }
 
 pub(crate) fn symbol_to_completion_item(
@@ -219,18 +375,34 @@ pub(crate) async fn handle(
     let uri = params.text_document_position.text_document.uri;
     let position = params.text_document_position.position;
 
-    let cursor_line = {
+    let (cursor_line, green, text, line_index) = {
         let Some(doc) = documents.get(&uri) else {
             return Ok(None);
         };
         let line_idx = position.line as usize;
-        match doc.text.lines().nth(line_idx) {
-            Some(line) => line.to_owned(),
+        let line = match doc.text.lines().nth(line_idx) {
+            Some(l) => l.to_owned(),
             None => return Ok(None),
-        }
+        };
+        (
+            line,
+            doc.green.clone(),
+            doc.text.clone(),
+            doc.line_index.clone(),
+        )
     };
 
-    let ctx = detect_completion_context(&cursor_line, position.character);
+    let line_ctx = detect_completion_context(&cursor_line, position.character);
+
+    // Use AST to correct line-based detection for two cases:
+    // 1. Map entries misdetected as PropertyValue → General
+    // 2. Multi-line values misdetected as PropertyName/General → PropertyValue
+    let ctx = lsp_position_to_offset(&text, &line_index, position)
+        .and_then(|offset| {
+            let root = SyntaxNode::new_root(green);
+            ast_refine_context(&root, offset, &line_ctx)
+        })
+        .unwrap_or(line_ctx);
 
     match ctx {
         CompletionContext::UseModulePath(partial) => {
@@ -268,6 +440,75 @@ pub(crate) async fn handle(
             }
             return Ok(Some(CompletionResponse::Array(items)));
         }
+        CompletionContext::PropertyValue(ref prop_name, ref partial) => {
+            let prop_values = css_values::values_for_property(prop_name);
+            let all_values: Vec<&str> = prop_values
+                .iter()
+                .chain(css_values::GLOBAL_KEYWORDS.iter())
+                .copied()
+                .collect();
+
+            // Note: if partial starts with `$`, the Variable context is detected
+            // before PropertyValue (line ~101), so we never reach here with a `$` prefix.
+            let mut items: Vec<CompletionItem> = if partial.is_empty() {
+                // No partial typed — show all values unfiltered
+                all_values
+                    .iter()
+                    .enumerate()
+                    .map(|(i, v)| CompletionItem {
+                        label: (*v).to_owned(),
+                        kind: Some(CompletionItemKind::ENUM_MEMBER),
+                        sort_text: Some(format!("0_{i:04}_{v}")),
+                        ..CompletionItem::default()
+                    })
+                    .collect()
+            } else {
+                // Fuzzy-filter values against partial
+                let mut scored: Vec<(u32, &str)> = all_values
+                    .iter()
+                    .filter_map(|v| {
+                        let score = fuzzy_score(v, partial)?;
+                        Some((score, *v))
+                    })
+                    .collect();
+                scored.sort_by(|a, b| b.0.cmp(&a.0));
+                scored
+                    .into_iter()
+                    .map(|(score, v)| CompletionItem {
+                        label: v.to_owned(),
+                        kind: Some(CompletionItemKind::ENUM_MEMBER),
+                        sort_text: Some(format!("0_{:04}_{v}", 1000 - score)),
+                        ..CompletionItem::default()
+                    })
+                    .collect()
+            };
+
+            // Also include Sass symbols (variables, functions) — valid in value position
+            let visible = module_graph.visible_symbols(&uri);
+            let symbol_items: Vec<CompletionItem> = visible
+                .into_iter()
+                .filter(|(_, _, sym)| {
+                    sym.kind == symbols::SymbolKind::Variable
+                        || sym.kind == symbols::SymbolKind::Function
+                })
+                .map(|(prefix, sym_uri, sym)| {
+                    let is_builtin = crate::builtins::is_builtin_uri(sym_uri.as_str());
+                    let mut item = symbol_to_completion_item(prefix.as_deref(), &sym, is_builtin);
+                    // Bump symbol sort after keyword values (replace tier prefix)
+                    if let Some(ref mut st) = item.sort_text {
+                        let suffix = st.find('_').map_or(st.as_str(), |i| &st[i..]);
+                        *st = format!("1{suffix}");
+                    }
+                    item
+                })
+                .collect();
+            items.extend(symbol_items);
+
+            if items.is_empty() {
+                return Ok(None);
+            }
+            return Ok(Some(CompletionResponse::Array(items)));
+        }
         _ => {}
     }
 
@@ -283,8 +524,11 @@ pub(crate) async fn handle(
             CompletionContext::IncludeMixin => sym.kind == symbols::SymbolKind::Mixin,
             CompletionContext::Namespace(ns) => prefix.as_ref().is_some_and(|p| p == ns),
             CompletionContext::Extend => sym.kind == symbols::SymbolKind::Placeholder,
-            CompletionContext::General | CompletionContext::PropertyValue => true,
-            CompletionContext::PropertyName(_) | CompletionContext::UseModulePath(_) => false,
+            CompletionContext::General => true,
+            // These contexts are handled above and return early.
+            CompletionContext::PropertyValue(..)
+            | CompletionContext::PropertyName(_)
+            | CompletionContext::UseModulePath(_) => false,
         })
         .map(|(prefix, sym_uri, sym)| {
             let is_builtin = crate::builtins::is_builtin_uri(sym_uri.as_str());
