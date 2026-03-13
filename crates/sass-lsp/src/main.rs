@@ -1,5 +1,6 @@
 mod ast_helpers;
 mod builtins;
+mod code_actions;
 mod colors;
 mod completion;
 mod config;
@@ -26,16 +27,18 @@ use sass_parser::text_range::{TextRange, TextSize};
 use tokio::sync::mpsc;
 use tower_lsp_server::jsonrpc::Result;
 use tower_lsp_server::ls_types::{
-    ColorInformation, ColorPresentation, ColorPresentationParams, ColorProviderCapability,
-    CompletionOptions, CompletionParams, CompletionResponse, DidChangeConfigurationParams,
-    DidChangeTextDocumentParams, DidChangeWatchedFilesParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentColorParams, DocumentHighlight,
-    DocumentHighlightParams, DocumentLinkOptions, DocumentLinkParams, DocumentSymbolParams,
-    DocumentSymbolResponse, FileChangeType, FileSystemWatcher, FoldingRange, FoldingRangeParams,
-    FoldingRangeProviderCapability, GlobPattern, GotoDefinitionParams, GotoDefinitionResponse,
-    Hover, HoverParams, InitializeParams, InitializeResult, InitializedParams, Location, OneOf,
-    PrepareRenameResponse, ReferenceParams, Registration, RenameOptions, RenameParams,
-    SelectionRange, SelectionRangeParams, SelectionRangeProviderCapability, SemanticTokenModifier,
+    CodeActionKind, CodeActionOptions, CodeActionOrCommand, CodeActionParams,
+    CodeActionProviderCapability, ColorInformation, ColorPresentation, ColorPresentationParams,
+    ColorProviderCapability, CompletionOptions, CompletionParams, CompletionResponse,
+    DidChangeConfigurationParams, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
+    DocumentColorParams, DocumentHighlight, DocumentHighlightParams, DocumentLinkOptions,
+    DocumentLinkParams, DocumentSymbolParams, DocumentSymbolResponse, FileChangeType,
+    FileSystemWatcher, FoldingRange, FoldingRangeParams, FoldingRangeProviderCapability,
+    GlobPattern, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
+    InitializeParams, InitializeResult, InitializedParams, Location, OneOf, PrepareRenameResponse,
+    ReferenceParams, Registration, RenameOptions, RenameParams, SelectionRange,
+    SelectionRangeParams, SelectionRangeProviderCapability, SemanticTokenModifier,
     SemanticTokenType, SemanticTokens, SemanticTokensFullOptions, SemanticTokensLegend,
     SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
     SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo, SignatureHelp,
@@ -261,6 +264,12 @@ impl LanguageServer for Backend {
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
                 document_highlight_provider: Some(OneOf::Left(true)),
                 selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
+                code_action_provider: Some(CodeActionProviderCapability::Options(
+                    CodeActionOptions {
+                        code_action_kinds: Some(vec![CodeActionKind::QUICKFIX]),
+                        ..CodeActionOptions::default()
+                    },
+                )),
                 ..ServerCapabilities::default()
             },
             server_info: Some(ServerInfo {
@@ -610,6 +619,22 @@ impl LanguageServer for Backend {
         params: SelectionRangeParams,
     ) -> Result<Option<Vec<SelectionRange>>> {
         Ok(selection::handle_selection_range(&self.documents, params))
+    }
+
+    async fn code_action(
+        &self,
+        params: CodeActionParams,
+    ) -> Result<Option<Vec<CodeActionOrCommand>>> {
+        Ok(
+            code_actions::handle_code_action(&self.documents, &self.module_graph, params).map(
+                |actions| {
+                    actions
+                        .into_iter()
+                        .map(CodeActionOrCommand::CodeAction)
+                        .collect()
+                },
+            ),
+        )
     }
 
     async fn color_presentation(

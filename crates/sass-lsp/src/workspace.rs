@@ -1041,7 +1041,7 @@ impl ModuleGraph {
 
 // ── Namespace extraction ────────────────────────────────────────────
 
-fn extract_namespace(root: &SyntaxNode, import_ref: &ImportRef) -> Namespace {
+pub(crate) fn extract_namespace(root: &SyntaxNode, import_ref: &ImportRef) -> Namespace {
     if import_ref.kind == ImportKind::Import {
         return Namespace::Star;
     }
@@ -1092,13 +1092,17 @@ fn extract_namespace(root: &SyntaxNode, import_ref: &ImportRef) -> Namespace {
 /// Default namespace: last segment of the path without extension/underscore.
 /// `@use "src/colors"` → `colors`
 /// `@use "sass:math"` → `math`
-fn default_namespace(path: &str) -> Namespace {
+pub(crate) fn default_namespace(path: &str) -> Namespace {
     if let Some(name) = path.strip_prefix("sass:") {
         return Namespace::Named(name.to_owned());
     }
     let segment = path.rsplit('/').next().unwrap_or(path);
     let stem = segment.strip_prefix('_').unwrap_or(segment);
-    let stem = stem.strip_suffix(".scss").unwrap_or(stem);
+    let stem = stem
+        .strip_suffix(".scss")
+        .or_else(|| stem.strip_suffix(".sass"))
+        .or_else(|| stem.strip_suffix(".css"))
+        .unwrap_or(stem);
     Namespace::Named(stem.to_owned())
 }
 
@@ -1281,7 +1285,7 @@ fn is_visible(vis: &ForwardVisibility, name: &str) -> bool {
 
 // ── URI ↔ Path conversion ───────────────────────────────────────────
 
-fn uri_to_path(uri: &Uri) -> Option<PathBuf> {
+pub(crate) fn uri_to_path(uri: &Uri) -> Option<PathBuf> {
     uri.to_file_path().map(std::borrow::Cow::into_owned)
 }
 
@@ -1428,6 +1432,22 @@ mod tests {
         assert_eq!(
             default_namespace("_mixins"),
             Namespace::Named("mixins".into())
+        );
+    }
+
+    #[test]
+    fn default_namespace_sass_extension() {
+        assert_eq!(
+            default_namespace("base.sass"),
+            Namespace::Named("base".into())
+        );
+    }
+
+    #[test]
+    fn default_namespace_css_extension() {
+        assert_eq!(
+            default_namespace("vendor.css"),
+            Namespace::Named("vendor".into())
         );
     }
 
