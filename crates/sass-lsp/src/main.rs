@@ -14,6 +14,7 @@ mod highlights;
 mod hover;
 mod inlay_hints;
 mod navigation;
+mod sassdoc;
 mod selection;
 mod semantic_tokens;
 mod signature_help;

@@ -348,9 +348,15 @@ pub(crate) fn symbol_to_completion_item(
     let sort_text = Some(format!("{tier}_{label}"));
 
     let documentation = sym.doc.as_ref().map(|doc| {
+        let value = if crate::sassdoc::has_annotations(doc) {
+            let parsed = crate::sassdoc::parse(doc);
+            crate::sassdoc::format_markdown(&parsed)
+        } else {
+            doc.clone()
+        };
         tower_lsp_server::ls_types::Documentation::MarkupContent(MarkupContent {
             kind: MarkupKind::Markdown,
-            value: doc.clone(),
+            value,
         })
     });
 
