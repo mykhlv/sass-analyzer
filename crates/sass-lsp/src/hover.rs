@@ -7,6 +7,7 @@ use tower_lsp_server::ls_types::{
 use crate::DocumentState;
 use crate::convert::{lsp_position_to_offset, text_range_to_lsp};
 use crate::navigation::{find_definition_at_offset, find_reference_at_offset};
+use crate::sassdoc;
 use crate::symbols::{self, Symbol};
 use crate::workspace::ModuleGraph;
 
@@ -99,7 +100,12 @@ pub(crate) fn format_hover_markdown(sym: &Symbol, source_uri: Option<&Uri>) -> S
     let mut parts = vec![format!("```scss\n{signature}\n```")];
 
     if let Some(doc) = &sym.doc {
-        parts.push(doc.clone());
+        if sassdoc::has_annotations(doc) {
+            let parsed = sassdoc::parse(doc);
+            parts.push(sassdoc::format_markdown(&parsed));
+        } else {
+            parts.push(doc.clone());
+        }
     }
 
     if let Some(uri) = source_uri {
