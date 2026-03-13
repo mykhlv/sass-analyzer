@@ -33,7 +33,6 @@ pub struct ForwardVisibility {
 }
 
 /// A resolved import edge in the module graph.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ImportEdge {
     pub target: Uri,
@@ -48,13 +47,15 @@ pub struct ImportEdge {
 /// The green tree is re-parsed on demand from `source_text`; source text
 /// is reconstructed on demand from the green tree via `green.text()`.
 /// Invariant: at least one of `green` or `source_text` is always `Some`.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ModuleInfo {
     pub symbols: Arc<FileSymbols>,
     pub green: Option<rowan::GreenNode>,
     pub line_index: sass_parser::line_index::LineIndex,
     pub source_text: Option<String>,
+    /// True if the file uses `@import` or `meta.load-css()`, which merge scopes
+    /// in ways the module graph cannot fully track.
+    pub has_legacy_import: bool,
 }
 
 /// Cross-file dependency graph for the SCSS workspace.
@@ -259,22 +260,26 @@ impl ModuleGraph {
         line_index: sass_parser::line_index::LineIndex,
         source_text: String,
     ) {
+        let root = SyntaxNode::new_root(green.clone());
+        let import_refs = imports::collect_imports(&root);
+        let has_legacy_import = import_refs
+            .iter()
+            .any(|r| r.kind == ImportKind::Import || r.kind == ImportKind::LoadCss);
+
         self.files.insert(
             uri.clone(),
             ModuleInfo {
                 symbols,
-                green: Some(green.clone()),
+                green: Some(green),
                 line_index,
                 source_text: Some(source_text),
+                has_legacy_import,
             },
         );
         self.touch_tree_lru(uri);
         self.touch_source_lru(uri);
         self.evict_trees();
         self.evict_sources();
-
-        let root = SyntaxNode::new_root(green);
-        let import_refs = imports::collect_imports(&root);
         let base_path = uri_to_path(uri);
 
         let mut resolved_edges = Vec::new();
@@ -354,8 +359,27 @@ impl ModuleGraph {
         self.edges.insert(uri.clone(), resolved_edges);
     }
 
+    /// Check if a file has `@import` or `meta.load-css()` — these can provide
+    /// definitions from unindexed sources, so undefined-reference warnings
+    /// should be suppressed.
+    pub fn has_unresolved_imports(&self, uri: &Uri) -> bool {
+        self.files
+            .get(uri)
+            .is_some_and(|info| info.has_legacy_import)
+    }
+
+    /// Find all files that directly import the given URI.
+    pub fn dependents_of(&self, uri: &Uri) -> Vec<Uri> {
+        let mut result = Vec::new();
+        for entry in &self.edges {
+            if entry.value().iter().any(|edge| &edge.target == uri) {
+                result.push(entry.key().clone());
+            }
+        }
+        result
+    }
+
     /// Remove a file from the graph (used by file watcher for deleted files).
-    #[allow(dead_code)]
     pub fn remove_file(&self, uri: &Uri) {
         self.files.remove(uri);
         self.edges.remove(uri);
@@ -378,6 +402,22 @@ impl ModuleGraph {
 
     /// Resolve a qualified name (`namespace.$name` or `namespace.func()`)
     /// from a given source file. Returns the target URI and matching Symbol.
+    /// Resolve a reference — dispatches to `resolve_qualified` or `resolve_unqualified`
+    /// depending on whether a namespace is present.
+    pub fn resolve_reference(
+        &self,
+        from: &Uri,
+        namespace: Option<&str>,
+        name: &str,
+        kind: symbols::SymbolKind,
+    ) -> Option<(Uri, symbols::Symbol)> {
+        if let Some(ns) = namespace {
+            self.resolve_qualified(from, ns, name, kind)
+        } else {
+            self.resolve_unqualified(from, name, kind)
+        }
+    }
+
     pub fn resolve_qualified(
         &self,
         from: &Uri,
@@ -1001,7 +1041,7 @@ impl ModuleGraph {
 
 // ── Namespace extraction ────────────────────────────────────────────
 
-fn extract_namespace(root: &SyntaxNode, import_ref: &ImportRef) -> Namespace {
+pub(crate) fn extract_namespace(root: &SyntaxNode, import_ref: &ImportRef) -> Namespace {
     if import_ref.kind == ImportKind::Import {
         return Namespace::Star;
     }
@@ -1052,13 +1092,17 @@ fn extract_namespace(root: &SyntaxNode, import_ref: &ImportRef) -> Namespace {
 /// Default namespace: last segment of the path without extension/underscore.
 /// `@use "src/colors"` → `colors`
 /// `@use "sass:math"` → `math`
-fn default_namespace(path: &str) -> Namespace {
+pub(crate) fn default_namespace(path: &str) -> Namespace {
     if let Some(name) = path.strip_prefix("sass:") {
         return Namespace::Named(name.to_owned());
     }
     let segment = path.rsplit('/').next().unwrap_or(path);
     let stem = segment.strip_prefix('_').unwrap_or(segment);
-    let stem = stem.strip_suffix(".scss").unwrap_or(stem);
+    let stem = stem
+        .strip_suffix(".scss")
+        .or_else(|| stem.strip_suffix(".sass"))
+        .or_else(|| stem.strip_suffix(".css"))
+        .unwrap_or(stem);
     Namespace::Named(stem.to_owned())
 }
 
@@ -1241,7 +1285,7 @@ fn is_visible(vis: &ForwardVisibility, name: &str) -> bool {
 
 // ── URI ↔ Path conversion ───────────────────────────────────────────
 
-fn uri_to_path(uri: &Uri) -> Option<PathBuf> {
+pub(crate) fn uri_to_path(uri: &Uri) -> Option<PathBuf> {
     uri.to_file_path().map(std::borrow::Cow::into_owned)
 }
 
@@ -1392,6 +1436,22 @@ mod tests {
     }
 
     #[test]
+    fn default_namespace_sass_extension() {
+        assert_eq!(
+            default_namespace("base.sass"),
+            Namespace::Named("base".into())
+        );
+    }
+
+    #[test]
+    fn default_namespace_css_extension() {
+        assert_eq!(
+            default_namespace("vendor.css"),
+            Namespace::Named("vendor".into())
+        );
+    }
+
+    #[test]
     fn extract_namespace_as_alias() {
         let (green, _) = sass_parser::parse("@use \"colors\" as c;");
         let root = SyntaxNode::new_root(green);
@@ -1438,6 +1498,7 @@ mod tests {
             green: Some(green),
             line_index: li,
             source_text: Some(source.to_owned()),
+            has_legacy_import: false,
         }
     }
 
@@ -2091,5 +2152,134 @@ mod tests {
         // A path that uses `..` to escape should be blocked
         let escaped = tmp.join("subdir").join("..").join("..").join("etc");
         assert!(!graph.is_path_allowed(&escaped));
+    }
+
+    // ── Circular import handling ──────────────────────────────────────
+
+    #[test]
+    fn circular_use_does_not_loop() {
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
+        let a: Uri = "file:///a.scss".parse().unwrap();
+        let b: Uri = "file:///b.scss".parse().unwrap();
+
+        graph.files.insert(a.clone(), make_info("$from_a: red;"));
+        graph.files.insert(b.clone(), make_info("$from_b: blue;"));
+
+        // a → b (star import)
+        graph.edges.insert(
+            a.clone(),
+            vec![ImportEdge {
+                target: b.clone(),
+                namespace: Namespace::Star,
+                kind: ImportKind::Use,
+                visibility: ForwardVisibility::default(),
+            }],
+        );
+        // b → a (star import — circular)
+        graph.edges.insert(
+            b.clone(),
+            vec![ImportEdge {
+                target: a.clone(),
+                namespace: Namespace::Star,
+                kind: ImportKind::Use,
+                visibility: ForwardVisibility::default(),
+            }],
+        );
+
+        // Should terminate, not infinite loop
+        let r = graph.resolve_unqualified(&a, "from_b", symbols::SymbolKind::Variable);
+        assert!(r.is_some());
+        assert_eq!(r.unwrap().1.name, "from_b");
+
+        let r = graph.resolve_unqualified(&b, "from_a", symbols::SymbolKind::Variable);
+        assert!(r.is_some());
+        assert_eq!(r.unwrap().1.name, "from_a");
+    }
+
+    #[test]
+    fn circular_forward_does_not_loop() {
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
+        let a: Uri = "file:///a.scss".parse().unwrap();
+        let b: Uri = "file:///b.scss".parse().unwrap();
+        let c: Uri = "file:///c.scss".parse().unwrap();
+
+        graph.files.insert(a.clone(), make_info("$a_var: 1;"));
+        graph.files.insert(b.clone(), make_info(""));
+        graph.files.insert(c.clone(), make_info("$c_var: 3;"));
+
+        // a → b (forward), b → c (forward), c → a (forward — cycle)
+        graph.edges.insert(
+            a.clone(),
+            vec![ImportEdge {
+                target: b.clone(),
+                namespace: Namespace::Star,
+                kind: ImportKind::Forward,
+                visibility: ForwardVisibility::default(),
+            }],
+        );
+        graph.edges.insert(
+            b.clone(),
+            vec![ImportEdge {
+                target: c.clone(),
+                namespace: Namespace::Star,
+                kind: ImportKind::Forward,
+                visibility: ForwardVisibility::default(),
+            }],
+        );
+        graph.edges.insert(
+            c.clone(),
+            vec![ImportEdge {
+                target: a.clone(),
+                namespace: Namespace::Star,
+                kind: ImportKind::Forward,
+                visibility: ForwardVisibility::default(),
+            }],
+        );
+
+        // Consumer uses a as *
+        let consumer: Uri = "file:///consumer.scss".parse().unwrap();
+        graph.files.insert(consumer.clone(), make_info(""));
+        graph.edges.insert(
+            consumer.clone(),
+            vec![ImportEdge {
+                target: a.clone(),
+                namespace: Namespace::Star,
+                kind: ImportKind::Use,
+                visibility: ForwardVisibility::default(),
+            }],
+        );
+
+        // Should resolve through forward chain without infinite loop
+        let r = graph.resolve_unqualified(&consumer, "c_var", symbols::SymbolKind::Variable);
+        assert!(r.is_some());
+        assert_eq!(r.unwrap().1.name, "c_var");
+
+        // visible_symbols should also terminate
+        let visible = graph.visible_symbols(&consumer);
+        let names: Vec<&str> = visible.iter().map(|(_, _, s)| s.name.as_str()).collect();
+        assert!(names.contains(&"a_var"));
+        assert!(names.contains(&"c_var"));
+    }
+
+    #[test]
+    fn self_import_does_not_loop() {
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
+        let a: Uri = "file:///a.scss".parse().unwrap();
+
+        graph.files.insert(a.clone(), make_info("$x: 1;"));
+
+        // a imports itself
+        graph.edges.insert(
+            a.clone(),
+            vec![ImportEdge {
+                target: a.clone(),
+                namespace: Namespace::Star,
+                kind: ImportKind::Use,
+                visibility: ForwardVisibility::default(),
+            }],
+        );
+
+        let r = graph.resolve_unqualified(&a, "x", symbols::SymbolKind::Variable);
+        assert!(r.is_some());
     }
 }

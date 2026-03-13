@@ -1,11 +1,58 @@
+use dashmap::DashMap;
 use sass_parser::syntax::SyntaxNode;
 use sass_parser::syntax_kind::SyntaxKind;
 use tower_lsp_server::ls_types::{
-    MarkupContent, MarkupKind, ParameterInformation, ParameterLabel, SignatureInformation,
+    MarkupContent, MarkupKind, ParameterInformation, ParameterLabel, SignatureHelp,
+    SignatureHelpParams, SignatureInformation, Uri,
 };
 
+use crate::DocumentState;
 use crate::ast_helpers::{ident_text_range_of, nth_ident_text_range_of};
+use crate::convert::lsp_position_to_offset;
 use crate::symbols;
+use crate::workspace::ModuleGraph;
+
+// ── Handler ─────────────────────────────────────────────────────────
+
+pub(crate) fn handle(
+    documents: &DashMap<Uri, DocumentState>,
+    module_graph: &ModuleGraph,
+    params: SignatureHelpParams,
+) -> Option<SignatureHelp> {
+    let uri = params.text_document_position_params.text_document.uri;
+    let position = params.text_document_position_params.position;
+
+    let (green, text, offset) = {
+        let doc = documents.get(&uri)?;
+        let offset = lsp_position_to_offset(&doc.text, &doc.line_index, position)?;
+        (doc.green.clone(), doc.text.clone(), offset)
+    };
+
+    let root = SyntaxNode::new_root(green);
+
+    let call_info = find_call_at_offset(&root, offset)?;
+
+    let resolved = module_graph.resolve_reference(
+        &uri,
+        call_info.namespace.as_deref(),
+        &call_info.name,
+        call_info.kind,
+    );
+
+    let (_target_uri, symbol) = resolved?;
+
+    let params_text = symbol.params.as_ref()?;
+
+    let active_param = count_active_parameter(&text, &call_info, offset);
+
+    let sig_info = build_signature_info(&symbol, params_text);
+
+    Some(SignatureHelp {
+        signatures: vec![sig_info],
+        active_signature: Some(0),
+        active_parameter: Some(active_param),
+    })
+}
 
 // ── Signature help ──────────────────────────────────────────────────
 

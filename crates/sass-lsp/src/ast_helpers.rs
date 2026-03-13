@@ -5,6 +5,31 @@ use sass_parser::text_range::TextRange;
 use crate::convert::utf16_len;
 use crate::symbols;
 
+/// Check if a reference at the given range has a namespace prefix (e.g. `ns.$var`).
+/// Returns the namespace identifier if found.
+pub(crate) fn namespace_of_ref(root: &SyntaxNode, ref_range: TextRange) -> Option<String> {
+    let token = root.token_at_offset(ref_range.start()).right_biased()?;
+    for node in token.parent()?.ancestors() {
+        if node.kind() == SyntaxKind::NAMESPACE_REF {
+            let ns_ident = node
+                .children_with_tokens()
+                .filter_map(rowan::NodeOrToken::into_token)
+                .find(|t| t.kind() == SyntaxKind::IDENT)?;
+            return Some(ns_ident.text().to_string());
+        }
+        if matches!(
+            node.kind(),
+            SyntaxKind::DECLARATION
+                | SyntaxKind::RULE_SET
+                | SyntaxKind::BLOCK
+                | SyntaxKind::SOURCE_FILE
+        ) {
+            break;
+        }
+    }
+    None
+}
+
 /// Find the first IDENT token among direct children.
 pub(crate) fn first_ident_token(node: &SyntaxNode) -> Option<SyntaxToken> {
     node.children_with_tokens()
