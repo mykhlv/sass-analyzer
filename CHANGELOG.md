@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Added
+- Code actions (quick fixes): auto-import `@use` for undefined variables, functions, and mixins — inserts the `@use` statement and qualifies the reference with the namespace. Remove unused `@use` statements.
 - Semantic diagnostics: wrong argument count (ERROR) for functions and mixins, undefined variable/function/mixin warnings (WARNING) with false-positive suppression for `@import` files and CSS global functions
 - Diagnostic cascade: when a dependency file changes, diagnostics are re-published for all open files that import it
 - Selection ranges: smart expand/shrink selection (Shift+Alt+→/←) that follows the AST structure — token → node → parent → root

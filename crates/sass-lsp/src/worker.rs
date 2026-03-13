@@ -79,6 +79,7 @@ fn semantic_to_lsp(
                 d.code.to_owned(),
             )),
             message: d.message,
+            data: d.data,
             ..Diagnostic::default()
         })
         .collect()

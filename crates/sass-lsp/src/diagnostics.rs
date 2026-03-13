@@ -4,6 +4,7 @@ use sass_parser::syntax_kind::SyntaxKind;
 use sass_parser::text_range::TextRange;
 use tower_lsp_server::ls_types::{DiagnosticSeverity, Uri};
 
+use crate::ast_helpers;
 use crate::symbols::{FileSymbols, RefKind, SymbolKind};
 use crate::workspace;
 
@@ -12,6 +13,8 @@ pub(crate) struct SemanticDiagnostic {
     pub(crate) message: String,
     pub(crate) severity: DiagnosticSeverity,
     pub(crate) code: &'static str,
+    /// Structured context for code actions (serialized as JSON in LSP diagnostic `data`).
+    pub(crate) data: Option<serde_json::Value>,
 }
 
 pub(crate) fn check_file(
@@ -48,7 +51,7 @@ fn check_arg_count(
             _ => continue,
         };
 
-        let namespace = namespace_of_ref(root, sym_ref.range);
+        let namespace = ast_helpers::namespace_of_ref(root, sym_ref.range);
         let Some((_, target)) =
             module_graph.resolve_reference(uri, namespace.as_deref(), &sym_ref.name, kind)
         else {
@@ -74,6 +77,7 @@ fn check_arg_count(
                 ),
                 severity: DiagnosticSeverity::ERROR,
                 code: "wrong-arg-count",
+                data: None,
             });
         } else if !param_info.has_rest && arg_count > param_info.total {
             out.push(SemanticDiagnostic {
@@ -86,6 +90,7 @@ fn check_arg_count(
                 ),
                 severity: DiagnosticSeverity::ERROR,
                 code: "wrong-arg-count",
+                data: None,
             });
         }
     }
@@ -285,7 +290,7 @@ fn check_undefined(
             continue;
         }
 
-        let namespace = namespace_of_ref(root, sym_ref.range);
+        let namespace = ast_helpers::namespace_of_ref(root, sym_ref.range);
         if module_graph
             .resolve_reference(uri, namespace.as_deref(), &sym_ref.name, kind)
             .is_some()
@@ -305,6 +310,10 @@ fn check_undefined(
             message: format!("undefined {} `{}`", kind_label(sym_ref.kind), sym_ref.name),
             severity: DiagnosticSeverity::WARNING,
             code: diagnostic_code,
+            data: Some(serde_json::json!({
+                "name": sym_ref.name,
+                "kind": kind_label(sym_ref.kind),
+            })),
         });
     }
 }
@@ -320,32 +329,6 @@ fn kind_label(kind: RefKind) -> &'static str {
 
 fn is_css_global_function(name: &str) -> bool {
     CSS_GLOBAL_FUNCTIONS.iter().any(|&f| f == name)
-}
-
-// ── Namespace extraction ────────────────────────────────────────────
-
-fn namespace_of_ref(root: &SyntaxNode, ref_range: TextRange) -> Option<String> {
-    let token = root.token_at_offset(ref_range.start()).right_biased()?;
-    for node in token.parent()?.ancestors() {
-        if node.kind() == SyntaxKind::NAMESPACE_REF {
-            let ns_ident = node
-                .children_with_tokens()
-                .filter_map(rowan::NodeOrToken::into_token)
-                .find(|t| t.kind() == SyntaxKind::IDENT)?;
-            return Some(ns_ident.text().to_string());
-        }
-        // Don't walk past the direct container
-        if matches!(
-            node.kind(),
-            SyntaxKind::DECLARATION
-                | SyntaxKind::RULE_SET
-                | SyntaxKind::BLOCK
-                | SyntaxKind::SOURCE_FILE
-        ) {
-            break;
-        }
-    }
-    None
 }
 
 // ── Parameter / loop variable detection ─────────────────────────────
