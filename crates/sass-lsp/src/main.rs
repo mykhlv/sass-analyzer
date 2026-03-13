@@ -11,6 +11,7 @@ mod diagnostics;
 mod folding;
 mod highlights;
 mod hover;
+mod inlay_hints;
 mod navigation;
 mod selection;
 mod semantic_tokens;
@@ -37,9 +38,9 @@ use tower_lsp_server::ls_types::{
     DocumentLinkParams, DocumentSymbolParams, DocumentSymbolResponse, FileChangeType,
     FileSystemWatcher, FoldingRange, FoldingRangeParams, FoldingRangeProviderCapability,
     GlobPattern, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
-    InitializeParams, InitializeResult, InitializedParams, Location, OneOf, PrepareRenameResponse,
-    ReferenceParams, Registration, RenameOptions, RenameParams, SelectionRange,
-    SelectionRangeParams, SelectionRangeProviderCapability, SemanticTokenModifier,
+    InitializeParams, InitializeResult, InitializedParams, InlayHint, InlayHintParams, Location,
+    OneOf, PrepareRenameResponse, ReferenceParams, Registration, RenameOptions, RenameParams,
+    SelectionRange, SelectionRangeParams, SelectionRangeProviderCapability, SemanticTokenModifier,
     SemanticTokenType, SemanticTokens, SemanticTokensFullOptions, SemanticTokensLegend,
     SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
     SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo, SignatureHelp,
@@ -265,6 +266,7 @@ impl LanguageServer for Backend {
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
                 document_highlight_provider: Some(OneOf::Left(true)),
                 selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
+                inlay_hint_provider: Some(OneOf::Left(true)),
                 code_action_provider: Some(CodeActionProviderCapability::Options(
                     CodeActionOptions {
                         code_action_kinds: Some(vec![
@@ -623,6 +625,14 @@ impl LanguageServer for Backend {
         params: SelectionRangeParams,
     ) -> Result<Option<Vec<SelectionRange>>> {
         Ok(selection::handle_selection_range(&self.documents, params))
+    }
+
+    async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
+        Ok(inlay_hints::handle(
+            &self.documents,
+            &self.module_graph,
+            params,
+        ))
     }
 
     async fn code_action(

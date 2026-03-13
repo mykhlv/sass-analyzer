@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Added
+- Inlay hints: parameter name hints for positional arguments in function calls and `@include` directives (e.g., `add(⁣$a:⁣ 1px, ⁣$b:⁣ 2px)`). Skips keyword arguments, single-parameter calls, and rest parameters
 - CSS value completions: after typing `display: `, offers `flex`, `grid`, `block`, `none`, etc. Covers ~80 CSS properties with keyword values plus global keywords (`inherit`, `initial`, `unset`, `revert`, `revert-layer`). Sass variables and functions also appear in value position. AST-based context refinement correctly handles map entries and multi-line values
 - Code actions (quick fixes): auto-import `@use` for undefined variables, functions, and mixins — inserts the `@use` statement and qualifies the reference with the namespace. Remove unused `@use` statements
 - Code actions (refactoring): extract selection to variable (`$new-variable`), extract declarations to mixin (`@mixin new-mixin`)
