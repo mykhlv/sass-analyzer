@@ -9,6 +9,7 @@ mod folding;
 mod highlights;
 mod hover;
 mod navigation;
+mod selection;
 mod semantic_tokens;
 mod signature_help;
 mod symbols;
@@ -33,8 +34,9 @@ use tower_lsp_server::ls_types::{
     FoldingRangeProviderCapability, GlobPattern, GotoDefinitionParams, GotoDefinitionResponse,
     Hover, HoverParams, InitializeParams, InitializeResult, InitializedParams, Location, OneOf,
     PrepareRenameResponse, ReferenceParams, Registration, RenameOptions, RenameParams,
-    SemanticTokenModifier, SemanticTokenType, SemanticTokens, SemanticTokensFullOptions,
-    SemanticTokensLegend, SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
+    SelectionRange, SelectionRangeParams, SelectionRangeProviderCapability, SemanticTokenModifier,
+    SemanticTokenType, SemanticTokens, SemanticTokensFullOptions, SemanticTokensLegend,
+    SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
     SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo, SignatureHelp,
     SignatureHelpOptions, SignatureHelpParams, SymbolInformation, TextDocumentContentChangeEvent,
     TextDocumentPositionParams, TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
@@ -257,6 +259,7 @@ impl LanguageServer for Backend {
                 color_provider: Some(ColorProviderCapability::Simple(true)),
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
                 document_highlight_provider: Some(OneOf::Left(true)),
+                selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
                 ..ServerCapabilities::default()
             },
             server_info: Some(ServerInfo {
@@ -599,6 +602,13 @@ impl LanguageServer for Backend {
             &self.documents,
             params,
         ))
+    }
+
+    async fn selection_range(
+        &self,
+        params: SelectionRangeParams,
+    ) -> Result<Option<Vec<SelectionRange>>> {
+        Ok(selection::handle_selection_range(&self.documents, params))
     }
 
     async fn color_presentation(
