@@ -5,6 +5,7 @@ mod completion;
 mod config;
 mod convert;
 mod css_properties;
+mod diagnostics;
 mod folding;
 mod highlights;
 mod hover;

@@ -53,6 +53,9 @@ pub struct ModuleInfo {
     pub green: Option<rowan::GreenNode>,
     pub line_index: sass_parser::line_index::LineIndex,
     pub source_text: Option<String>,
+    /// True if the file uses `@import` or `meta.load-css()`, which merge scopes
+    /// in ways the module graph cannot fully track.
+    pub has_legacy_import: bool,
 }
 
 /// Cross-file dependency graph for the SCSS workspace.
@@ -257,22 +260,26 @@ impl ModuleGraph {
         line_index: sass_parser::line_index::LineIndex,
         source_text: String,
     ) {
+        let root = SyntaxNode::new_root(green.clone());
+        let import_refs = imports::collect_imports(&root);
+        let has_legacy_import = import_refs
+            .iter()
+            .any(|r| r.kind == ImportKind::Import || r.kind == ImportKind::LoadCss);
+
         self.files.insert(
             uri.clone(),
             ModuleInfo {
                 symbols,
-                green: Some(green.clone()),
+                green: Some(green),
                 line_index,
                 source_text: Some(source_text),
+                has_legacy_import,
             },
         );
         self.touch_tree_lru(uri);
         self.touch_source_lru(uri);
         self.evict_trees();
         self.evict_sources();
-
-        let root = SyntaxNode::new_root(green);
-        let import_refs = imports::collect_imports(&root);
         let base_path = uri_to_path(uri);
 
         let mut resolved_edges = Vec::new();
@@ -350,6 +357,15 @@ impl ModuleGraph {
         }
 
         self.edges.insert(uri.clone(), resolved_edges);
+    }
+
+    /// Check if a file has `@import` or `meta.load-css()` — these can provide
+    /// definitions from unindexed sources, so undefined-reference warnings
+    /// should be suppressed.
+    pub fn has_unresolved_imports(&self, uri: &Uri) -> bool {
+        self.files
+            .get(uri)
+            .is_some_and(|info| info.has_legacy_import)
     }
 
     /// Find all files that directly import the given URI.
@@ -1462,6 +1478,7 @@ mod tests {
             green: Some(green),
             line_index: li,
             source_text: Some(source.to_owned()),
+            has_legacy_import: false,
         }
     }
 

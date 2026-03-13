@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Added
+- Semantic diagnostics: wrong argument count (ERROR) for functions and mixins, undefined variable/function/mixin warnings (WARNING) with false-positive suppression for `@import` files and CSS global functions
+- Diagnostic cascade: when a dependency file changes, diagnostics are re-published for all open files that import it
 - Selection ranges: smart expand/shrink selection (Shift+Alt+→/←) that follows the AST structure — token → node → parent → root
 - Document highlights: highlight all occurrences of the symbol under the cursor (variables, functions, mixins, placeholders) with read/write distinction
 - Folding ranges: collapsible regions for rule blocks, at-rules, multi-line comments, consecutive `//` comment groups, and `// #region` / `// #endregion` markers
