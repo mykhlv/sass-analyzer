@@ -1254,30 +1254,30 @@ fn calc_with_variable() {
     check(
         "$w: calc($base + 10px);",
         expect![[r#"
-        SOURCE_FILE@0..23
-          VARIABLE_DECL@0..23
-            DOLLAR@0..1 "$"
-            IDENT@1..2 "w"
-            COLON@2..3 ":"
-            CALCULATION@3..22
-              WHITESPACE@3..4 " "
-              IDENT@4..8 "calc"
-              LPAREN@8..9 "("
-              CALC_SUM@9..21
-                CALC_VALUE@9..14
-                  VARIABLE_REF@9..14
-                    DOLLAR@9..10 "$"
-                    IDENT@10..14 "base"
-                WHITESPACE@14..15 " "
-                PLUS@15..16 "+"
-                CALC_VALUE@16..21
-                  DIMENSION@16..21
-                    WHITESPACE@16..17 " "
-                    NUMBER@17..19 "10"
-                    IDENT@19..21 "px"
-              RPAREN@21..22 ")"
-            SEMICOLON@22..23 ";"
-    "#]],
+            SOURCE_FILE@0..23
+              VARIABLE_DECL@0..23
+                DOLLAR@0..1 "$"
+                IDENT@1..2 "w"
+                COLON@2..3 ":"
+                FUNCTION_CALL@3..22
+                  WHITESPACE@3..4 " "
+                  IDENT@4..8 "calc"
+                  ARG_LIST@8..22
+                    LPAREN@8..9 "("
+                    ARG@9..21
+                      BINARY_EXPR@9..21
+                        VARIABLE_REF@9..14
+                          DOLLAR@9..10 "$"
+                          IDENT@10..14 "base"
+                        WHITESPACE@14..15 " "
+                        PLUS@15..16 "+"
+                        DIMENSION@16..21
+                          WHITESPACE@16..17 " "
+                          NUMBER@17..19 "10"
+                          IDENT@19..21 "px"
+                    RPAREN@21..22 ")"
+                SEMICOLON@22..23 ";"
+        "#]],
     );
 }
 
@@ -2474,49 +2474,48 @@ fn integration_calc_in_declaration() {
     check(
         "div { width: calc(100% - 2 * $gap); }",
         expect![[r#"
-        SOURCE_FILE@0..37
-          RULE_SET@0..37
-            SELECTOR_LIST@0..3
-              SELECTOR@0..3
-                SIMPLE_SELECTOR@0..3
-                  IDENT@0..3 "div"
-            BLOCK@3..37
-              WHITESPACE@3..4 " "
-              LBRACE@4..5 "{"
-              DECLARATION@5..35
-                PROPERTY@5..11
-                  WHITESPACE@5..6 " "
-                  IDENT@6..11 "width"
-                COLON@11..12 ":"
-                VALUE@12..34
-                  CALCULATION@12..34
-                    WHITESPACE@12..13 " "
-                    IDENT@13..17 "calc"
-                    LPAREN@17..18 "("
-                    CALC_SUM@18..33
-                      CALC_VALUE@18..22
-                        DIMENSION@18..22
-                          NUMBER@18..21 "100"
-                          PERCENT@21..22 "%"
-                      WHITESPACE@22..23 " "
-                      MINUS@23..24 "-"
-                      CALC_PRODUCT@24..33
-                        CALC_VALUE@24..26
-                          NUMBER_LITERAL@24..26
-                            WHITESPACE@24..25 " "
-                            NUMBER@25..26 "2"
-                        WHITESPACE@26..27 " "
-                        STAR@27..28 "*"
-                        CALC_VALUE@28..33
-                          VARIABLE_REF@28..33
-                            WHITESPACE@28..29 " "
-                            DOLLAR@29..30 "$"
-                            IDENT@30..33 "gap"
-                    RPAREN@33..34 ")"
-                SEMICOLON@34..35 ";"
-              WHITESPACE@35..36 " "
-              RBRACE@36..37 "}"
-    "#]],
+            SOURCE_FILE@0..37
+              RULE_SET@0..37
+                SELECTOR_LIST@0..3
+                  SELECTOR@0..3
+                    SIMPLE_SELECTOR@0..3
+                      IDENT@0..3 "div"
+                BLOCK@3..37
+                  WHITESPACE@3..4 " "
+                  LBRACE@4..5 "{"
+                  DECLARATION@5..35
+                    PROPERTY@5..11
+                      WHITESPACE@5..6 " "
+                      IDENT@6..11 "width"
+                    COLON@11..12 ":"
+                    VALUE@12..34
+                      FUNCTION_CALL@12..34
+                        WHITESPACE@12..13 " "
+                        IDENT@13..17 "calc"
+                        ARG_LIST@17..34
+                          LPAREN@17..18 "("
+                          ARG@18..33
+                            BINARY_EXPR@18..33
+                              DIMENSION@18..22
+                                NUMBER@18..21 "100"
+                                PERCENT@21..22 "%"
+                              WHITESPACE@22..23 " "
+                              MINUS@23..24 "-"
+                              BINARY_EXPR@24..33
+                                NUMBER_LITERAL@24..26
+                                  WHITESPACE@24..25 " "
+                                  NUMBER@25..26 "2"
+                                WHITESPACE@26..27 " "
+                                STAR@27..28 "*"
+                                VARIABLE_REF@28..33
+                                  WHITESPACE@28..29 " "
+                                  DOLLAR@29..30 "$"
+                                  IDENT@30..33 "gap"
+                          RPAREN@33..34 ")"
+                    SEMICOLON@34..35 ";"
+                  WHITESPACE@35..36 " "
+                  RBRACE@36..37 "}"
+        "#]],
     );
 }
 
@@ -3381,5 +3380,187 @@ fn interpolation_in_selector_property_value() {
                   WHITESPACE@28..29 " "
                   RBRACE@29..30 "}"
         "##]],
+    );
+}
+
+// ── sass-spec false negative regression tests ────────────────────────────
+
+#[test]
+fn important_in_mixin_arg() {
+    check(
+        "a { @include foo(1px !important); }",
+        expect![[r#"
+            SOURCE_FILE@0..35
+              RULE_SET@0..35
+                SELECTOR_LIST@0..1
+                  SELECTOR@0..1
+                    SIMPLE_SELECTOR@0..1
+                      IDENT@0..1 "a"
+                BLOCK@1..35
+                  WHITESPACE@1..2 " "
+                  LBRACE@2..3 "{"
+                  INCLUDE_RULE@3..33
+                    WHITESPACE@3..4 " "
+                    AT@4..5 "@"
+                    IDENT@5..12 "include"
+                    WHITESPACE@12..13 " "
+                    IDENT@13..16 "foo"
+                    ARG_LIST@16..32
+                      LPAREN@16..17 "("
+                      ARG@17..31
+                        DIMENSION@17..20
+                          NUMBER@17..18 "1"
+                          IDENT@18..20 "px"
+                        IMPORTANT@20..31
+                          WHITESPACE@20..21 " "
+                          BANG@21..22 "!"
+                          IDENT@22..31 "important"
+                      RPAREN@31..32 ")"
+                    SEMICOLON@32..33 ";"
+                  WHITESPACE@33..34 " "
+                  RBRACE@34..35 "}"
+        "#]],
+    );
+}
+
+#[test]
+fn progid_function_in_declaration() {
+    check(
+        "a { filter: progid:DXImageTransform.Microsoft.Alpha(Opacity=80); }",
+        expect![[r#"
+            SOURCE_FILE@0..66
+              RULE_SET@0..66
+                SELECTOR_LIST@0..1
+                  SELECTOR@0..1
+                    SIMPLE_SELECTOR@0..1
+                      IDENT@0..1 "a"
+                BLOCK@1..66
+                  WHITESPACE@1..2 " "
+                  LBRACE@2..3 "{"
+                  DECLARATION@3..64
+                    PROPERTY@3..10
+                      WHITESPACE@3..4 " "
+                      IDENT@4..10 "filter"
+                    COLON@10..11 ":"
+                    VALUE@11..63
+                      SPECIAL_FUNCTION_CALL@11..63
+                        WHITESPACE@11..12 " "
+                        IDENT@12..18 "progid"
+                        COLON@18..19 ":"
+                        IDENT@19..35 "DXImageTransform"
+                        DOT@35..36 "."
+                        IDENT@36..45 "Microsoft"
+                        DOT@45..46 "."
+                        IDENT@46..51 "Alpha"
+                        LPAREN@51..52 "("
+                        IDENT@52..59 "Opacity"
+                        EQ@59..60 "="
+                        NUMBER@60..62 "80"
+                        RPAREN@62..63 ")"
+                    SEMICOLON@63..64 ";"
+                  WHITESPACE@64..65 " "
+                  RBRACE@65..66 "}"
+        "#]],
+    );
+}
+
+#[test]
+fn expression_special_function() {
+    check(
+        "a { width: expression(document.body.clientWidth); }",
+        expect![[r#"
+            SOURCE_FILE@0..51
+              RULE_SET@0..51
+                SELECTOR_LIST@0..1
+                  SELECTOR@0..1
+                    SIMPLE_SELECTOR@0..1
+                      IDENT@0..1 "a"
+                BLOCK@1..51
+                  WHITESPACE@1..2 " "
+                  LBRACE@2..3 "{"
+                  DECLARATION@3..49
+                    PROPERTY@3..9
+                      WHITESPACE@3..4 " "
+                      IDENT@4..9 "width"
+                    COLON@9..10 ":"
+                    VALUE@10..48
+                      SPECIAL_FUNCTION_CALL@10..48
+                        WHITESPACE@10..11 " "
+                        IDENT@11..21 "expression"
+                        LPAREN@21..22 "("
+                        IDENT@22..30 "document"
+                        DOT@30..31 "."
+                        IDENT@31..35 "body"
+                        DOT@35..36 "."
+                        IDENT@36..47 "clientWidth"
+                        RPAREN@47..48 ")"
+                    SEMICOLON@48..49 ";"
+                  WHITESPACE@49..50 " "
+                  RBRACE@50..51 "}"
+        "#]],
+    );
+}
+
+#[test]
+fn progid_function_in_expression() {
+    check(
+        "$x: progid:DXImageTransform.Microsoft.Alpha(Opacity=80);",
+        expect![[r#"
+            SOURCE_FILE@0..56
+              VARIABLE_DECL@0..56
+                DOLLAR@0..1 "$"
+                IDENT@1..2 "x"
+                COLON@2..3 ":"
+                SPECIAL_FUNCTION_CALL@3..55
+                  WHITESPACE@3..4 " "
+                  IDENT@4..10 "progid"
+                  COLON@10..11 ":"
+                  IDENT@11..27 "DXImageTransform"
+                  DOT@27..28 "."
+                  IDENT@28..37 "Microsoft"
+                  DOT@37..38 "."
+                  IDENT@38..43 "Alpha"
+                  LPAREN@43..44 "("
+                  IDENT@44..51 "Opacity"
+                  EQ@51..52 "="
+                  NUMBER@52..54 "80"
+                  RPAREN@54..55 ")"
+                SEMICOLON@55..56 ";"
+        "#]],
+    );
+}
+
+#[test]
+fn alpha_eq_function() {
+    check(
+        "a { filter: alpha(opacity=50); }",
+        expect![[r#"
+            SOURCE_FILE@0..32
+              RULE_SET@0..32
+                SELECTOR_LIST@0..1
+                  SELECTOR@0..1
+                    SIMPLE_SELECTOR@0..1
+                      IDENT@0..1 "a"
+                BLOCK@1..32
+                  WHITESPACE@1..2 " "
+                  LBRACE@2..3 "{"
+                  DECLARATION@3..30
+                    PROPERTY@3..10
+                      WHITESPACE@3..4 " "
+                      IDENT@4..10 "filter"
+                    COLON@10..11 ":"
+                    VALUE@11..29
+                      SPECIAL_FUNCTION_CALL@11..29
+                        WHITESPACE@11..12 " "
+                        IDENT@12..17 "alpha"
+                        LPAREN@17..18 "("
+                        IDENT@18..25 "opacity"
+                        EQ@25..26 "="
+                        NUMBER@26..28 "50"
+                        RPAREN@28..29 ")"
+                    SEMICOLON@29..30 ";"
+                  WHITESPACE@30..31 " "
+                  RBRACE@31..32 "}"
+        "#]],
     );
 }

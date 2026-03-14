@@ -1,17 +1,16 @@
 use crate::parser::Parser;
 #[allow(clippy::wildcard_imports)]
 use crate::syntax_kind::*;
-use crate::token_set::TokenSet;
 
-const BLOCK_STOP: TokenSet = TokenSet::new(&[LBRACE, RBRACE, SEMICOLON]);
-const BLOCK_OR_COMMA_STOP: TokenSet = TokenSet::new(&[LBRACE, RBRACE, SEMICOLON, COMMA]);
-
-/// `@media query { }`
+/// `@media condition { }`
 pub fn media_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // media
+
+    // Media query list — opaque until `;` or `{`
     media_query_list(p);
+
     if p.at(LBRACE) {
         super::block(p);
     } else {
@@ -20,29 +19,26 @@ pub fn media_rule(p: &mut Parser<'_>) {
     let _ = m.complete(p, MEDIA_RULE);
 }
 
-/// Parse comma-separated media queries.
 fn media_query_list(p: &mut Parser<'_>) {
-    media_query(p);
-    while p.eat(COMMA) {
-        media_query(p);
-    }
-}
-
-/// Parse a single media query.
-/// Handles: `screen`, `not print`, `(width >= 768px)`, `screen and (color)`, etc.
-/// Also handles interpolation `#{$var}`.
-fn media_query(p: &mut Parser<'_>) {
     let m = p.start();
-    super::eat_opaque_condition(p, BLOCK_OR_COMMA_STOP);
+    super::eat_opaque_condition(p, BLOCK_STOP);
     let _ = m.complete(p, MEDIA_QUERY);
 }
+
+/// Tokens that stop opaque condition consumption.
+#[rustfmt::skip]
+const BLOCK_STOP: crate::token_set::TokenSet = crate::token_set::TokenSet::new(&[
+    LBRACE, RBRACE, SEMICOLON,
+]);
 
 /// `@supports condition { }`
 pub fn supports_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // supports
+
     supports_condition(p);
+
     if p.at(LBRACE) {
         super::block(p);
     } else {
@@ -51,7 +47,6 @@ pub fn supports_rule(p: &mut Parser<'_>) {
     let _ = m.complete(p, SUPPORTS_RULE);
 }
 
-/// Parse a @supports condition: `not`/`and`/`or` combinators with `(prop: value)`.
 fn supports_condition(p: &mut Parser<'_>) {
     let m = p.start();
     super::eat_opaque_condition(p, BLOCK_STOP);
@@ -64,14 +59,19 @@ pub fn keyframes_rule(p: &mut Parser<'_>) {
     p.bump(); // @
     p.bump(); // keyframes / -webkit-keyframes / etc.
 
-    // Name (can be interpolated)
+    // Name (can be interpolated, a variable, or omitted for anonymous)
     if p.at(HASH_LBRACE) {
         let _ = super::interpolation(p);
     } else if p.at(IDENT) {
         p.bump();
-    } else {
-        p.error("expected keyframes name");
+    } else if p.at(DOLLAR) {
+        // `$variable` used literally as name
+        p.bump();
+        if p.at(IDENT) {
+            p.bump();
+        }
     }
+    // Empty name (anonymous keyframes) — no error, proceed to block
 
     if !p.at(LBRACE) {
         p.error("expected `{`");
@@ -84,8 +84,14 @@ pub fn keyframes_rule(p: &mut Parser<'_>) {
     while !p.at(RBRACE) && !p.at_end() {
         if p.at(SEMICOLON) {
             p.bump();
-        } else if p.at(IDENT) || p.at(NUMBER) {
+        } else if p.at(DOLLAR) {
+            // Variable declaration inside keyframes: `$b: 10%;`
+            super::expressions::variable_declaration(p);
+        } else if p.at(IDENT) || p.at(NUMBER) || p.at(HASH_LBRACE) {
             keyframe_block(p);
+        } else if p.at(AT) {
+            // Allow nested at-rules (e.g., @at-root inside keyframes)
+            super::at_rule(p);
         } else {
             p.err_and_bump("expected keyframe selector");
         }
@@ -113,7 +119,7 @@ fn keyframe_block(p: &mut Parser<'_>) {
     let _ = m.complete(p, KEYFRAME_SELECTOR);
 }
 
-/// Parse a single keyframe stop: `from`, `to`, or `50%`
+/// Parse a single keyframe stop: `from`, `to`, `50%`, or `#{interpolation}`
 fn keyframe_selector(p: &mut Parser<'_>) {
     match p.current() {
         IDENT => {
@@ -130,6 +136,9 @@ fn keyframe_selector(p: &mut Parser<'_>) {
             if p.at(PERCENT) && !p.has_whitespace_before() {
                 p.bump();
             }
+        }
+        HASH_LBRACE => {
+            let _ = super::interpolation(p);
         }
         _ => {
             p.error("expected keyframe selector");

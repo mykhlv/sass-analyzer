@@ -121,7 +121,7 @@ fn ident_or_call(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarke
             let m = p.start();
             p.bump(); // IDENT (namespace)
             p.bump(); // DOT
-            let _ = super::functions::function_call(p, ctx);
+            let _ = super::functions::function_dispatch(p, ctx);
             return Some(m.complete(p, NAMESPACE_REF));
         }
     }
@@ -141,6 +141,11 @@ fn ident_or_call(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarke
     // In SassScript, `and`/`or` are infix operators — don't consume as atom
     if ctx == ParseContext::SassScript && (text == "and" || text == "or") {
         return None;
+    }
+
+    // progid:Namespace.Class(args) — multi-token IE filter function name
+    if text.eq_ignore_ascii_case("progid") && p.nth(1) == COLON {
+        return Some(super::functions::progid_function_call(p));
     }
 
     // Check for function call: IDENT immediately followed by LPAREN (no whitespace)

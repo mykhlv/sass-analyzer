@@ -469,18 +469,17 @@ fn each_simple() {
                 IDENT@7..8 "x"
                 WHITESPACE@8..9 " "
                 IDENT@9..11 "in"
-                LIST_EXPR@11..19
-                  VALUE@11..13
-                    WHITESPACE@11..12 " "
-                    IDENT@12..13 "a"
-                  COMMA@13..14 ","
-                  VALUE@14..16
-                    WHITESPACE@14..15 " "
-                    IDENT@15..16 "b"
-                  COMMA@16..17 ","
-                  VALUE@17..19
-                    WHITESPACE@17..18 " "
-                    IDENT@18..19 "c"
+                VALUE@11..13
+                  WHITESPACE@11..12 " "
+                  IDENT@12..13 "a"
+                COMMA@13..14 ","
+                VALUE@14..16
+                  WHITESPACE@14..15 " "
+                  IDENT@15..16 "b"
+                COMMA@16..17 ","
+                VALUE@17..19
+                  WHITESPACE@17..18 " "
+                  IDENT@18..19 "c"
                 BLOCK@19..23
                   WHITESPACE@19..20 " "
                   LBRACE@20..21 "{"
@@ -2062,18 +2061,17 @@ fn error_each_missing_in() {
                 WHITESPACE@5..6 " "
                 DOLLAR@6..7 "$"
                 IDENT@7..8 "x"
-                LIST_EXPR@8..16
-                  NUMBER_LITERAL@8..10
-                    WHITESPACE@8..9 " "
-                    NUMBER@9..10 "1"
-                  COMMA@10..11 ","
-                  NUMBER_LITERAL@11..13
-                    WHITESPACE@11..12 " "
-                    NUMBER@12..13 "2"
-                  COMMA@13..14 ","
-                  NUMBER_LITERAL@14..16
-                    WHITESPACE@14..15 " "
-                    NUMBER@15..16 "3"
+                NUMBER_LITERAL@8..10
+                  WHITESPACE@8..9 " "
+                  NUMBER@9..10 "1"
+                COMMA@10..11 ","
+                NUMBER_LITERAL@11..13
+                  WHITESPACE@11..12 " "
+                  NUMBER@12..13 "2"
+                COMMA@13..14 ","
+                NUMBER_LITERAL@14..16
+                  WHITESPACE@14..15 " "
+                  NUMBER@15..16 "3"
                 BLOCK@16..20
                   WHITESPACE@16..17 " "
                   LBRACE@17..18 "{"
@@ -2289,6 +2287,447 @@ fn forward_as_hide_combined() {
                 WHITESPACE@28..29 " "
                 IDENT@29..37 "_private"
                 SEMICOLON@37..38 ";"
+        "#]],
+    );
+}
+
+// ── sass-spec false negative regression tests ────────────────────────────
+
+#[test]
+fn elseif_deprecated_no_space() {
+    check(
+        "@if true { a: b } @elseif false { c: d }",
+        expect![[r#"
+            SOURCE_FILE@0..40
+              IF_RULE@0..40
+                AT@0..1 "@"
+                IDENT@1..3 "if"
+                BOOL_LITERAL@3..8
+                  WHITESPACE@3..4 " "
+                  IDENT@4..8 "true"
+                BLOCK@8..17
+                  WHITESPACE@8..9 " "
+                  LBRACE@9..10 "{"
+                  DECLARATION@10..15
+                    PROPERTY@10..12
+                      WHITESPACE@10..11 " "
+                      IDENT@11..12 "a"
+                    COLON@12..13 ":"
+                    VALUE@13..15
+                      VALUE@13..15
+                        WHITESPACE@13..14 " "
+                        IDENT@14..15 "b"
+                  WHITESPACE@15..16 " "
+                  RBRACE@16..17 "}"
+                ELSE_CLAUSE@17..40
+                  WHITESPACE@17..18 " "
+                  AT@18..19 "@"
+                  IDENT@19..25 "elseif"
+                  BOOL_LITERAL@25..31
+                    WHITESPACE@25..26 " "
+                    IDENT@26..31 "false"
+                  BLOCK@31..40
+                    WHITESPACE@31..32 " "
+                    LBRACE@32..33 "{"
+                    DECLARATION@33..38
+                      PROPERTY@33..35
+                        WHITESPACE@33..34 " "
+                        IDENT@34..35 "c"
+                      COLON@35..36 ":"
+                      VALUE@36..38
+                        VALUE@36..38
+                          WHITESPACE@36..37 " "
+                          IDENT@37..38 "d"
+                    WHITESPACE@38..39 " "
+                    RBRACE@39..40 "}"
+        "#]],
+    );
+}
+
+#[test]
+fn keyframes_interpolated_selector() {
+    check(
+        "@keyframes a { #{$b} { c: d } }",
+        expect![[r##"
+            SOURCE_FILE@0..31
+              KEYFRAMES_RULE@0..31
+                AT@0..1 "@"
+                IDENT@1..10 "keyframes"
+                WHITESPACE@10..11 " "
+                IDENT@11..12 "a"
+                WHITESPACE@12..13 " "
+                LBRACE@13..14 "{"
+                KEYFRAME_SELECTOR@14..29
+                  INTERPOLATION@14..20
+                    WHITESPACE@14..15 " "
+                    HASH_LBRACE@15..17 "#{"
+                    VARIABLE_REF@17..19
+                      DOLLAR@17..18 "$"
+                      IDENT@18..19 "b"
+                    RBRACE@19..20 "}"
+                  BLOCK@20..29
+                    WHITESPACE@20..21 " "
+                    LBRACE@21..22 "{"
+                    DECLARATION@22..27
+                      PROPERTY@22..24
+                        WHITESPACE@22..23 " "
+                        IDENT@23..24 "c"
+                      COLON@24..25 ":"
+                      VALUE@25..27
+                        VALUE@25..27
+                          WHITESPACE@25..26 " "
+                          IDENT@26..27 "d"
+                    WHITESPACE@27..28 " "
+                    RBRACE@28..29 "}"
+                WHITESPACE@29..30 " "
+                RBRACE@30..31 "}"
+        "##]],
+    );
+}
+
+#[test]
+fn keyframes_anonymous() {
+    check(
+        "@keyframes { from { a: b } }",
+        expect![[r#"
+            SOURCE_FILE@0..28
+              KEYFRAMES_RULE@0..28
+                AT@0..1 "@"
+                IDENT@1..10 "keyframes"
+                WHITESPACE@10..11 " "
+                LBRACE@11..12 "{"
+                KEYFRAME_SELECTOR@12..26
+                  WHITESPACE@12..13 " "
+                  IDENT@13..17 "from"
+                  BLOCK@17..26
+                    WHITESPACE@17..18 " "
+                    LBRACE@18..19 "{"
+                    DECLARATION@19..24
+                      PROPERTY@19..21
+                        WHITESPACE@19..20 " "
+                        IDENT@20..21 "a"
+                      COLON@21..22 ":"
+                      VALUE@22..24
+                        VALUE@22..24
+                          WHITESPACE@22..23 " "
+                          IDENT@23..24 "b"
+                    WHITESPACE@24..25 " "
+                    RBRACE@25..26 "}"
+                WHITESPACE@26..27 " "
+                RBRACE@27..28 "}"
+        "#]],
+    );
+}
+
+#[test]
+fn keyframes_variable_name() {
+    check(
+        "@keyframes $name { to { a: b } }",
+        expect![[r#"
+            SOURCE_FILE@0..32
+              KEYFRAMES_RULE@0..32
+                AT@0..1 "@"
+                IDENT@1..10 "keyframes"
+                WHITESPACE@10..11 " "
+                DOLLAR@11..12 "$"
+                IDENT@12..16 "name"
+                WHITESPACE@16..17 " "
+                LBRACE@17..18 "{"
+                KEYFRAME_SELECTOR@18..30
+                  WHITESPACE@18..19 " "
+                  IDENT@19..21 "to"
+                  BLOCK@21..30
+                    WHITESPACE@21..22 " "
+                    LBRACE@22..23 "{"
+                    DECLARATION@23..28
+                      PROPERTY@23..25
+                        WHITESPACE@23..24 " "
+                        IDENT@24..25 "a"
+                      COLON@25..26 ":"
+                      VALUE@26..28
+                        VALUE@26..28
+                          WHITESPACE@26..27 " "
+                          IDENT@27..28 "b"
+                    WHITESPACE@28..29 " "
+                    RBRACE@29..30 "}"
+                WHITESPACE@30..31 " "
+                RBRACE@31..32 "}"
+        "#]],
+    );
+}
+
+#[test]
+fn keyframes_variable_declaration() {
+    check(
+        "@keyframes a { $x: 10%; #{$x} { c: d } }",
+        expect![[r##"
+            SOURCE_FILE@0..40
+              KEYFRAMES_RULE@0..40
+                AT@0..1 "@"
+                IDENT@1..10 "keyframes"
+                WHITESPACE@10..11 " "
+                IDENT@11..12 "a"
+                WHITESPACE@12..13 " "
+                LBRACE@13..14 "{"
+                VARIABLE_DECL@14..23
+                  WHITESPACE@14..15 " "
+                  DOLLAR@15..16 "$"
+                  IDENT@16..17 "x"
+                  COLON@17..18 ":"
+                  DIMENSION@18..22
+                    WHITESPACE@18..19 " "
+                    NUMBER@19..21 "10"
+                    PERCENT@21..22 "%"
+                  SEMICOLON@22..23 ";"
+                KEYFRAME_SELECTOR@23..38
+                  INTERPOLATION@23..29
+                    WHITESPACE@23..24 " "
+                    HASH_LBRACE@24..26 "#{"
+                    VARIABLE_REF@26..28
+                      DOLLAR@26..27 "$"
+                      IDENT@27..28 "x"
+                    RBRACE@28..29 "}"
+                  BLOCK@29..38
+                    WHITESPACE@29..30 " "
+                    LBRACE@30..31 "{"
+                    DECLARATION@31..36
+                      PROPERTY@31..33
+                        WHITESPACE@31..32 " "
+                        IDENT@32..33 "c"
+                      COLON@33..34 ":"
+                      VALUE@34..36
+                        VALUE@34..36
+                          WHITESPACE@34..35 " "
+                          IDENT@35..36 "d"
+                    WHITESPACE@36..37 " "
+                    RBRACE@37..38 "}"
+                WHITESPACE@38..39 " "
+                RBRACE@39..40 "}"
+        "##]],
+    );
+}
+
+#[test]
+fn extend_comma_separated() {
+    check(
+        ".a { @extend .b, .c; }",
+        expect![[r#"
+            SOURCE_FILE@0..22
+              RULE_SET@0..22
+                SELECTOR_LIST@0..2
+                  SELECTOR@0..2
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "a"
+                BLOCK@2..22
+                  WHITESPACE@2..3 " "
+                  LBRACE@3..4 "{"
+                  EXTEND_RULE@4..20
+                    WHITESPACE@4..5 " "
+                    AT@5..6 "@"
+                    IDENT@6..12 "extend"
+                    WHITESPACE@12..13 " "
+                    DOT@13..14 "."
+                    IDENT@14..15 "b"
+                    COMMA@15..16 ","
+                    WHITESPACE@16..17 " "
+                    DOT@17..18 "."
+                    IDENT@18..19 "c"
+                    SEMICOLON@19..20 ";"
+                  WHITESPACE@20..21 " "
+                  RBRACE@21..22 "}"
+        "#]],
+    );
+}
+
+#[test]
+fn each_space_separated() {
+    check(
+        "@each $n in 1px 2px 3px { a: $n }",
+        expect![[r#"
+            SOURCE_FILE@0..33
+              EACH_RULE@0..33
+                AT@0..1 "@"
+                IDENT@1..5 "each"
+                WHITESPACE@5..6 " "
+                DOLLAR@6..7 "$"
+                IDENT@7..8 "n"
+                WHITESPACE@8..9 " "
+                IDENT@9..11 "in"
+                DIMENSION@11..15
+                  WHITESPACE@11..12 " "
+                  NUMBER@12..13 "1"
+                  IDENT@13..15 "px"
+                DIMENSION@15..19
+                  WHITESPACE@15..16 " "
+                  NUMBER@16..17 "2"
+                  IDENT@17..19 "px"
+                DIMENSION@19..23
+                  WHITESPACE@19..20 " "
+                  NUMBER@20..21 "3"
+                  IDENT@21..23 "px"
+                BLOCK@23..33
+                  WHITESPACE@23..24 " "
+                  LBRACE@24..25 "{"
+                  DECLARATION@25..31
+                    PROPERTY@25..27
+                      WHITESPACE@25..26 " "
+                      IDENT@26..27 "a"
+                    COLON@27..28 ":"
+                    VALUE@28..31
+                      VARIABLE_REF@28..31
+                        WHITESPACE@28..29 " "
+                        DOLLAR@29..30 "$"
+                        IDENT@30..31 "n"
+                  WHITESPACE@31..32 " "
+                  RBRACE@32..33 "}"
+        "#]],
+    );
+}
+
+#[test]
+fn generic_at_rule_interpolated_name() {
+    check(
+        "@#{\"foo\"} bar { a: b }",
+        expect![[r##"
+            SOURCE_FILE@0..22
+              GENERIC_AT_RULE@0..22
+                AT@0..1 "@"
+                INTERPOLATION@1..9
+                  HASH_LBRACE@1..3 "#{"
+                  STRING_LITERAL@3..8
+                    QUOTED_STRING@3..8 "\"foo\""
+                  RBRACE@8..9 "}"
+                WHITESPACE@9..10 " "
+                IDENT@10..13 "bar"
+                BLOCK@13..22
+                  WHITESPACE@13..14 " "
+                  LBRACE@14..15 "{"
+                  DECLARATION@15..20
+                    PROPERTY@15..17
+                      WHITESPACE@15..16 " "
+                      IDENT@16..17 "a"
+                    COLON@17..18 ":"
+                    VALUE@18..20
+                      VALUE@18..20
+                        WHITESPACE@18..19 " "
+                        IDENT@19..20 "b"
+                  WHITESPACE@20..21 " "
+                  RBRACE@21..22 "}"
+        "##]],
+    );
+}
+
+#[test]
+fn generic_at_rule_interpolated_value() {
+    check(
+        "@foo bar#{$baz} qux { a: b }",
+        expect![[r##"
+            SOURCE_FILE@0..28
+              GENERIC_AT_RULE@0..28
+                AT@0..1 "@"
+                IDENT@1..4 "foo"
+                WHITESPACE@4..5 " "
+                IDENT@5..8 "bar"
+                INTERPOLATION@8..15
+                  HASH_LBRACE@8..10 "#{"
+                  VARIABLE_REF@10..14
+                    DOLLAR@10..11 "$"
+                    IDENT@11..14 "baz"
+                  RBRACE@14..15 "}"
+                WHITESPACE@15..16 " "
+                IDENT@16..19 "qux"
+                BLOCK@19..28
+                  WHITESPACE@19..20 " "
+                  LBRACE@20..21 "{"
+                  DECLARATION@21..26
+                    PROPERTY@21..23
+                      WHITESPACE@21..22 " "
+                      IDENT@22..23 "a"
+                    COLON@23..24 ":"
+                    VALUE@24..26
+                      VALUE@24..26
+                        WHITESPACE@24..25 " "
+                        IDENT@25..26 "b"
+                  WHITESPACE@26..27 " "
+                  RBRACE@27..28 "}"
+        "##]],
+    );
+}
+
+#[test]
+fn css_function_declaration() {
+    check(
+        "@function --my-fn() { result: b }",
+        expect![[r#"
+            SOURCE_FILE@0..33
+              GENERIC_AT_RULE@0..33
+                AT@0..1 "@"
+                IDENT@1..9 "function"
+                WHITESPACE@9..10 " "
+                IDENT@10..17 "--my-fn"
+                LPAREN@17..18 "("
+                RPAREN@18..19 ")"
+                BLOCK@19..33
+                  WHITESPACE@19..20 " "
+                  LBRACE@20..21 "{"
+                  DECLARATION@21..31
+                    PROPERTY@21..28
+                      WHITESPACE@21..22 " "
+                      IDENT@22..28 "result"
+                    COLON@28..29 ":"
+                    VALUE@29..31
+                      VALUE@29..31
+                        WHITESPACE@29..30 " "
+                        IDENT@30..31 "b"
+                  WHITESPACE@31..32 " "
+                  RBRACE@32..33 "}"
+        "#]],
+    );
+}
+
+#[test]
+fn at_root_query_quoted_string() {
+    check(
+        "@at-root (without: \"media\") { a { b: c } }",
+        expect![[r#"
+            SOURCE_FILE@0..42
+              AT_ROOT_RULE@0..42
+                AT@0..1 "@"
+                IDENT@1..8 "at-root"
+                AT_ROOT_QUERY@8..27
+                  WHITESPACE@8..9 " "
+                  LPAREN@9..10 "("
+                  IDENT@10..17 "without"
+                  COLON@17..18 ":"
+                  WHITESPACE@18..19 " "
+                  QUOTED_STRING@19..26 "\"media\""
+                  RPAREN@26..27 ")"
+                BLOCK@27..42
+                  WHITESPACE@27..28 " "
+                  LBRACE@28..29 "{"
+                  RULE_SET@29..40
+                    SELECTOR_LIST@29..31
+                      SELECTOR@29..31
+                        SIMPLE_SELECTOR@29..31
+                          WHITESPACE@29..30 " "
+                          IDENT@30..31 "a"
+                    BLOCK@31..40
+                      WHITESPACE@31..32 " "
+                      LBRACE@32..33 "{"
+                      DECLARATION@33..38
+                        PROPERTY@33..35
+                          WHITESPACE@33..34 " "
+                          IDENT@34..35 "b"
+                        COLON@35..36 ":"
+                        VALUE@36..38
+                          VALUE@36..38
+                            WHITESPACE@36..37 " "
+                            IDENT@37..38 "c"
+                      WHITESPACE@38..39 " "
+                      RBRACE@39..40 "}"
+                  WHITESPACE@40..41 " "
+                  RBRACE@41..42 "}"
         "#]],
     );
 }
