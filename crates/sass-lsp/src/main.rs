@@ -2,7 +2,6 @@ mod ast_helpers;
 mod builtins;
 mod call_hierarchy;
 mod code_actions;
-mod colors;
 mod completion;
 mod config;
 mod convert;
@@ -34,13 +33,12 @@ use tower_lsp_server::ls_types::{
     CallHierarchyIncomingCall, CallHierarchyIncomingCallsParams, CallHierarchyItem,
     CallHierarchyOutgoingCall, CallHierarchyOutgoingCallsParams, CallHierarchyPrepareParams,
     CallHierarchyServerCapability, CodeActionKind, CodeActionOptions, CodeActionOrCommand,
-    CodeActionParams, CodeActionProviderCapability, ColorInformation, ColorPresentation,
-    ColorPresentationParams, ColorProviderCapability, CompletionOptions, CompletionParams,
+    CodeActionParams, CodeActionProviderCapability, CompletionOptions, CompletionParams,
     CompletionResponse, DidChangeConfigurationParams, DidChangeTextDocumentParams,
     DidChangeWatchedFilesParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DidSaveTextDocumentParams, DocumentColorParams, DocumentHighlight, DocumentHighlightParams,
-    DocumentLinkOptions, DocumentLinkParams, DocumentSymbolParams, DocumentSymbolResponse,
-    FileChangeType, FileSystemWatcher, FoldingRange, FoldingRangeParams,
+    DidSaveTextDocumentParams, DocumentHighlight, DocumentHighlightParams, DocumentLinkOptions,
+    DocumentLinkParams, DocumentSymbolParams, DocumentSymbolResponse, ExecuteCommandOptions,
+    ExecuteCommandParams, FileChangeType, FileSystemWatcher, FoldingRange, FoldingRangeParams,
     FoldingRangeProviderCapability, GlobPattern, GotoDefinitionParams, GotoDefinitionResponse,
     Hover, HoverParams, InitializeParams, InitializeResult, InitializedParams, InlayHint,
     InlayHintParams, Location, OneOf, PrepareRenameResponse, ReferenceParams, Registration,
@@ -71,6 +69,9 @@ pub(crate) enum Task {
     },
     ExternalDelete {
         uri: Uri,
+    },
+    CheckWorkspace {
+        root: PathBuf,
     },
 }
 
@@ -267,7 +268,6 @@ impl LanguageServer for Backend {
                     work_done_progress_options: WorkDoneProgressOptions::default(),
                 }),
                 workspace_symbol_provider: Some(OneOf::Left(true)),
-                color_provider: Some(ColorProviderCapability::Simple(true)),
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
                 document_highlight_provider: Some(OneOf::Left(true)),
                 selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
@@ -282,6 +282,10 @@ impl LanguageServer for Backend {
                         ..CodeActionOptions::default()
                     },
                 )),
+                execute_command_provider: Some(ExecuteCommandOptions {
+                    commands: vec!["sass-analyzer.checkWorkspace".to_owned()],
+                    ..ExecuteCommandOptions::default()
+                }),
                 ..ServerCapabilities::default()
             },
             server_info: Some(ServerInfo {
@@ -608,10 +612,6 @@ impl LanguageServer for Backend {
         ))
     }
 
-    async fn document_color(&self, params: DocumentColorParams) -> Result<Vec<ColorInformation>> {
-        Ok(colors::handle_document_color(&self.documents, params))
-    }
-
     async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
         Ok(Some(folding::handle_folding_range(&self.documents, params)))
     }
@@ -682,11 +682,22 @@ impl LanguageServer for Backend {
         )
     }
 
-    async fn color_presentation(
+    async fn execute_command(
         &self,
-        params: ColorPresentationParams,
-    ) -> Result<Vec<ColorPresentation>> {
-        Ok(colors::handle_color_presentation(&params))
+        params: ExecuteCommandParams,
+    ) -> Result<Option<serde_json::Value>> {
+        if params.command == "sass-analyzer.checkWorkspace" {
+            let root = self
+                .workspace_root
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
+            if let Some(root) = root {
+                let _ = self.task_tx.send(Task::CheckWorkspace { root });
+            }
+            return Ok(None);
+        }
+        Err(tower_lsp_server::jsonrpc::Error::method_not_found())
     }
 
     #[allow(deprecated)]
