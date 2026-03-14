@@ -1,3 +1,5 @@
+use std::fmt::Write;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SassDoc {
     pub description: Option<String>,
@@ -326,10 +328,10 @@ pub fn format_markdown(doc: &SassDoc) -> String {
             }
             let mut line = format!("- `${}`", p.name);
             if let Some(ty) = &p.type_annotation {
-                line.push_str(&format!(" `{{{ty}}}`"));
+                let _ = write!(line, " `{{{ty}}}`");
             }
             if let Some(desc) = &p.description {
-                line.push_str(&format!(" — {desc}"));
+                let _ = write!(line, " — {desc}");
             }
             param_lines.push(line);
         }
@@ -341,10 +343,10 @@ pub fn format_markdown(doc: &SassDoc) -> String {
     if let Some(ret) = &doc.return_doc {
         let mut line = String::from("**@return**");
         if let Some(ty) = &ret.type_annotation {
-            line.push_str(&format!(" `{{{ty}}}`"));
+            let _ = write!(line, " `{{{ty}}}`");
         }
         if let Some(desc) = &ret.description {
-            line.push_str(&format!(" — {desc}"));
+            let _ = write!(line, " — {desc}");
         }
         parts.push(line);
     }

@@ -177,10 +177,10 @@ impl<V: Vfs> ModuleResolver<V> {
         }
 
         // 6. Walk up node_modules
-        if self.node_modules_enabled {
-            if let Some(path) = self.resolve_node_modules(spec, base) {
-                return Ok(ResolvedModule::File(path));
-            }
+        if self.node_modules_enabled
+            && let Some(path) = self.resolve_node_modules(spec, base)
+        {
+            return Ok(ResolvedModule::File(path));
         }
 
         Err(ResolveError::NotFound(spec.to_owned()))
@@ -252,10 +252,10 @@ impl<V: Vfs> ModuleResolver<V> {
             let best = targets
                 .iter()
                 .max_by_key(|t| common_prefix_len(t, base_dir));
-            if let Some(target) = best {
-                if let Some(path) = self.resolve_in_dir(target, rest) {
-                    return Some(path);
-                }
+            if let Some(target) = best
+                && let Some(path) = self.resolve_in_dir(target, rest)
+            {
+                return Some(path);
             }
             // Fallback: try all targets in order.
             for target in targets {

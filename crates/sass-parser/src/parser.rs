@@ -267,7 +267,7 @@ impl CompletedMarker {
         new_pos
     }
 
-    #[allow(clippy::match_on_vec_items)]
+    #[allow(clippy::indexing_slicing)]
     pub fn kind(&self, p: &Parser<'_>) -> SyntaxKind {
         match p.events[self.pos as usize] {
             Event::Enter { kind, .. } => kind,

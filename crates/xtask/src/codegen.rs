@@ -209,16 +209,16 @@ fn extract_fields_inner(
                         cardinality: Cardinality::Many,
                     });
                 }
-            } else if let Rule::Labeled { label, rule } = rule.as_ref() {
-                if let Some((ty, _)) = resolve_field_type(grammar, rule) {
-                    let name = label.clone();
-                    if seen.insert(name.clone()) {
-                        fields.push(Field::Node {
-                            name,
-                            ty,
-                            cardinality: Cardinality::Many,
-                        });
-                    }
+            } else if let Rule::Labeled { label, rule } = rule.as_ref()
+                && let Some((ty, _)) = resolve_field_type(grammar, rule)
+            {
+                let name = label.clone();
+                if seen.insert(name.clone()) {
+                    fields.push(Field::Node {
+                        name,
+                        ty,
+                        cardinality: Cardinality::Many,
+                    });
                 }
             }
         }

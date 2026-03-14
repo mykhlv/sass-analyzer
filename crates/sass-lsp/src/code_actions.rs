@@ -227,20 +227,19 @@ fn compute_use_path(
     let spec = normalize_sass_path(&rel);
 
     // Round-trip validation: check that the spec resolves back to target
-    if let Some(resolved_uri) = module_graph.resolve_import(from_uri, &spec) {
-        if resolved_uri == *target_uri {
-            return Some(spec);
-        }
+    if let Some(resolved_uri) = module_graph.resolve_import(from_uri, &spec)
+        && resolved_uri == *target_uri
+    {
+        return Some(spec);
     }
 
     // Fallback: try without stripping _ (non-partial files)
     let spec2 = normalize_extension_only(&rel);
-    if spec2 != spec {
-        if let Some(resolved_uri) = module_graph.resolve_import(from_uri, &spec2) {
-            if resolved_uri == *target_uri {
-                return Some(spec2);
-            }
-        }
+    if spec2 != spec
+        && let Some(resolved_uri) = module_graph.resolve_import(from_uri, &spec2)
+        && resolved_uri == *target_uri
+    {
+        return Some(spec2);
     }
 
     None

@@ -110,15 +110,15 @@ pub(crate) fn detect_completion_context(line: &str, character: u32) -> Completio
     }
 
     // After `$` — variable completion
-    if before.ends_with('$') || (before.contains('$') && !before.ends_with(' ')) {
-        if let Some(dollar_pos) = before.rfind('$') {
-            let after_dollar = &before[dollar_pos + 1..];
-            if after_dollar
-                .chars()
-                .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
-            {
-                return CompletionContext::Variable;
-            }
+    if (before.ends_with('$') || (before.contains('$') && !before.ends_with(' ')))
+        && let Some(dollar_pos) = before.rfind('$')
+    {
+        let after_dollar = &before[dollar_pos + 1..];
+        if after_dollar
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+        {
+            return CompletionContext::Variable;
         }
     }
 
@@ -126,23 +126,22 @@ pub(crate) fn detect_completion_context(line: &str, character: u32) -> Completio
     // Guard against pseudo-selectors (`a:hover`, `&:focus`, `:root`) by requiring
     // the text before `:` to look like a CSS property name — must contain a hyphen
     // or be at least 2 chars long (excludes single-letter tag selectors like `a:hover`).
-    if let Some(colon_pos) = trimmed.find(':') {
-        if !trimmed.starts_with('@')
-            && !trimmed.starts_with('$')
-            && !trimmed.starts_with('&')
-            && !trimmed.starts_with(':')
-            && colon_pos > 0
-        {
-            let prop_candidate = trimmed[..colon_pos].trim();
-            let looks_like_property = prop_candidate.len() >= 2
-                && prop_candidate
-                    .bytes()
-                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
-            if looks_like_property {
-                let prop = prop_candidate.to_owned();
-                let partial = trimmed[colon_pos + 1..].trim_start().to_owned();
-                return CompletionContext::PropertyValue(prop, partial);
-            }
+    if let Some(colon_pos) = trimmed.find(':')
+        && !trimmed.starts_with('@')
+        && !trimmed.starts_with('$')
+        && !trimmed.starts_with('&')
+        && !trimmed.starts_with(':')
+        && colon_pos > 0
+    {
+        let prop_candidate = trimmed[..colon_pos].trim();
+        let looks_like_property = prop_candidate.len() >= 2
+            && prop_candidate
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+        if looks_like_property {
+            let prop = prop_candidate.to_owned();
+            let partial = trimmed[colon_pos + 1..].trim_start().to_owned();
+            return CompletionContext::PropertyValue(prop, partial);
         }
     }
 
