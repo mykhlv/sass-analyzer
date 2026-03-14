@@ -77,6 +77,41 @@ async fn recv_msg(
     }
 }
 
+/// Read until a response with the given `id` arrives, skipping notifications
+/// and auto-responding to server→client requests. Use this instead of `recv_msg`
+/// when the server may emit extra diagnostics between request and response.
+async fn recv_response(
+    reader: &mut (impl AsyncReadExt + Unpin),
+    writer: &mut (impl AsyncWriteExt + Unpin),
+    id: u64,
+) -> Value {
+    loop {
+        let msg = recv_msg_raw(reader).await;
+        // Server→client request: auto-respond
+        if msg.get("method").is_some() && msg.get("id").is_some() {
+            send_msg(
+                writer,
+                &serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": msg["id"],
+                    "result": null
+                }),
+            )
+            .await;
+            continue;
+        }
+        // Notification (no "id" field) — skip
+        if msg.get("id").is_none() {
+            continue;
+        }
+        // Response with matching id
+        if msg["id"] == id {
+            return msg;
+        }
+        // Response with different id — skip (shouldn't happen normally)
+    }
+}
+
 /// Spawn the LSP server on in-memory duplex streams, return client-side handles.
 fn spawn_server() -> (tokio::io::DuplexStream, tokio::io::DuplexStream) {
     let (client_read, server_write) = tokio::io::duplex(1024 * 64);
@@ -6550,7 +6585,7 @@ async fn call_hierarchy_cross_file_incoming() {
     )
     .await;
 
-    let resp = recv_msg(&mut reader, &mut writer).await;
+    let resp = recv_response(&mut reader, &mut writer, 100).await;
     let items = resp["result"].as_array().unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["name"], "double");
@@ -6568,7 +6603,7 @@ async fn call_hierarchy_cross_file_incoming() {
     )
     .await;
 
-    let resp = recv_msg(&mut reader, &mut writer).await;
+    let resp = recv_response(&mut reader, &mut writer, 101).await;
     let calls = resp["result"].as_array().unwrap();
     assert_eq!(
         calls.len(),
@@ -6656,7 +6691,7 @@ async fn call_hierarchy_cross_file_outgoing() {
     )
     .await;
 
-    let resp = recv_msg(&mut reader, &mut writer).await;
+    let resp = recv_response(&mut reader, &mut writer, 102).await;
     let items = resp["result"].as_array().unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["name"], "quadruple");
@@ -6674,7 +6709,7 @@ async fn call_hierarchy_cross_file_outgoing() {
     )
     .await;
 
-    let resp = recv_msg(&mut reader, &mut writer).await;
+    let resp = recv_response(&mut reader, &mut writer, 103).await;
     let calls = resp["result"].as_array().unwrap();
     assert_eq!(calls.len(), 1, "quadruple calls one unique target (double)");
     assert_eq!(calls[0]["to"]["name"], "double");
