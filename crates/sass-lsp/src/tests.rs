@@ -9,6 +9,8 @@ use tokio::sync::mpsc;
 use tower_lsp_server::LspService;
 use tower_lsp_server::ls_types::{ParameterLabel, Position, Range, TextDocumentContentChangeEvent};
 
+use std::path::Path;
+
 use crate::completion::fuzzy_score;
 use crate::config;
 use crate::convert::{apply_content_changes, byte_to_lsp_pos, lsp_pos_to_byte};
@@ -16,6 +18,15 @@ use crate::semantic_tokens::{MOD_DECLARATION, TOK_VARIABLE};
 use crate::signature_help::parse_param_labels;
 use crate::worker::run_worker;
 use crate::workspace;
+
+/// Convert a filesystem path to a proper `file://` URI string.
+/// Uses `Uri::from_file_path` to match the server's internal URI construction,
+/// ensuring URI equality checks work across platforms (especially Windows).
+fn file_uri(path: &Path) -> String {
+    tower_lsp_server::ls_types::Uri::from_file_path(path)
+        .expect("failed to convert path to URI")
+        .to_string()
+}
 
 /// Send a JSON-RPC message with Content-Length framing.
 async fn send_msg(writer: &mut (impl AsyncWriteExt + Unpin), msg: &Value) {
@@ -3450,6 +3461,36 @@ fn completion_context_detection() {
     assert!(matches!(ctx, CompletionContext::Extend));
 }
 
+async fn do_initialize_with_root(
+    reader: &mut (impl AsyncReadExt + Unpin),
+    writer: &mut (impl AsyncWriteExt + Unpin),
+    root_uri: &str,
+) -> Value {
+    send_msg(
+        writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": { "capabilities": {}, "rootUri": root_uri }
+        }),
+    )
+    .await;
+    let resp = recv_msg(reader, writer).await;
+
+    send_msg(
+        writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "initialized",
+            "params": {}
+        }),
+    )
+    .await;
+
+    resp
+}
+
 async fn do_initialize_with(
     reader: &mut (impl AsyncReadExt + Unpin),
     writer: &mut (impl AsyncWriteExt + Unpin),
@@ -6515,12 +6556,12 @@ async fn call_hierarchy_nested_callable_not_attributed_to_outer() {
 
 #[tokio::test]
 async fn call_hierarchy_cross_file_incoming() {
-    let (mut reader, mut writer) = spawn_server();
-    do_initialize(&mut reader, &mut writer).await;
-
-    // Create temp directory with two SCSS files
+    // Create temp directory BEFORE initialize so we can pass it as rootUri.
     let dir = std::env::temp_dir().join(format!("sass_ch_cross_{}", std::process::id()));
     let _ = std::fs::create_dir_all(&dir);
+
+    let (mut reader, mut writer) = spawn_server();
+    do_initialize_with_root(&mut reader, &mut writer, &file_uri(&dir)).await;
     let helpers_path = dir.join("_helpers.scss");
     let main_path = dir.join("main.scss");
 
@@ -6530,10 +6571,10 @@ async fn call_hierarchy_cross_file_incoming() {
     std::fs::write(&helpers_path, helpers_scss).unwrap();
     std::fs::write(&main_path, main_scss).unwrap();
 
-    let helpers_uri = format!("file://{}", helpers_path.display());
-    let main_uri = format!("file://{}", main_path.display());
+    let helpers_uri = file_uri(&helpers_path);
+    let main_uri = file_uri(&main_path);
 
-    // Open both files
+    // Open both files.
     send_msg(
         &mut writer,
         &serde_json::json!({
@@ -6550,8 +6591,6 @@ async fn call_hierarchy_cross_file_incoming() {
         }),
     )
     .await;
-    let _diag = recv_msg(&mut reader, &mut writer).await;
-
     send_msg(
         &mut writer,
         &serde_json::json!({
@@ -6568,50 +6607,74 @@ async fn call_hierarchy_cross_file_incoming() {
         }),
     )
     .await;
-    let _diag = recv_msg(&mut reader, &mut writer).await;
 
-    // Prepare on "double" definition in _helpers.scss
-    send_msg(
-        &mut writer,
-        &serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 100,
-            "method": "textDocument/prepareCallHierarchy",
-            "params": {
-                "textDocument": { "uri": helpers_uri },
-                "position": { "line": 0, "character": 10 }
+    // Retry prepareCallHierarchy until the server has indexed the file.
+    // tower-lsp-server processes didOpen concurrently, so the file may not
+    // be ready on the first attempt.
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    let mut id = 100u64;
+    let item = loop {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "prepareCallHierarchy never returned a result for helpers"
+        );
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "method": "textDocument/prepareCallHierarchy",
+                "params": {
+                    "textDocument": { "uri": helpers_uri },
+                    "position": { "line": 0, "character": 10 }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_response(&mut reader, &mut writer, id).await;
+        id += 1;
+        if let Some(items) = resp["result"].as_array() {
+            if !items.is_empty() {
+                assert_eq!(items[0]["name"], "double");
+                break items[0].clone();
             }
-        }),
-    )
-    .await;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    };
 
-    let resp = recv_response(&mut reader, &mut writer, 100).await;
-    let items = resp["result"].as_array().unwrap();
-    assert_eq!(items.len(), 1);
-    assert_eq!(items[0]["name"], "double");
-    let item = items[0].clone();
+    // Incoming calls — retry until the cross-file reference is indexed.
+    let calls = loop {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "incomingCalls never returned results"
+        );
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "method": "callHierarchy/incomingCalls",
+                "params": { "item": item }
+            }),
+        )
+        .await;
 
-    // Incoming calls — double is called from main.scss (top-level)
-    send_msg(
-        &mut writer,
-        &serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 101,
-            "method": "callHierarchy/incomingCalls",
-            "params": { "item": item }
-        }),
-    )
-    .await;
+        let resp = recv_response(&mut reader, &mut writer, id).await;
+        id += 1;
+        if let Some(arr) = resp["result"].as_array() {
+            if !arr.is_empty() {
+                break arr.clone();
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    };
 
-    let resp = recv_response(&mut reader, &mut writer, 101).await;
-    let calls = resp["result"].as_array().unwrap();
     assert_eq!(
         calls.len(),
         1,
         "double is called from one location (main.scss top-level)"
     );
-
-    // The caller is a file-level item from main.scss
     let from = &calls[0]["from"];
     assert_eq!(from["name"], "main.scss");
 
@@ -6621,12 +6684,12 @@ async fn call_hierarchy_cross_file_incoming() {
 
 #[tokio::test]
 async fn call_hierarchy_cross_file_outgoing() {
-    let (mut reader, mut writer) = spawn_server();
-    do_initialize(&mut reader, &mut writer).await;
-
-    // Create temp directory with two SCSS files
+    // Create temp directory BEFORE initialize so we can pass it as rootUri.
     let dir = std::env::temp_dir().join(format!("sass_ch_cross_out_{}", std::process::id()));
     let _ = std::fs::create_dir_all(&dir);
+
+    let (mut reader, mut writer) = spawn_server();
+    do_initialize_with_root(&mut reader, &mut writer, &file_uri(&dir)).await;
     let helpers_path = dir.join("_helpers.scss");
     let main_path = dir.join("main.scss");
 
@@ -6636,10 +6699,10 @@ async fn call_hierarchy_cross_file_outgoing() {
     std::fs::write(&helpers_path, helpers_scss).unwrap();
     std::fs::write(&main_path, main_scss).unwrap();
 
-    let helpers_uri = format!("file://{}", helpers_path.display());
-    let main_uri = format!("file://{}", main_path.display());
+    let helpers_uri = file_uri(&helpers_path);
+    let main_uri = file_uri(&main_path);
 
-    // Open both files
+    // Open both files.
     send_msg(
         &mut writer,
         &serde_json::json!({
@@ -6656,8 +6719,6 @@ async fn call_hierarchy_cross_file_outgoing() {
         }),
     )
     .await;
-    let _diag = recv_msg(&mut reader, &mut writer).await;
-
     send_msg(
         &mut writer,
         &serde_json::json!({
@@ -6674,43 +6735,67 @@ async fn call_hierarchy_cross_file_outgoing() {
         }),
     )
     .await;
-    let _diag = recv_msg(&mut reader, &mut writer).await;
 
-    // Prepare on "quadruple" definition in main.scss
-    send_msg(
-        &mut writer,
-        &serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 102,
-            "method": "textDocument/prepareCallHierarchy",
-            "params": {
-                "textDocument": { "uri": main_uri },
-                "position": { "line": 1, "character": 10 }
+    // Retry prepareCallHierarchy until the server has indexed the file.
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    let mut id = 200u64;
+    let item = loop {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "prepareCallHierarchy never returned a result for main"
+        );
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "method": "textDocument/prepareCallHierarchy",
+                "params": {
+                    "textDocument": { "uri": main_uri },
+                    "position": { "line": 1, "character": 10 }
+                }
+            }),
+        )
+        .await;
+
+        let resp = recv_response(&mut reader, &mut writer, id).await;
+        id += 1;
+        if let Some(items) = resp["result"].as_array() {
+            if !items.is_empty() {
+                assert_eq!(items[0]["name"], "quadruple");
+                break items[0].clone();
             }
-        }),
-    )
-    .await;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    };
 
-    let resp = recv_response(&mut reader, &mut writer, 102).await;
-    let items = resp["result"].as_array().unwrap();
-    assert_eq!(items.len(), 1);
-    assert_eq!(items[0]["name"], "quadruple");
-    let item = items[0].clone();
+    // Outgoing calls — retry until cross-file resolution is ready.
+    let calls = loop {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "outgoingCalls never returned results"
+        );
+        send_msg(
+            &mut writer,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "method": "callHierarchy/outgoingCalls",
+                "params": { "item": item }
+            }),
+        )
+        .await;
 
-    // Outgoing calls — quadruple calls helpers.double (twice, grouped as one target)
-    send_msg(
-        &mut writer,
-        &serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 103,
-            "method": "callHierarchy/outgoingCalls",
-            "params": { "item": item }
-        }),
-    )
-    .await;
+        let resp = recv_response(&mut reader, &mut writer, id).await;
+        id += 1;
+        if let Some(arr) = resp["result"].as_array() {
+            if !arr.is_empty() {
+                break arr.clone();
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    };
 
-    let resp = recv_response(&mut reader, &mut writer, 103).await;
-    let calls = resp["result"].as_array().unwrap();
     assert_eq!(calls.len(), 1, "quadruple calls one unique target (double)");
     assert_eq!(calls[0]["to"]["name"], "double");
     assert_eq!(
