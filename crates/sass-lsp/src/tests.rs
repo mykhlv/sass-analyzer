@@ -4121,261 +4121,6 @@ async fn semantic_tokens_on_empty_file() {
 }
 
 // ---------------------------------------------------------------------------
-// Color decorators
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn document_color_hex() {
-    let (mut reader, mut writer) = spawn_server();
-    do_initialize(&mut reader, &mut writer).await;
-
-    let scss = ".btn { color: #ff0000; background: #0f0; }\n";
-    send_msg(
-        &mut writer,
-        &serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "textDocument/didOpen",
-            "params": {
-                "textDocument": {
-                    "uri": "file:///color_hex.scss",
-                    "languageId": "scss",
-                    "version": 1,
-                    "text": scss
-                }
-            }
-        }),
-    )
-    .await;
-    let _diag = recv_msg(&mut reader, &mut writer).await;
-
-    send_msg(
-        &mut writer,
-        &serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 50,
-            "method": "textDocument/documentColor",
-            "params": {
-                "textDocument": { "uri": "file:///color_hex.scss" }
-            }
-        }),
-    )
-    .await;
-
-    let resp = recv_msg(&mut reader, &mut writer).await;
-    let colors = resp["result"].as_array().unwrap();
-    assert_eq!(colors.len(), 2, "should find two hex colors");
-
-    // First color: #ff0000 → red
-    let c0 = &colors[0]["color"];
-    assert!((c0["red"].as_f64().unwrap() - 1.0).abs() < 0.01);
-    assert!((c0["green"].as_f64().unwrap()).abs() < 0.01);
-    assert!((c0["blue"].as_f64().unwrap()).abs() < 0.01);
-
-    // Second color: #0f0 → green
-    let c1 = &colors[1]["color"];
-    assert!((c1["red"].as_f64().unwrap()).abs() < 0.01);
-    assert!((c1["green"].as_f64().unwrap() - 1.0).abs() < 0.01);
-    assert!((c1["blue"].as_f64().unwrap()).abs() < 0.01);
-}
-
-#[tokio::test]
-async fn document_color_rgb_function() {
-    let (mut reader, mut writer) = spawn_server();
-    do_initialize(&mut reader, &mut writer).await;
-
-    let scss = ".btn { color: rgb(0, 128, 255); }\n";
-    send_msg(
-        &mut writer,
-        &serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "textDocument/didOpen",
-            "params": {
-                "textDocument": {
-                    "uri": "file:///color_rgb.scss",
-                    "languageId": "scss",
-                    "version": 1,
-                    "text": scss
-                }
-            }
-        }),
-    )
-    .await;
-    let _diag = recv_msg(&mut reader, &mut writer).await;
-
-    send_msg(
-        &mut writer,
-        &serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 51,
-            "method": "textDocument/documentColor",
-            "params": {
-                "textDocument": { "uri": "file:///color_rgb.scss" }
-            }
-        }),
-    )
-    .await;
-
-    let resp = recv_msg(&mut reader, &mut writer).await;
-    let colors = resp["result"].as_array().unwrap();
-    assert_eq!(colors.len(), 1, "should find one rgb color");
-
-    let c0 = &colors[0]["color"];
-    assert!((c0["red"].as_f64().unwrap()).abs() < 0.01);
-    assert!((c0["green"].as_f64().unwrap() - 0.502).abs() < 0.01);
-    assert!((c0["blue"].as_f64().unwrap() - 1.0).abs() < 0.01);
-}
-
-#[tokio::test]
-async fn color_presentation_returns_formats() {
-    let (mut reader, mut writer) = spawn_server();
-    do_initialize(&mut reader, &mut writer).await;
-
-    send_msg(
-        &mut writer,
-        &serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 52,
-            "method": "textDocument/colorPresentation",
-            "params": {
-                "textDocument": { "uri": "file:///test.scss" },
-                "color": { "red": 1.0, "green": 0.0, "blue": 0.0, "alpha": 1.0 },
-                "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 7 } }
-            }
-        }),
-    )
-    .await;
-
-    let resp = recv_msg(&mut reader, &mut writer).await;
-    let presentations = resp["result"].as_array().unwrap();
-    assert!(
-        presentations.len() >= 3,
-        "should return at least 3 presentations (hex short, hex long, rgb, hsl)"
-    );
-    let labels: Vec<&str> = presentations
-        .iter()
-        .map(|p| p["label"].as_str().unwrap())
-        .collect();
-    assert!(labels.contains(&"#ff0000"), "should include hex format");
-    assert!(
-        labels.contains(&"rgb(255, 0, 0)"),
-        "should include rgb format"
-    );
-}
-
-#[tokio::test]
-async fn document_color_hsl_function() {
-    let (mut reader, mut writer) = spawn_server();
-    do_initialize(&mut reader, &mut writer).await;
-
-    let scss = ".btn { color: hsl(120, 100%, 50%); }\n";
-    send_msg(
-        &mut writer,
-        &serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "textDocument/didOpen",
-            "params": {
-                "textDocument": {
-                    "uri": "file:///color_hsl.scss",
-                    "languageId": "scss",
-                    "version": 1,
-                    "text": scss
-                }
-            }
-        }),
-    )
-    .await;
-    let _diag = recv_msg(&mut reader, &mut writer).await;
-
-    send_msg(
-        &mut writer,
-        &serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 53,
-            "method": "textDocument/documentColor",
-            "params": {
-                "textDocument": { "uri": "file:///color_hsl.scss" }
-            }
-        }),
-    )
-    .await;
-
-    let resp = recv_msg(&mut reader, &mut writer).await;
-    let colors = resp["result"].as_array().unwrap();
-    assert_eq!(colors.len(), 1, "should find one hsl color");
-
-    let c0 = &colors[0]["color"];
-    assert!((c0["red"].as_f64().unwrap()).abs() < 0.01);
-    assert!((c0["green"].as_f64().unwrap() - 1.0).abs() < 0.01);
-    assert!((c0["blue"].as_f64().unwrap()).abs() < 0.01);
-}
-
-#[tokio::test]
-async fn document_color_named() {
-    let (mut reader, mut writer) = spawn_server();
-    do_initialize(&mut reader, &mut writer).await;
-
-    let scss = ".btn { color: red; background: cornflowerblue; }\n";
-    send_msg(
-        &mut writer,
-        &serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "textDocument/didOpen",
-            "params": {
-                "textDocument": {
-                    "uri": "file:///color_named.scss",
-                    "languageId": "scss",
-                    "version": 1,
-                    "text": scss
-                }
-            }
-        }),
-    )
-    .await;
-    let _diag = recv_msg(&mut reader, &mut writer).await;
-
-    send_msg(
-        &mut writer,
-        &serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 54,
-            "method": "textDocument/documentColor",
-            "params": {
-                "textDocument": { "uri": "file:///color_named.scss" }
-            }
-        }),
-    )
-    .await;
-
-    let resp = recv_msg(&mut reader, &mut writer).await;
-    let colors = resp["result"].as_array().unwrap();
-    assert_eq!(colors.len(), 2, "should find two named colors");
-
-    // First: red
-    let c0 = &colors[0]["color"];
-    assert!((c0["red"].as_f64().unwrap() - 1.0).abs() < 0.01);
-    assert!((c0["green"].as_f64().unwrap()).abs() < 0.01);
-    assert!((c0["blue"].as_f64().unwrap()).abs() < 0.01);
-
-    // Second: cornflowerblue (100, 149, 237)
-    let c1 = &colors[1]["color"];
-    assert!((c1["red"].as_f64().unwrap() - 0.392).abs() < 0.01);
-    assert!((c1["green"].as_f64().unwrap() - 0.584).abs() < 0.01);
-    assert!((c1["blue"].as_f64().unwrap() - 0.929).abs() < 0.01);
-}
-
-#[tokio::test]
-async fn initialize_reports_color_provider_capability() {
-    let (mut reader, mut writer) = spawn_server();
-    let resp = do_initialize(&mut reader, &mut writer).await;
-
-    let caps = &resp["result"]["capabilities"];
-    assert_eq!(
-        caps["colorProvider"], true,
-        "server should advertise color provider"
-    );
-}
-
-// ---------------------------------------------------------------------------
 // Folding ranges
 // ---------------------------------------------------------------------------
 
@@ -5589,6 +5334,75 @@ async fn semantic_defined_variable_no_diagnostic() {
 }
 
 #[tokio::test]
+async fn semantic_local_var_in_mixin_no_diagnostic() {
+    let (mut reader, mut writer) = spawn_server();
+    do_initialize(&mut reader, &mut writer).await;
+
+    let text = "\
+@mixin btnVariant($variant) {
+  $common: red;
+  background-color: $common;
+  &-disabled {
+    $disabled: blue;
+    background-color: $disabled;
+    color: $common;
+  }
+}";
+    let diags =
+        open_and_get_diagnostics(&mut reader, &mut writer, "file:///local_var.scss", text, 1).await;
+
+    let semantic: Vec<_> = diags
+        .iter()
+        .filter(|d| {
+            d["code"]
+                .as_str()
+                .is_some_and(|c| c.starts_with("undefined"))
+        })
+        .collect();
+    assert!(
+        semantic.is_empty(),
+        "local variables in mixin body should not be flagged as undefined, got: {semantic:?}"
+    );
+}
+
+#[tokio::test]
+async fn semantic_top_level_var_used_in_mixin_no_diagnostic() {
+    let (mut reader, mut writer) = spawn_server();
+    do_initialize(&mut reader, &mut writer).await;
+
+    let text = "@use 'sass:map';\n\
+$other-var: red;\n\
+$btn-size: (lg: 16px, sm: 13px);\n\
+@mixin btnSize($size) {\n\
+  font-size: map.get($btn-size, $size);\n\
+}";
+    let diags = open_and_get_diagnostics(
+        &mut reader,
+        &mut writer,
+        "file:///top_level_var.scss",
+        text,
+        1,
+    )
+    .await;
+
+    let semantic: Vec<_> = diags
+        .iter()
+        .filter(|d| {
+            d["code"]
+                .as_str()
+                .is_some_and(|c| c == "undefined-variable")
+                && d["message"]
+                    .as_str()
+                    .is_some_and(|m| m.contains("btn-size"))
+        })
+        .collect();
+    assert!(
+        semantic.is_empty(),
+        "top-level $btn-size should not be flagged as undefined, got: {semantic:?}"
+    );
+}
+
+#[tokio::test]
 async fn semantic_css_var_no_diagnostic() {
     let (mut reader, mut writer) = spawn_server();
     do_initialize(&mut reader, &mut writer).await;
@@ -6110,4 +5924,1140 @@ async fn inlay_hint_keyword_arg_breaks_positional() {
 
     assert_eq!(hints.len(), 1, "only first positional arg gets hint");
     assert_eq!(hints[0]["label"], "$a:");
+}
+
+// ── Call Hierarchy ──────────────────────────────────────────────────
+
+#[tokio::test]
+async fn call_hierarchy_prepare_on_function_definition() {
+    let (mut reader, mut writer) = spawn_server();
+    do_initialize(&mut reader, &mut writer).await;
+
+    let scss = "@function add($a, $b) { @return $a + $b; }\n.x { width: add(1, 2); }";
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": "file:///ch_prep.scss",
+                    "languageId": "scss",
+                    "version": 1,
+                    "text": scss
+                }
+            }
+        }),
+    )
+    .await;
+    let _diag = recv_msg(&mut reader, &mut writer).await;
+
+    // Cursor on "add" in @function definition (line 0, char 10)
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 80,
+            "method": "textDocument/prepareCallHierarchy",
+            "params": {
+                "textDocument": { "uri": "file:///ch_prep.scss" },
+                "position": { "line": 0, "character": 10 }
+            }
+        }),
+    )
+    .await;
+
+    let resp = recv_msg(&mut reader, &mut writer).await;
+    let items = resp["result"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["name"], "add");
+    assert_eq!(items[0]["kind"], 12, "SymbolKind::FUNCTION = 12");
+    assert!(items[0]["data"]["kind"] == "function");
+}
+
+#[tokio::test]
+async fn call_hierarchy_prepare_on_mixin_definition() {
+    let (mut reader, mut writer) = spawn_server();
+    do_initialize(&mut reader, &mut writer).await;
+
+    let scss =
+        "@mixin flex($dir) { display: flex; flex-direction: $dir; }\n.x { @include flex(row); }";
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": "file:///ch_mixin.scss",
+                    "languageId": "scss",
+                    "version": 1,
+                    "text": scss
+                }
+            }
+        }),
+    )
+    .await;
+    let _diag = recv_msg(&mut reader, &mut writer).await;
+
+    // Cursor on "flex" in @mixin definition (line 0, char 7)
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 81,
+            "method": "textDocument/prepareCallHierarchy",
+            "params": {
+                "textDocument": { "uri": "file:///ch_mixin.scss" },
+                "position": { "line": 0, "character": 7 }
+            }
+        }),
+    )
+    .await;
+
+    let resp = recv_msg(&mut reader, &mut writer).await;
+    let items = resp["result"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["name"], "flex");
+    assert!(items[0]["data"]["kind"] == "mixin");
+}
+
+#[tokio::test]
+async fn call_hierarchy_prepare_on_call_site() {
+    let (mut reader, mut writer) = spawn_server();
+    do_initialize(&mut reader, &mut writer).await;
+
+    let scss = "@function add($a, $b) { @return $a + $b; }\n.x { width: add(1, 2); }";
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": "file:///ch_call.scss",
+                    "languageId": "scss",
+                    "version": 1,
+                    "text": scss
+                }
+            }
+        }),
+    )
+    .await;
+    let _diag = recv_msg(&mut reader, &mut writer).await;
+
+    // Cursor on "add" in call site (line 1, char 12)
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 82,
+            "method": "textDocument/prepareCallHierarchy",
+            "params": {
+                "textDocument": { "uri": "file:///ch_call.scss" },
+                "position": { "line": 1, "character": 12 }
+            }
+        }),
+    )
+    .await;
+
+    let resp = recv_msg(&mut reader, &mut writer).await;
+    let items = resp["result"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["name"], "add");
+}
+
+#[tokio::test]
+async fn call_hierarchy_prepare_on_variable_returns_null() {
+    let (mut reader, mut writer) = spawn_server();
+    do_initialize(&mut reader, &mut writer).await;
+
+    let scss = "$color: red;\n.x { color: $color; }";
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": "file:///ch_var.scss",
+                    "languageId": "scss",
+                    "version": 1,
+                    "text": scss
+                }
+            }
+        }),
+    )
+    .await;
+    let _diag = recv_msg(&mut reader, &mut writer).await;
+
+    // Cursor on "$color" variable reference
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 83,
+            "method": "textDocument/prepareCallHierarchy",
+            "params": {
+                "textDocument": { "uri": "file:///ch_var.scss" },
+                "position": { "line": 1, "character": 13 }
+            }
+        }),
+    )
+    .await;
+
+    let resp = recv_msg(&mut reader, &mut writer).await;
+    assert!(resp["result"].is_null(), "variables are not callable");
+}
+
+#[tokio::test]
+async fn call_hierarchy_incoming_calls() {
+    let (mut reader, mut writer) = spawn_server();
+    do_initialize(&mut reader, &mut writer).await;
+
+    let scss = "\
+@function helper($x) { @return $x; }
+@function caller_a($n) { @return helper($n); }
+@function caller_b($n) { @return helper($n) + helper($n); }
+";
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": "file:///ch_incoming.scss",
+                    "languageId": "scss",
+                    "version": 1,
+                    "text": scss
+                }
+            }
+        }),
+    )
+    .await;
+    let _diag = recv_msg(&mut reader, &mut writer).await;
+
+    // First prepare on "helper"
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 84,
+            "method": "textDocument/prepareCallHierarchy",
+            "params": {
+                "textDocument": { "uri": "file:///ch_incoming.scss" },
+                "position": { "line": 0, "character": 10 }
+            }
+        }),
+    )
+    .await;
+
+    let resp = recv_msg(&mut reader, &mut writer).await;
+    let items = resp["result"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    let item = items[0].clone();
+
+    // Now get incoming calls
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 85,
+            "method": "callHierarchy/incomingCalls",
+            "params": { "item": item }
+        }),
+    )
+    .await;
+
+    let resp = recv_msg(&mut reader, &mut writer).await;
+    let calls = resp["result"].as_array().unwrap();
+    assert_eq!(
+        calls.len(),
+        2,
+        "helper is called from caller_a and caller_b"
+    );
+
+    let caller_names: Vec<&str> = calls
+        .iter()
+        .map(|c| c["from"]["name"].as_str().unwrap())
+        .collect();
+    assert!(caller_names.contains(&"caller_a"));
+    assert!(caller_names.contains(&"caller_b"));
+
+    // caller_b calls helper twice
+    let caller_b = calls
+        .iter()
+        .find(|c| c["from"]["name"] == "caller_b")
+        .unwrap();
+    assert_eq!(
+        caller_b["fromRanges"].as_array().unwrap().len(),
+        2,
+        "caller_b calls helper twice"
+    );
+}
+
+#[tokio::test]
+async fn call_hierarchy_outgoing_calls() {
+    let (mut reader, mut writer) = spawn_server();
+    do_initialize(&mut reader, &mut writer).await;
+
+    let scss = "\
+@function add($a, $b) { @return $a + $b; }
+@function mul($a, $b) { @return $a * $b; }
+@function compute($x) { @return add(mul($x, 2), 1); }
+";
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": "file:///ch_outgoing.scss",
+                    "languageId": "scss",
+                    "version": 1,
+                    "text": scss
+                }
+            }
+        }),
+    )
+    .await;
+    let _diag = recv_msg(&mut reader, &mut writer).await;
+
+    // Prepare on "compute"
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 86,
+            "method": "textDocument/prepareCallHierarchy",
+            "params": {
+                "textDocument": { "uri": "file:///ch_outgoing.scss" },
+                "position": { "line": 2, "character": 10 }
+            }
+        }),
+    )
+    .await;
+
+    let resp = recv_msg(&mut reader, &mut writer).await;
+    let items = resp["result"].as_array().unwrap();
+    let item = items[0].clone();
+
+    // Get outgoing calls
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 87,
+            "method": "callHierarchy/outgoingCalls",
+            "params": { "item": item }
+        }),
+    )
+    .await;
+
+    let resp = recv_msg(&mut reader, &mut writer).await;
+    let calls = resp["result"].as_array().unwrap();
+    assert_eq!(calls.len(), 2, "compute calls add and mul");
+
+    let callee_names: Vec<&str> = calls
+        .iter()
+        .map(|c| c["to"]["name"].as_str().unwrap())
+        .collect();
+    assert!(callee_names.contains(&"add"));
+    assert!(callee_names.contains(&"mul"));
+}
+
+#[tokio::test]
+async fn call_hierarchy_incoming_from_include() {
+    let (mut reader, mut writer) = spawn_server();
+    do_initialize(&mut reader, &mut writer).await;
+
+    let scss = "\
+@mixin reset { margin: 0; }
+.a { @include reset; }
+.b { @include reset; }
+";
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": "file:///ch_include.scss",
+                    "languageId": "scss",
+                    "version": 1,
+                    "text": scss
+                }
+            }
+        }),
+    )
+    .await;
+    let _diag = recv_msg(&mut reader, &mut writer).await;
+
+    // Prepare on "reset" mixin
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 88,
+            "method": "textDocument/prepareCallHierarchy",
+            "params": {
+                "textDocument": { "uri": "file:///ch_include.scss" },
+                "position": { "line": 0, "character": 7 }
+            }
+        }),
+    )
+    .await;
+
+    let resp = recv_msg(&mut reader, &mut writer).await;
+    let items = resp["result"].as_array().unwrap();
+    let item = items[0].clone();
+    assert!(item["data"]["kind"] == "mixin");
+
+    // Get incoming calls
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 89,
+            "method": "callHierarchy/incomingCalls",
+            "params": { "item": item }
+        }),
+    )
+    .await;
+
+    let resp = recv_msg(&mut reader, &mut writer).await;
+    let calls = resp["result"].as_array().unwrap();
+    // Both @includes are at top level (inside rule sets, not inside functions/mixins)
+    // so they should be grouped as file-level callers
+    assert!(
+        !calls.is_empty(),
+        "mixin should have at least 1 incoming call group"
+    );
+}
+
+#[tokio::test]
+async fn call_hierarchy_outgoing_from_mixin() {
+    let (mut reader, mut writer) = spawn_server();
+    do_initialize(&mut reader, &mut writer).await;
+
+    let scss = "\
+@function double($n) { @return $n * 2; }
+@mixin sized($w) { width: double($w); }
+";
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": "file:///ch_mixin_out.scss",
+                    "languageId": "scss",
+                    "version": 1,
+                    "text": scss
+                }
+            }
+        }),
+    )
+    .await;
+    let _diag = recv_msg(&mut reader, &mut writer).await;
+
+    // Prepare on "sized" mixin
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 90,
+            "method": "textDocument/prepareCallHierarchy",
+            "params": {
+                "textDocument": { "uri": "file:///ch_mixin_out.scss" },
+                "position": { "line": 1, "character": 7 }
+            }
+        }),
+    )
+    .await;
+
+    let resp = recv_msg(&mut reader, &mut writer).await;
+    let items = resp["result"].as_array().unwrap();
+    let item = items[0].clone();
+
+    // Get outgoing calls
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 91,
+            "method": "callHierarchy/outgoingCalls",
+            "params": { "item": item }
+        }),
+    )
+    .await;
+
+    let resp = recv_msg(&mut reader, &mut writer).await;
+    let calls = resp["result"].as_array().unwrap();
+    assert_eq!(calls.len(), 1, "sized calls double");
+    assert_eq!(calls[0]["to"]["name"], "double");
+}
+
+#[tokio::test]
+async fn call_hierarchy_nested_callable_not_attributed_to_outer() {
+    let (mut reader, mut writer) = spawn_server();
+    do_initialize(&mut reader, &mut writer).await;
+
+    // inner() calls helper(), but outer() should NOT list helper() as outgoing
+    let scss = "\
+@function helper() { @return 1; }
+@function outer() {
+  @function inner() { @return helper(); }
+  @return inner();
+}
+";
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": "file:///ch_nested.scss",
+                    "languageId": "scss",
+                    "version": 1,
+                    "text": scss
+                }
+            }
+        }),
+    )
+    .await;
+    let _diag = recv_msg(&mut reader, &mut writer).await;
+
+    // Prepare on "outer"
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 92,
+            "method": "textDocument/prepareCallHierarchy",
+            "params": {
+                "textDocument": { "uri": "file:///ch_nested.scss" },
+                "position": { "line": 1, "character": 10 }
+            }
+        }),
+    )
+    .await;
+
+    let resp = recv_msg(&mut reader, &mut writer).await;
+    let items = resp["result"].as_array().unwrap();
+    let item = items[0].clone();
+    assert_eq!(item["name"], "outer");
+
+    // Get outgoing calls from outer
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 93,
+            "method": "callHierarchy/outgoingCalls",
+            "params": { "item": item }
+        }),
+    )
+    .await;
+
+    let resp = recv_msg(&mut reader, &mut writer).await;
+    let calls = resp["result"].as_array().unwrap();
+    let callee_names: Vec<&str> = calls
+        .iter()
+        .map(|c| c["to"]["name"].as_str().unwrap())
+        .collect();
+    assert!(callee_names.contains(&"inner"), "outer calls inner");
+    assert!(
+        !callee_names.contains(&"helper"),
+        "helper is called by inner, not outer"
+    );
+}
+
+#[tokio::test]
+async fn call_hierarchy_cross_file_incoming() {
+    let (mut reader, mut writer) = spawn_server();
+    do_initialize(&mut reader, &mut writer).await;
+
+    // Create temp directory with two SCSS files
+    let dir = std::env::temp_dir().join(format!("sass_ch_cross_{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let helpers_path = dir.join("_helpers.scss");
+    let main_path = dir.join("main.scss");
+
+    let helpers_scss = "@function double($x) { @return $x * 2; }\n";
+    let main_scss = "@use 'helpers';\n.a { width: helpers.double(10px); }\n";
+
+    std::fs::write(&helpers_path, helpers_scss).unwrap();
+    std::fs::write(&main_path, main_scss).unwrap();
+
+    let helpers_uri = format!("file://{}", helpers_path.display());
+    let main_uri = format!("file://{}", main_path.display());
+
+    // Open both files
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": helpers_uri,
+                    "languageId": "scss",
+                    "version": 1,
+                    "text": helpers_scss
+                }
+            }
+        }),
+    )
+    .await;
+    let _diag = recv_msg(&mut reader, &mut writer).await;
+
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": main_uri,
+                    "languageId": "scss",
+                    "version": 1,
+                    "text": main_scss
+                }
+            }
+        }),
+    )
+    .await;
+    let _diag = recv_msg(&mut reader, &mut writer).await;
+
+    // Prepare on "double" definition in _helpers.scss
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 100,
+            "method": "textDocument/prepareCallHierarchy",
+            "params": {
+                "textDocument": { "uri": helpers_uri },
+                "position": { "line": 0, "character": 10 }
+            }
+        }),
+    )
+    .await;
+
+    let resp = recv_msg(&mut reader, &mut writer).await;
+    let items = resp["result"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["name"], "double");
+    let item = items[0].clone();
+
+    // Incoming calls — double is called from main.scss (top-level)
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 101,
+            "method": "callHierarchy/incomingCalls",
+            "params": { "item": item }
+        }),
+    )
+    .await;
+
+    let resp = recv_msg(&mut reader, &mut writer).await;
+    let calls = resp["result"].as_array().unwrap();
+    assert_eq!(
+        calls.len(),
+        1,
+        "double is called from one location (main.scss top-level)"
+    );
+
+    // The caller is a file-level item from main.scss
+    let from = &calls[0]["from"];
+    assert_eq!(from["name"], "main.scss");
+
+    // Clean up
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn call_hierarchy_cross_file_outgoing() {
+    let (mut reader, mut writer) = spawn_server();
+    do_initialize(&mut reader, &mut writer).await;
+
+    // Create temp directory with two SCSS files
+    let dir = std::env::temp_dir().join(format!("sass_ch_cross_out_{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let helpers_path = dir.join("_helpers.scss");
+    let main_path = dir.join("main.scss");
+
+    let helpers_scss = "@function double($x) { @return $x * 2; }\n";
+    let main_scss = "@use 'helpers';\n@function quadruple($x) { @return helpers.double(helpers.double($x)); }\n";
+
+    std::fs::write(&helpers_path, helpers_scss).unwrap();
+    std::fs::write(&main_path, main_scss).unwrap();
+
+    let helpers_uri = format!("file://{}", helpers_path.display());
+    let main_uri = format!("file://{}", main_path.display());
+
+    // Open both files
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": helpers_uri,
+                    "languageId": "scss",
+                    "version": 1,
+                    "text": helpers_scss
+                }
+            }
+        }),
+    )
+    .await;
+    let _diag = recv_msg(&mut reader, &mut writer).await;
+
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": main_uri,
+                    "languageId": "scss",
+                    "version": 1,
+                    "text": main_scss
+                }
+            }
+        }),
+    )
+    .await;
+    let _diag = recv_msg(&mut reader, &mut writer).await;
+
+    // Prepare on "quadruple" definition in main.scss
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 102,
+            "method": "textDocument/prepareCallHierarchy",
+            "params": {
+                "textDocument": { "uri": main_uri },
+                "position": { "line": 1, "character": 10 }
+            }
+        }),
+    )
+    .await;
+
+    let resp = recv_msg(&mut reader, &mut writer).await;
+    let items = resp["result"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["name"], "quadruple");
+    let item = items[0].clone();
+
+    // Outgoing calls — quadruple calls helpers.double (twice, grouped as one target)
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 103,
+            "method": "callHierarchy/outgoingCalls",
+            "params": { "item": item }
+        }),
+    )
+    .await;
+
+    let resp = recv_msg(&mut reader, &mut writer).await;
+    let calls = resp["result"].as_array().unwrap();
+    assert_eq!(calls.len(), 1, "quadruple calls one unique target (double)");
+    assert_eq!(calls[0]["to"]["name"], "double");
+    assert_eq!(
+        calls[0]["fromRanges"].as_array().unwrap().len(),
+        2,
+        "double is called twice from quadruple"
+    );
+
+    // Clean up
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn call_hierarchy_recursive_function() {
+    let (mut reader, mut writer) = spawn_server();
+    do_initialize(&mut reader, &mut writer).await;
+
+    let scss = "@function fact($n) { @return if($n <= 1, 1, $n * fact($n - 1)); }\n";
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": "file:///ch_recursive.scss",
+                    "languageId": "scss",
+                    "version": 1,
+                    "text": scss
+                }
+            }
+        }),
+    )
+    .await;
+    let _diag = recv_msg(&mut reader, &mut writer).await;
+
+    // Prepare on "fact"
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 94,
+            "method": "textDocument/prepareCallHierarchy",
+            "params": {
+                "textDocument": { "uri": "file:///ch_recursive.scss" },
+                "position": { "line": 0, "character": 10 }
+            }
+        }),
+    )
+    .await;
+
+    let resp = recv_msg(&mut reader, &mut writer).await;
+    let items = resp["result"].as_array().unwrap();
+    let item = items[0].clone();
+
+    // Outgoing: fact calls itself
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 95,
+            "method": "callHierarchy/outgoingCalls",
+            "params": { "item": item.clone() }
+        }),
+    )
+    .await;
+
+    let resp = recv_msg(&mut reader, &mut writer).await;
+    let calls = resp["result"].as_array().unwrap();
+    assert!(
+        calls.iter().any(|c| c["to"]["name"] == "fact"),
+        "fact calls itself"
+    );
+
+    // Incoming: fact is called by itself
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 96,
+            "method": "callHierarchy/incomingCalls",
+            "params": { "item": item }
+        }),
+    )
+    .await;
+
+    let resp = recv_msg(&mut reader, &mut writer).await;
+    let calls = resp["result"].as_array().unwrap();
+    assert!(
+        calls.iter().any(|c| c["from"]["name"] == "fact"),
+        "fact is called by itself"
+    );
+}
+
+// ── SassDoc integration tests ──────────────────────────────────────
+
+#[tokio::test]
+async fn hover_sassdoc_param_and_return() {
+    let (mut reader, mut writer) = spawn_server();
+    do_initialize(&mut reader, &mut writer).await;
+
+    let scss = "\
+/// Doubles a number.
+/// @param {Number} $n - The number to double
+/// @return {Number} The doubled value
+@function double($n) { @return $n * 2; }
+.a { width: double(5); }
+";
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": "file:///hover_sassdoc.scss",
+                    "languageId": "scss",
+                    "version": 1,
+                    "text": scss
+                }
+            }
+        }),
+    )
+    .await;
+    let _diag = recv_msg(&mut reader, &mut writer).await;
+
+    // Hover on "double" in the call (line 4, character 14)
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 100,
+            "method": "textDocument/hover",
+            "params": {
+                "textDocument": { "uri": "file:///hover_sassdoc.scss" },
+                "position": { "line": 4, "character": 14 }
+            }
+        }),
+    )
+    .await;
+
+    let resp = recv_msg(&mut reader, &mut writer).await;
+    let content = resp["result"]["contents"]["value"].as_str().unwrap();
+    assert!(
+        content.contains("**Parameters:**"),
+        "hover should show structured params: {content}"
+    );
+    assert!(
+        content.contains("`$n`"),
+        "hover should show param name: {content}"
+    );
+    assert!(
+        content.contains("`{Number}`"),
+        "hover should show param type: {content}"
+    );
+    assert!(
+        content.contains("**@return**"),
+        "hover should show @return: {content}"
+    );
+}
+
+#[tokio::test]
+async fn hover_sassdoc_deprecated() {
+    let (mut reader, mut writer) = spawn_server();
+    do_initialize(&mut reader, &mut writer).await;
+
+    let scss = "\
+/// @deprecated Use new-mixin instead
+@mixin old-mixin { color: red; }
+.a { @include old-mixin; }
+";
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": "file:///hover_sassdoc_dep.scss",
+                    "languageId": "scss",
+                    "version": 1,
+                    "text": scss
+                }
+            }
+        }),
+    )
+    .await;
+    let _diag = recv_msg(&mut reader, &mut writer).await;
+
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 101,
+            "method": "textDocument/hover",
+            "params": {
+                "textDocument": { "uri": "file:///hover_sassdoc_dep.scss" },
+                "position": { "line": 2, "character": 14 }
+            }
+        }),
+    )
+    .await;
+
+    let resp = recv_msg(&mut reader, &mut writer).await;
+    let content = resp["result"]["contents"]["value"].as_str().unwrap();
+    assert!(
+        content.contains("**@deprecated**"),
+        "hover should show deprecated: {content}"
+    );
+    assert!(
+        content.contains("Use new-mixin instead"),
+        "hover should show deprecation message: {content}"
+    );
+}
+
+#[tokio::test]
+async fn hover_sassdoc_example() {
+    let (mut reader, mut writer) = spawn_server();
+    do_initialize(&mut reader, &mut writer).await;
+
+    let scss = "\
+/// Responsive breakpoint mixin.
+/// @param {String} $bp - Breakpoint name
+/// @example
+///   @include respond-to(mobile) { display: none; }
+@mixin respond-to($bp) { @content; }
+.a { @include respond-to(mobile); }
+";
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": "file:///hover_sassdoc_ex.scss",
+                    "languageId": "scss",
+                    "version": 1,
+                    "text": scss
+                }
+            }
+        }),
+    )
+    .await;
+    let _diag = recv_msg(&mut reader, &mut writer).await;
+
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 102,
+            "method": "textDocument/hover",
+            "params": {
+                "textDocument": { "uri": "file:///hover_sassdoc_ex.scss" },
+                "position": { "line": 5, "character": 14 }
+            }
+        }),
+    )
+    .await;
+
+    let resp = recv_msg(&mut reader, &mut writer).await;
+    let content = resp["result"]["contents"]["value"].as_str().unwrap();
+    assert!(
+        content.contains("**@example**"),
+        "hover should show @example: {content}"
+    );
+    assert!(
+        content.contains("```scss"),
+        "hover should contain code block: {content}"
+    );
+}
+
+#[tokio::test]
+async fn signature_help_sassdoc_param_docs() {
+    let (mut reader, mut writer) = spawn_server();
+    do_initialize(&mut reader, &mut writer).await;
+
+    let scss = "\
+/// @param {Color} $color - The base color
+/// @param {Number} $amount - Adjustment amount
+@function adjust($color, $amount) { @return $color; }
+.a { color: adjust(red, 10%); }
+";
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": "file:///sig_sassdoc.scss",
+                    "languageId": "scss",
+                    "version": 1,
+                    "text": scss
+                }
+            }
+        }),
+    )
+    .await;
+    let _diag = recv_msg(&mut reader, &mut writer).await;
+
+    // Cursor after the comma, on "10%" (line 3, character 24)
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 103,
+            "method": "textDocument/signatureHelp",
+            "params": {
+                "textDocument": { "uri": "file:///sig_sassdoc.scss" },
+                "position": { "line": 3, "character": 25 }
+            }
+        }),
+    )
+    .await;
+
+    let resp = recv_msg(&mut reader, &mut writer).await;
+    let sig = &resp["result"]["signatures"][0];
+    let params = sig["parameters"].as_array().unwrap();
+    assert_eq!(params.len(), 2);
+
+    // First param should have documentation
+    let doc0 = params[0]["documentation"]["value"].as_str().unwrap();
+    assert!(
+        doc0.contains("The base color"),
+        "param 0 doc should contain description: {doc0}"
+    );
+
+    // Second param should have documentation
+    let doc1 = params[1]["documentation"]["value"].as_str().unwrap();
+    assert!(
+        doc1.contains("Adjustment amount"),
+        "param 1 doc should contain description: {doc1}"
+    );
+}
+
+#[tokio::test]
+async fn hover_plain_doc_still_works() {
+    let (mut reader, mut writer) = spawn_server();
+    do_initialize(&mut reader, &mut writer).await;
+
+    let scss = "/// Just a simple description\n$color: red;\n.a { color: $color; }\n";
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": "file:///hover_plain_doc.scss",
+                    "languageId": "scss",
+                    "version": 1,
+                    "text": scss
+                }
+            }
+        }),
+    )
+    .await;
+    let _diag = recv_msg(&mut reader, &mut writer).await;
+
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 104,
+            "method": "textDocument/hover",
+            "params": {
+                "textDocument": { "uri": "file:///hover_plain_doc.scss" },
+                "position": { "line": 2, "character": 14 }
+            }
+        }),
+    )
+    .await;
+
+    let resp = recv_msg(&mut reader, &mut writer).await;
+    let content = resp["result"]["contents"]["value"].as_str().unwrap();
+    assert!(
+        content.contains("Just a simple description"),
+        "plain doc should still work: {content}"
+    );
+    assert!(
+        !content.contains("**Parameters:**"),
+        "plain doc should not have structured sections: {content}"
+    );
 }

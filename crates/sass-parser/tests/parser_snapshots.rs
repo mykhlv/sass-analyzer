@@ -923,22 +923,16 @@ fn nested_property_with_value() {
                 BLOCK@1..33
                   WHITESPACE@1..2 " "
                   LBRACE@2..3 "{"
-                  RULE_SET@3..11
-                    SELECTOR_LIST@3..11
-                      SELECTOR@3..11
-                        SIMPLE_SELECTOR@3..10
-                          WHITESPACE@3..4 " "
-                          IDENT@4..10 "margin"
-                        PSEUDO_SELECTOR@10..11
-                          COLON@10..11 ":"
-                  ERROR@11..14
-                    WHITESPACE@11..12 " "
-                    NUMBER@12..14 "10"
-                  RULE_SET@14..31
-                    SELECTOR_LIST@14..16
-                      SELECTOR@14..16
-                        SIMPLE_SELECTOR@14..16
-                          IDENT@14..16 "px"
+                  NESTED_PROPERTY@3..31
+                    PROPERTY@3..10
+                      WHITESPACE@3..4 " "
+                      IDENT@4..10 "margin"
+                    COLON@10..11 ":"
+                    VALUE@11..16
+                      DIMENSION@11..16
+                        WHITESPACE@11..12 " "
+                        NUMBER@12..14 "10"
+                        IDENT@14..16 "px"
                     BLOCK@16..31
                       WHITESPACE@16..17 " "
                       LBRACE@17..18 "{"
@@ -957,10 +951,134 @@ fn nested_property_with_value() {
                       RBRACE@30..31 "}"
                   WHITESPACE@31..32 " "
                   RBRACE@32..33 "}"
-            errors:
-              12..14: expected IDENT
-              12..14: expected `{`
-              12..14: expected declaration or nested rule
+        "#]],
+    );
+}
+
+#[test]
+fn nested_property_value_and_block_zero() {
+    // Value-and-block with bare 0 (no unit)
+    check(
+        ".a { margin: 0 { bottom: 15px; } }",
+        expect![[r#"
+            SOURCE_FILE@0..34
+              RULE_SET@0..34
+                SELECTOR_LIST@0..2
+                  SELECTOR@0..2
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "a"
+                BLOCK@2..34
+                  WHITESPACE@2..3 " "
+                  LBRACE@3..4 "{"
+                  NESTED_PROPERTY@4..32
+                    PROPERTY@4..11
+                      WHITESPACE@4..5 " "
+                      IDENT@5..11 "margin"
+                    COLON@11..12 ":"
+                    VALUE@12..14
+                      NUMBER_LITERAL@12..14
+                        WHITESPACE@12..13 " "
+                        NUMBER@13..14 "0"
+                    BLOCK@14..32
+                      WHITESPACE@14..15 " "
+                      LBRACE@15..16 "{"
+                      DECLARATION@16..30
+                        PROPERTY@16..23
+                          WHITESPACE@16..17 " "
+                          IDENT@17..23 "bottom"
+                        COLON@23..24 ":"
+                        VALUE@24..29
+                          DIMENSION@24..29
+                            WHITESPACE@24..25 " "
+                            NUMBER@25..27 "15"
+                            IDENT@27..29 "px"
+                        SEMICOLON@29..30 ";"
+                      WHITESPACE@30..31 " "
+                      RBRACE@31..32 "}"
+                  WHITESPACE@32..33 " "
+                  RBRACE@33..34 "}"
+        "#]],
+    );
+}
+
+#[test]
+fn nested_property_value_and_block_variable() {
+    // Value-and-block with variable value
+    check(
+        ".b { font: $base { weight: bold; } }",
+        expect![[r#"
+            SOURCE_FILE@0..36
+              RULE_SET@0..36
+                SELECTOR_LIST@0..2
+                  SELECTOR@0..2
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "b"
+                BLOCK@2..36
+                  WHITESPACE@2..3 " "
+                  LBRACE@3..4 "{"
+                  NESTED_PROPERTY@4..34
+                    PROPERTY@4..9
+                      WHITESPACE@4..5 " "
+                      IDENT@5..9 "font"
+                    COLON@9..10 ":"
+                    VALUE@10..16
+                      VARIABLE_REF@10..16
+                        WHITESPACE@10..11 " "
+                        DOLLAR@11..12 "$"
+                        IDENT@12..16 "base"
+                    BLOCK@16..34
+                      WHITESPACE@16..17 " "
+                      LBRACE@17..18 "{"
+                      DECLARATION@18..32
+                        PROPERTY@18..25
+                          WHITESPACE@18..19 " "
+                          IDENT@19..25 "weight"
+                        COLON@25..26 ":"
+                        VALUE@26..31
+                          VALUE@26..31
+                            WHITESPACE@26..27 " "
+                            IDENT@27..31 "bold"
+                        SEMICOLON@31..32 ";"
+                      WHITESPACE@32..33 " "
+                      RBRACE@33..34 "}"
+                  WHITESPACE@34..35 " "
+                  RBRACE@35..36 "}"
+        "#]],
+    );
+}
+
+#[test]
+fn pseudo_selector_still_works() {
+    // Ensure p:hover { } is still parsed as a selector, not a declaration
+    check(
+        "p:hover { color: red; }",
+        expect![[r#"
+            SOURCE_FILE@0..23
+              RULE_SET@0..23
+                SELECTOR_LIST@0..7
+                  SELECTOR@0..7
+                    SIMPLE_SELECTOR@0..1
+                      IDENT@0..1 "p"
+                    PSEUDO_SELECTOR@1..7
+                      COLON@1..2 ":"
+                      IDENT@2..7 "hover"
+                BLOCK@7..23
+                  WHITESPACE@7..8 " "
+                  LBRACE@8..9 "{"
+                  DECLARATION@9..21
+                    PROPERTY@9..15
+                      WHITESPACE@9..10 " "
+                      IDENT@10..15 "color"
+                    COLON@15..16 ":"
+                    VALUE@16..20
+                      VALUE@16..20
+                        WHITESPACE@16..17 " "
+                        IDENT@17..20 "red"
+                    SEMICOLON@20..21 ";"
+                  WHITESPACE@21..22 " "
+                  RBRACE@22..23 "}"
         "#]],
     );
 }

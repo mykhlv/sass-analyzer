@@ -22,10 +22,11 @@ pub(crate) fn check_file(
     symbols: &FileSymbols,
     module_graph: &workspace::ModuleGraph,
     green: &GreenNode,
+    has_parse_errors: bool,
 ) -> Vec<SemanticDiagnostic> {
     let root = SyntaxNode::new_root(green.clone());
     let mut result = Vec::new();
-    let suppress_undefined = should_suppress_undefined(uri, module_graph);
+    let suppress_undefined = has_parse_errors || should_suppress_undefined(uri, module_graph);
 
     check_arg_count(&root, symbols, module_graph, uri, &mut result);
     if !suppress_undefined {
@@ -227,7 +228,7 @@ const CSS_GLOBAL_FUNCTIONS: &[&str] = &[
     "blur", "brightness", "contrast", "drop-shadow", "grayscale",
     "hue-rotate", "invert", "sepia",
     // Shapes / clip-path
-    "polygon", "circle", "ellipse", "inset", "path",
+    "polygon", "circle", "ellipse", "inset", "path", "rect",
     // Grid
     "minmax", "fit-content", "repeat",
     // Animation timing
@@ -282,10 +283,9 @@ fn check_undefined(
             RefKind::Placeholder => continue,
         };
 
-        // Skip variables that are parameters of enclosing functions/mixins
-        // or loop variables (@each, @for)
+        // Skip variables that are parameters, loop variables, or locally declared
         if sym_ref.kind == RefKind::Variable
-            && is_param_or_loop_var(root, sym_ref.range, &sym_ref.name)
+            && is_locally_defined(root, sym_ref.range, &sym_ref.name)
         {
             continue;
         }
@@ -333,7 +333,7 @@ fn is_css_global_function(name: &str) -> bool {
 
 // ── Parameter / loop variable detection ─────────────────────────────
 
-fn is_param_or_loop_var(root: &SyntaxNode, ref_range: TextRange, name: &str) -> bool {
+fn is_locally_defined(root: &SyntaxNode, ref_range: TextRange, name: &str) -> bool {
     let Some(token) = root.token_at_offset(ref_range.start()).right_biased() else {
         return false;
     };
@@ -350,6 +350,39 @@ fn is_param_or_loop_var(root: &SyntaxNode, ref_range: TextRange, name: &str) -> 
                 }
             }
             _ => {}
+        }
+        // Check for local $var: declarations in this ancestor that precede the reference
+        if has_local_var_before(&ancestor, ref_range.start(), name) {
+            return true;
+        }
+    }
+    false
+}
+
+fn has_local_var_before(
+    node: &SyntaxNode,
+    before: sass_parser::text_range::TextSize,
+    name: &str,
+) -> bool {
+    for child in node.children() {
+        if child.kind() == SyntaxKind::VARIABLE_DECL && child.text_range().start() < before {
+            // VARIABLE_DECL = DOLLAR IDENT COLON ...
+            let mut saw_dollar = false;
+            for tok in child
+                .children_with_tokens()
+                .filter_map(rowan::NodeOrToken::into_token)
+            {
+                if tok.kind() == SyntaxKind::DOLLAR {
+                    saw_dollar = true;
+                } else if tok.kind() == SyntaxKind::IDENT && saw_dollar {
+                    if tok.text() == name {
+                        return true;
+                    }
+                    break;
+                } else {
+                    break;
+                }
+            }
         }
     }
     false

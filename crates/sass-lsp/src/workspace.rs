@@ -56,6 +56,8 @@ pub struct ModuleInfo {
     /// True if the file uses `@import` or `meta.load-css()`, which merge scopes
     /// in ways the module graph cannot fully track.
     pub has_legacy_import: bool,
+    /// True if the file has `@use`/`@forward` imports that could not be resolved.
+    pub has_unresolved_use: bool,
 }
 
 /// Cross-file dependency graph for the SCSS workspace.
@@ -274,6 +276,7 @@ impl ModuleGraph {
                 line_index,
                 source_text: Some(source_text),
                 has_legacy_import,
+                has_unresolved_use: false, // updated after resolution loop below
             },
         );
         self.touch_tree_lru(uri);
@@ -283,6 +286,7 @@ impl ModuleGraph {
         let base_path = uri_to_path(uri);
 
         let mut resolved_edges = Vec::new();
+        let mut has_unresolved_use = false;
 
         for import_ref in &import_refs {
             if import_ref.kind == ImportKind::LoadCss {
@@ -326,6 +330,8 @@ impl ModuleGraph {
                         visibility: ForwardVisibility::default(),
                     });
                 }
+            } else if import_ref.kind == ImportKind::Use || import_ref.kind == ImportKind::Forward {
+                has_unresolved_use = true;
             }
         }
 
@@ -357,6 +363,12 @@ impl ModuleGraph {
         }
 
         self.edges.insert(uri.clone(), resolved_edges);
+
+        if has_unresolved_use {
+            if let Some(mut info) = self.files.get_mut(uri) {
+                info.has_unresolved_use = true;
+            }
+        }
     }
 
     /// Check if a file has `@import` or `meta.load-css()` — these can provide
@@ -365,7 +377,7 @@ impl ModuleGraph {
     pub fn has_unresolved_imports(&self, uri: &Uri) -> bool {
         self.files
             .get(uri)
-            .is_some_and(|info| info.has_legacy_import)
+            .is_some_and(|info| info.has_legacy_import || info.has_unresolved_use)
     }
 
     /// Find all files that directly import the given URI.
@@ -682,6 +694,14 @@ impl ModuleGraph {
         let text = root.text().to_string();
         info.source_text = Some(text.clone());
         Some(text)
+    }
+
+    pub fn get_symbols(&self, uri: &Uri) -> Option<std::sync::Arc<symbols::FileSymbols>> {
+        self.files.get(uri).map(|info| info.symbols.clone())
+    }
+
+    pub fn get_green(&self, uri: &Uri) -> Option<rowan::GreenNode> {
+        self.get_or_reparse_green(uri)
     }
 
     pub fn all_symbols(&self) -> Vec<(Uri, symbols::Symbol)> {
@@ -1499,6 +1519,7 @@ mod tests {
             line_index: li,
             source_text: Some(source.to_owned()),
             has_legacy_import: false,
+            has_unresolved_use: false,
         }
     }
 

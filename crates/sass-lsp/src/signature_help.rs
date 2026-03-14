@@ -9,6 +9,7 @@ use tower_lsp_server::ls_types::{
 use crate::DocumentState;
 use crate::ast_helpers::{ident_text_range_of, nth_ident_text_range_of};
 use crate::convert::lsp_position_to_offset;
+use crate::sassdoc;
 use crate::symbols;
 use crate::workspace::ModuleGraph;
 
@@ -198,12 +199,61 @@ pub(crate) fn build_signature_info(
         }
     };
 
-    let parameters = parse_param_labels(&label, params_text);
+    let parsed_doc = sym
+        .doc
+        .as_ref()
+        .filter(|d| sassdoc::has_annotations(d))
+        .map(|d| sassdoc::parse(d));
+
+    let mut parameters = parse_param_labels(&label, params_text);
+
+    // Attach @param descriptions to parameter info
+    if let Some(ref sassdoc) = parsed_doc {
+        for param_info in &mut parameters {
+            if let ParameterLabel::LabelOffsets([start, end]) = param_info.label {
+                let param_text = utf16_slice(&label, start, end);
+                // Extract bare param name (strip $, default values, ...)
+                let bare_name = param_text
+                    .strip_prefix('$')
+                    .unwrap_or(&param_text)
+                    .split(':')
+                    .next()
+                    .unwrap_or("")
+                    .split("...")
+                    .next()
+                    .unwrap_or("")
+                    .trim();
+                if let Some(pdoc) = sassdoc.params.iter().find(|p| p.name == bare_name) {
+                    let mut doc_parts = Vec::new();
+                    if let Some(ty) = &pdoc.type_annotation {
+                        doc_parts.push(format!("`{{{ty}}}`"));
+                    }
+                    if let Some(desc) = &pdoc.description {
+                        doc_parts.push(desc.clone());
+                    }
+                    if !doc_parts.is_empty() {
+                        param_info.documentation =
+                            Some(tower_lsp_server::ls_types::Documentation::MarkupContent(
+                                MarkupContent {
+                                    kind: MarkupKind::Markdown,
+                                    value: doc_parts.join(" — "),
+                                },
+                            ));
+                    }
+                }
+            }
+        }
+    }
 
     let documentation = sym.doc.as_ref().map(|d| {
+        let value = if let Some(ref sassdoc) = parsed_doc {
+            sassdoc::format_markdown(sassdoc)
+        } else {
+            d.clone()
+        };
         tower_lsp_server::ls_types::Documentation::MarkupContent(MarkupContent {
             kind: MarkupKind::Markdown,
-            value: d.clone(),
+            value,
         })
     });
 
@@ -213,6 +263,17 @@ pub(crate) fn build_signature_info(
         parameters: Some(parameters),
         active_parameter: None,
     }
+}
+
+#[allow(clippy::cast_possible_truncation)]
+fn utf16_slice(s: &str, start: u32, end: u32) -> String {
+    let start = start as usize;
+    let end = end as usize;
+    let utf16: Vec<u16> = s.encode_utf16().collect();
+    if start >= utf16.len() || end > utf16.len() {
+        return String::new();
+    }
+    String::from_utf16_lossy(&utf16[start..end])
 }
 
 #[allow(clippy::cast_possible_truncation)]

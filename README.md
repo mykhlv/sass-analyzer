@@ -2,7 +2,7 @@
 
 A hand-written recursive descent SCSS parser in Rust, built for IDE tooling.
 
-**62+ MB/s** parse throughput | **99.11%** sass-spec compatibility | **693 tests** | **0 panics** on 668 real-world files
+**62+ MB/s** parse throughput | **99.13%** sass-spec compatibility | **897 tests** | **0 panics** on 668 real-world files
 
 ## Why
 
@@ -82,8 +82,8 @@ Memory profile (per KB of input): ~420 allocations, ~286 green nodes, ~134 green
 
 Tested against the [sass-spec](https://github.com/sass/sass-spec) conformance suite:
 
-- **10,865 / 10,963** valid inputs parse without error (99.11%)
-- Remaining 98 mismatches are edge cases (plain CSS `@import` conditions, exotic color syntax)
+- **10,868 / 10,963** valid inputs parse without error (99.13%)
+- Remaining 95 mismatches are edge cases (plain CSS `@import` conditions, exotic color syntax)
 - 2,252 false positives (inputs dart-sass rejects but we accept) — 93% are semantic errors a parser cannot catch
 
 **Real-world corpus** — 0 panics, 0 round-trip failures, 0 parse errors:
@@ -187,7 +187,7 @@ sass-analyzer/
 │   │   │   ├── resolver.rs       # Module path resolution
 │   │   │   ├── syntax_kind.rs    # 129 token/node kinds
 │   │   │   └── token_set.rs      # [u64; 4] bit set
-│   │   ├── tests/            # 547 tests (expect-test snapshots)
+│   │   ├── tests/            # 556 tests (expect-test snapshots)
 │   │   ├── benches/          # divan benchmarks
 │   │   └── fuzz/             # 4 libfuzzer targets
 │   ├── sass-lsp/             # LSP server (tower-lsp-server)

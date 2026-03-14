@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## 0.2.0 — 2026-03-14
+
 ### Added
+- SassDoc support: `/// @param`, `/// @return`, `/// @example`, `/// @deprecated`, `/// @type`, `/// @see`, `/// @output`, `/// @content`, `/// @throw` annotations are parsed and rendered as structured markdown in hover, completions, and signature help. Parameter descriptions appear inline in signature help popups
+- Call hierarchy: navigate incoming/outgoing calls for functions and mixins — "who calls this?" and "what does this call?" (right-click → Show Call Hierarchy). Supports same-file and cross-file resolution, groups callers by enclosing function/mixin
 - Inlay hints: parameter name hints for positional arguments in function calls and `@include` directives (e.g., `add(⁣$a:⁣ 1px, ⁣$b:⁣ 2px)`). Skips keyword arguments, single-parameter calls, and rest parameters
 - CSS value completions: after typing `display: `, offers `flex`, `grid`, `block`, `none`, etc. Covers ~80 CSS properties with keyword values plus global keywords (`inherit`, `initial`, `unset`, `revert`, `revert-layer`). Sass variables and functions also appear in value position. AST-based context refinement correctly handles map entries and multi-line values
 - Code actions (quick fixes): auto-import `@use` for undefined variables, functions, and mixins — inserts the `@use` statement and qualifies the reference with the namespace. Remove unused `@use` statements
@@ -17,9 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Selection ranges: smart expand/shrink selection (Shift+Alt+→/←) that follows the AST structure — token → node → parent → root
 - Document highlights: highlight all occurrences of the symbol under the cursor (variables, functions, mixins, placeholders) with read/write distinction
 - Folding ranges: collapsible regions for rule blocks, at-rules, multi-line comments, consecutive `//` comment groups, and `// #region` / `// #endregion` markers
-- Color decorators: inline color swatches for hex (`#rgb`, `#rrggbb`, `#rrggbbaa`), `rgb()`/`rgba()`, `hsl()`/`hsla()`, `transparent`, and 148 CSS named colors
-- Color picker: click a swatch to adjust colors; presents hex, rgb, and hsl formats
 - File watcher support: non-open SCSS/Sass files modified, created, or deleted on disk are now detected and re-indexed automatically
+- Check Workspace command: run diagnostics on all SCSS files in the workspace (Command Palette → "sass-analyzer: Check Workspace"), with progress reporting
+- Go to definition on `@use`/`@forward`/`@import` paths: Cmd+Click on the import string navigates directly to the target file
+- Parser: value-and-block syntax (`margin: 10px { top: 20px; }`) — nested property with both a value and sub-declarations
+- `rect()` CSS function recognized as valid (no false "undefined function" diagnostic)
+
+### Removed
+- Color provider (decorators and picker) — removed to avoid duplicate color squares with VS Code's built-in CSS color support
 
 ## 0.1.1 — 2026-03-12
 

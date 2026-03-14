@@ -2,7 +2,7 @@ use sass_parser::syntax::{SyntaxNode, SyntaxToken};
 use sass_parser::syntax_kind::SyntaxKind;
 use sass_parser::text_range::TextRange;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SymbolKind {
     Variable,
     Function,
