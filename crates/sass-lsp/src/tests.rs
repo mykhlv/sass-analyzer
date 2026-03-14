@@ -112,33 +112,32 @@ async fn recv_response(
     }
 }
 
-/// Drain all pending server messages (notifications, diagnostics, requests)
-/// for a short period. Use after `didOpen` when the server may emit multiple
-/// cascading diagnostics and `semanticTokens/refresh` requests.
-async fn drain_notifications(
+/// Wait until at least `count` `textDocument/publishDiagnostics` notifications
+/// have been received. Auto-responds to server→client requests. Use after
+/// opening files to ensure the server has finished processing them.
+async fn wait_for_diagnostics(
     reader: &mut (impl AsyncReadExt + Unpin),
     writer: &mut (impl AsyncWriteExt + Unpin),
-    duration: std::time::Duration,
+    count: usize,
 ) {
-    let deadline = tokio::time::Instant::now() + duration;
-    loop {
-        match tokio::time::timeout_at(deadline, recv_msg_raw(reader)).await {
-            Ok(msg) => {
-                // Auto-respond to server→client requests
-                if msg.get("method").is_some() && msg.get("id").is_some() {
-                    send_msg(
-                        writer,
-                        &serde_json::json!({
-                            "jsonrpc": "2.0",
-                            "id": msg["id"],
-                            "result": null
-                        }),
-                    )
-                    .await;
-                }
-                // Discard notifications
-            }
-            Err(_) => break, // Timeout — no more pending messages
+    let mut seen = 0;
+    while seen < count {
+        let msg = recv_msg_raw(reader).await;
+        // Server→client request: auto-respond
+        if msg.get("method").is_some() && msg.get("id").is_some() {
+            send_msg(
+                writer,
+                &serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": msg["id"],
+                    "result": null
+                }),
+            )
+            .await;
+            continue;
+        }
+        if msg.get("method") == Some(&serde_json::json!("textDocument/publishDiagnostics")) {
+            seen += 1;
         }
     }
 }
@@ -6564,8 +6563,9 @@ async fn call_hierarchy_cross_file_incoming() {
     let helpers_uri = format!("file://{}", helpers_path.display());
     let main_uri = format!("file://{}", main_path.display());
 
-    // Open both files and drain all notifications (diagnostics, cascading
-    // re-diagnostics, semanticTokens/refresh) before sending requests.
+    // Open both files, then wait for the server to finish indexing them
+    // (each didOpen produces at least one publishDiagnostics notification;
+    // the second file also triggers refresh_dependents on the first).
     send_msg(
         &mut writer,
         &serde_json::json!({
@@ -6598,12 +6598,11 @@ async fn call_hierarchy_cross_file_incoming() {
         }),
     )
     .await;
-    drain_notifications(
-        &mut reader,
-        &mut writer,
-        std::time::Duration::from_millis(500),
-    )
-    .await;
+    // Wait for diagnostics from both files (+ cascading re-diagnostics).
+    // The server emits at least 2 publishDiagnostics: one per didOpen.
+    // With refresh_dependents it may emit more — we wait for enough to
+    // ensure both files are indexed.
+    wait_for_diagnostics(&mut reader, &mut writer, 2).await;
 
     // Prepare on "double" definition in _helpers.scss
     send_msg(
@@ -6674,7 +6673,7 @@ async fn call_hierarchy_cross_file_outgoing() {
     let helpers_uri = format!("file://{}", helpers_path.display());
     let main_uri = format!("file://{}", main_path.display());
 
-    // Open both files and drain all notifications
+    // Open both files and wait for the server to finish indexing them.
     send_msg(
         &mut writer,
         &serde_json::json!({
@@ -6707,12 +6706,7 @@ async fn call_hierarchy_cross_file_outgoing() {
         }),
     )
     .await;
-    drain_notifications(
-        &mut reader,
-        &mut writer,
-        std::time::Duration::from_millis(500),
-    )
-    .await;
+    wait_for_diagnostics(&mut reader, &mut writer, 2).await;
 
     // Prepare on "quadruple" definition in main.scss
     send_msg(
