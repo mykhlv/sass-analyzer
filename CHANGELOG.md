@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## 0.2.0 — 2026-03-14
+
 ### Added
 - SassDoc support: `/// @param`, `/// @return`, `/// @example`, `/// @deprecated`, `/// @type`, `/// @see`, `/// @output`, `/// @content`, `/// @throw` annotations are parsed and rendered as structured markdown in hover, completions, and signature help. Parameter descriptions appear inline in signature help popups
 - Call hierarchy: navigate incoming/outgoing calls for functions and mixins — "who calls this?" and "what does this call?" (right-click → Show Call Hierarchy). Supports same-file and cross-file resolution, groups callers by enclosing function/mixin
