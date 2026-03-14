@@ -116,10 +116,10 @@ pub(crate) fn format_hover_markdown(sym: &Symbol, source_uri: Option<&Uri>) -> S
             };
             let url = format!("https://sass-lang.com/documentation/modules/{module}/#{anchor}");
             parts.push(format!("`sass:{module}` · [docs]({url})"));
-        } else if let Some(path) = uri.to_file_path() {
-            if let Some(name) = path.file_name() {
-                parts.push(format!("Defined in `{}`", name.to_string_lossy()));
-            }
+        } else if let Some(path) = uri.to_file_path()
+            && let Some(name) = path.file_name()
+        {
+            parts.push(format!("Defined in `{}`", name.to_string_lossy()));
         }
     }
 

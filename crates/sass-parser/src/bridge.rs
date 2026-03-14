@@ -123,7 +123,7 @@ pub fn build_tree(
     let all_trivia = input.all_trivia();
     let mut trivia_pos: usize = 0;
 
-    #[allow(clippy::match_on_vec_items)]
+    #[allow(clippy::indexing_slicing)]
     for i in 0..events.len() {
         match events[i] {
             // Fast path: Enter without forward_parent (>95% of Enter events).

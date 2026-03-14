@@ -153,11 +153,11 @@ fn fold_multiline_comment(
 }
 
 fn track_consecutive_comment(line: u32, comments: &mut Vec<(u32, u32)>) {
-    if let Some(last) = comments.last_mut() {
-        if line == last.1 + 1 {
-            last.1 = line;
-            return;
-        }
+    if let Some(last) = comments.last_mut()
+        && line == last.1 + 1
+    {
+        last.1 = line;
+        return;
     }
     comments.push((line, line));
 }

@@ -328,7 +328,7 @@ fn kind_label(kind: RefKind) -> &'static str {
 }
 
 fn is_css_global_function(name: &str) -> bool {
-    CSS_GLOBAL_FUNCTIONS.iter().any(|&f| f == name)
+    CSS_GLOBAL_FUNCTIONS.contains(&name)
 }
 
 // ── Parameter / loop variable detection ─────────────────────────────
