@@ -67,22 +67,6 @@ pub fn expr(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarker> {
     expr_bp(p, 0, ctx)
 }
 
-/// Parse a comma-separated list of expressions (for property values).
-/// Returns `Some` if at least one expression was parsed.
-pub fn expr_list(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarker> {
-    let first = expr(p, ctx)?;
-    if !p.at(COMMA) {
-        return Some(first);
-    }
-    let m = first.precede(p);
-    while p.eat(COMMA) {
-        if p.at_ts(EXPR_START) {
-            expr(p, ctx);
-        }
-    }
-    Some(m.complete(p, LIST_EXPR))
-}
-
 /// Parse a space-separated group of expressions in `SassScript` context.
 /// Stops at `;`, `}`, `!`, `,`, `)`, or EOF.
 /// Extra values become siblings (no wrapper node).

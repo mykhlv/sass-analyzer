@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Fixed
+- Parser: sass-spec compatibility improved from 99.13% to 99.78% (95 → 24 false negatives). Fixes include: trailing commas in selectors, `@elseif` (deprecated no-space form), `@extend` with comma-separated selectors, `@at-root` query with quoted strings, keyframe flexibility (interpolated selectors, variable declarations, nested at-rules, anonymous names), interpolated at-rule names, CSS `@function` declarations, `@import` with media query commas, calc with interpolation/variables/space-separated values, `alpha()`/`progid:`/`expression()` special functions, `#{}` in ID selectors and placeholders, `-#{}` in property names and selectors, `!important` in mixin arguments, `@each` with space-separated lists
+
 ## 0.2.0 — 2026-03-14
 
 ### Added

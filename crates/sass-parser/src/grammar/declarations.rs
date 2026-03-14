@@ -79,7 +79,7 @@ fn custom_property_declaration(p: &mut Parser<'_>) {
 /// `#{$a}-#{$b}`, `#{$ns}-#{$prop}-color`.
 fn property(p: &mut Parser<'_>) {
     let m = p.start();
-    if !p.at(IDENT) && !p.at(HASH_LBRACE) {
+    if !p.at(IDENT) && !p.at(HASH_LBRACE) && !p.at(MINUS) {
         p.error("expected property name");
         let _ = m.complete(p, PROPERTY);
         return;

@@ -24,13 +24,30 @@ use super::selectors;
 /// Dispatch `@keyword` — called when parser is at `AT`.
 pub fn at_rule(p: &mut Parser<'_>) {
     assert!(p.at(AT));
+
+    // Interpolated at-rule name: `@#{...}`, `@foo#{...}bar`
+    if p.nth(1) == HASH_LBRACE {
+        generic_at_rule(p);
+        return;
+    }
+
     let name = p.nth_text(1);
 
     match name {
         "mixin" => mixin::mixin_rule(p),
         "include" => mixin::include_rule(p),
         "content" => mixin::content_rule(p),
-        "function" => function::function_rule(p),
+        "function" => {
+            // CSS Functions: `@function --name(...)`, `@function --#{...}()`, `@function #{...}()`
+            let is_css_function = (p.nth(2) == IDENT && p.nth_text(2).starts_with("--"))
+                || p.nth(2) == HASH_LBRACE
+                || (p.nth(2) == MINUS && p.nth(3) == MINUS);
+            if is_css_function {
+                generic_at_rule(p);
+            } else {
+                function::function_rule(p);
+            }
+        }
         "return" => function::return_rule(p),
         "if" => control_flow::if_rule(p),
         "for" => control_flow::for_rule(p),
@@ -57,8 +74,8 @@ pub fn at_rule(p: &mut Parser<'_>) {
         "use" => use_forward::use_rule(p),
         "forward" => use_forward::forward_rule(p),
         "import" => use_forward::import_rule(p),
-        "else" => {
-            // Orphan @else — should have been consumed by if_rule
+        "else" | "elseif" => {
+            // Orphan @else/@elseif — should have been consumed by if_rule
             p.error("`@else` without preceding `@if`");
             generic_at_rule(p);
         }
@@ -70,13 +87,24 @@ pub fn at_rule(p: &mut Parser<'_>) {
 fn generic_at_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
-    if p.at(IDENT) {
-        p.bump(); // keyword
+    // Consume at-rule name: IDENT, interpolation, or mixed (e.g., `@foo#{bar}baz`)
+    let mut consumed_name = false;
+    while (p.at(IDENT) || p.at(MINUS) || p.at(HASH_LBRACE))
+        && (!consumed_name || !p.has_whitespace_before())
+    {
+        if p.at(HASH_LBRACE) {
+            let _ = interpolation(p);
+        } else {
+            p.bump();
+        }
+        consumed_name = true;
     }
     // Consume tokens until ; or { block } at depth 0
     while !p.at(SEMICOLON) && !p.at(LBRACE) && !p.at(RBRACE) && !p.at_end() {
         if p.at(LPAREN) {
             eat_balanced(p, LPAREN, RPAREN);
+        } else if p.at(HASH_LBRACE) {
+            let _ = interpolation(p);
         } else {
             p.bump();
         }

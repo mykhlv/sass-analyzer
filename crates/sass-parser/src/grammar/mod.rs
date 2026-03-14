@@ -133,6 +133,18 @@ fn looks_like_declaration(p: &Parser<'_>) -> bool {
     if p.at(HASH_LBRACE) {
         return looks_like_interpolated_declaration(p);
     }
+    // `-#{"foo"}-bar: b` — property name starting with hyphen then interpolation
+    if p.at(MINUS) && p.nth(1) == HASH_LBRACE {
+        return scan_past_interpolated_name(p, 1).is_some_and(|offset| {
+            if p.nth(offset) != COLON {
+                return false;
+            }
+            if p.nth(offset + 1) == LBRACE {
+                return true;
+            }
+            scan_for_declaration_end(p, offset + 1)
+        });
+    }
     if !p.at(IDENT) {
         return false;
     }
@@ -347,6 +359,7 @@ pub(crate) fn block(p: &mut Parser<'_>) {
             g.bump();
         } else if g.at(AT)
             || g.at(DOLLAR)
+            || g.at(MINUS)
             || g.at_ts(selectors::SELECTOR_START)
             || g.at_ts(selectors::COMBINATOR_TOKEN)
         {

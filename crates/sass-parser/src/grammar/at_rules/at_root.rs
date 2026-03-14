@@ -43,8 +43,8 @@ fn at_root_query(p: &mut Parser<'_>) {
     }
     p.expect(COLON);
 
-    // Parse values: `rule`, `all`, or at-rule names
-    while p.at(IDENT) {
+    // Parse values: `rule`, `all`, or at-rule names (may be quoted strings)
+    while p.at(IDENT) || p.at(QUOTED_STRING) {
         p.bump();
     }
 
