@@ -39,6 +39,13 @@
   "extensionKind": ["workspace"],
   "main": "./out/extension.js",
   "contributes": {
+    "commands": [
+      {
+        "command": "sass-analyzer.checkWorkspace",
+        "title": "Check Workspace",
+        "category": "sass-analyzer"
+      }
+    ],
     "semanticTokenTypes": [
       {
         "id": "mixin",

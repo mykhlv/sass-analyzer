@@ -19,9 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Selection ranges: smart expand/shrink selection (Shift+Alt+→/←) that follows the AST structure — token → node → parent → root
 - Document highlights: highlight all occurrences of the symbol under the cursor (variables, functions, mixins, placeholders) with read/write distinction
 - Folding ranges: collapsible regions for rule blocks, at-rules, multi-line comments, consecutive `//` comment groups, and `// #region` / `// #endregion` markers
-- Color decorators: inline color swatches for hex (`#rgb`, `#rrggbb`, `#rrggbbaa`), `rgb()`/`rgba()`, `hsl()`/`hsla()`, `transparent`, and 148 CSS named colors
-- Color picker: click a swatch to adjust colors; presents hex, rgb, and hsl formats
 - File watcher support: non-open SCSS/Sass files modified, created, or deleted on disk are now detected and re-indexed automatically
+- Check Workspace command: run diagnostics on all SCSS files in the workspace (Command Palette → "sass-analyzer: Check Workspace"), with progress reporting
+- Go to definition on `@use`/`@forward`/`@import` paths: Cmd+Click on the import string navigates directly to the target file
+- Parser: value-and-block syntax (`margin: 10px { top: 20px; }`) — nested property with both a value and sub-declarations
+- `rect()` CSS function recognized as valid (no false "undefined function" diagnostic)
+
+### Removed
+- Color provider (decorators and picker) — removed to avoid duplicate color squares with VS Code's built-in CSS color support
 
 ## 0.1.1 — 2026-03-12
 

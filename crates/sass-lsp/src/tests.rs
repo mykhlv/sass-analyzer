@@ -4121,261 +4121,6 @@ async fn semantic_tokens_on_empty_file() {
 }
 
 // ---------------------------------------------------------------------------
-// Color decorators
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn document_color_hex() {
-    let (mut reader, mut writer) = spawn_server();
-    do_initialize(&mut reader, &mut writer).await;
-
-    let scss = ".btn { color: #ff0000; background: #0f0; }\n";
-    send_msg(
-        &mut writer,
-        &serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "textDocument/didOpen",
-            "params": {
-                "textDocument": {
-                    "uri": "file:///color_hex.scss",
-                    "languageId": "scss",
-                    "version": 1,
-                    "text": scss
-                }
-            }
-        }),
-    )
-    .await;
-    let _diag = recv_msg(&mut reader, &mut writer).await;
-
-    send_msg(
-        &mut writer,
-        &serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 50,
-            "method": "textDocument/documentColor",
-            "params": {
-                "textDocument": { "uri": "file:///color_hex.scss" }
-            }
-        }),
-    )
-    .await;
-
-    let resp = recv_msg(&mut reader, &mut writer).await;
-    let colors = resp["result"].as_array().unwrap();
-    assert_eq!(colors.len(), 2, "should find two hex colors");
-
-    // First color: #ff0000 → red
-    let c0 = &colors[0]["color"];
-    assert!((c0["red"].as_f64().unwrap() - 1.0).abs() < 0.01);
-    assert!((c0["green"].as_f64().unwrap()).abs() < 0.01);
-    assert!((c0["blue"].as_f64().unwrap()).abs() < 0.01);
-
-    // Second color: #0f0 → green
-    let c1 = &colors[1]["color"];
-    assert!((c1["red"].as_f64().unwrap()).abs() < 0.01);
-    assert!((c1["green"].as_f64().unwrap() - 1.0).abs() < 0.01);
-    assert!((c1["blue"].as_f64().unwrap()).abs() < 0.01);
-}
-
-#[tokio::test]
-async fn document_color_rgb_function() {
-    let (mut reader, mut writer) = spawn_server();
-    do_initialize(&mut reader, &mut writer).await;
-
-    let scss = ".btn { color: rgb(0, 128, 255); }\n";
-    send_msg(
-        &mut writer,
-        &serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "textDocument/didOpen",
-            "params": {
-                "textDocument": {
-                    "uri": "file:///color_rgb.scss",
-                    "languageId": "scss",
-                    "version": 1,
-                    "text": scss
-                }
-            }
-        }),
-    )
-    .await;
-    let _diag = recv_msg(&mut reader, &mut writer).await;
-
-    send_msg(
-        &mut writer,
-        &serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 51,
-            "method": "textDocument/documentColor",
-            "params": {
-                "textDocument": { "uri": "file:///color_rgb.scss" }
-            }
-        }),
-    )
-    .await;
-
-    let resp = recv_msg(&mut reader, &mut writer).await;
-    let colors = resp["result"].as_array().unwrap();
-    assert_eq!(colors.len(), 1, "should find one rgb color");
-
-    let c0 = &colors[0]["color"];
-    assert!((c0["red"].as_f64().unwrap()).abs() < 0.01);
-    assert!((c0["green"].as_f64().unwrap() - 0.502).abs() < 0.01);
-    assert!((c0["blue"].as_f64().unwrap() - 1.0).abs() < 0.01);
-}
-
-#[tokio::test]
-async fn color_presentation_returns_formats() {
-    let (mut reader, mut writer) = spawn_server();
-    do_initialize(&mut reader, &mut writer).await;
-
-    send_msg(
-        &mut writer,
-        &serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 52,
-            "method": "textDocument/colorPresentation",
-            "params": {
-                "textDocument": { "uri": "file:///test.scss" },
-                "color": { "red": 1.0, "green": 0.0, "blue": 0.0, "alpha": 1.0 },
-                "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 7 } }
-            }
-        }),
-    )
-    .await;
-
-    let resp = recv_msg(&mut reader, &mut writer).await;
-    let presentations = resp["result"].as_array().unwrap();
-    assert!(
-        presentations.len() >= 3,
-        "should return at least 3 presentations (hex short, hex long, rgb, hsl)"
-    );
-    let labels: Vec<&str> = presentations
-        .iter()
-        .map(|p| p["label"].as_str().unwrap())
-        .collect();
-    assert!(labels.contains(&"#ff0000"), "should include hex format");
-    assert!(
-        labels.contains(&"rgb(255, 0, 0)"),
-        "should include rgb format"
-    );
-}
-
-#[tokio::test]
-async fn document_color_hsl_function() {
-    let (mut reader, mut writer) = spawn_server();
-    do_initialize(&mut reader, &mut writer).await;
-
-    let scss = ".btn { color: hsl(120, 100%, 50%); }\n";
-    send_msg(
-        &mut writer,
-        &serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "textDocument/didOpen",
-            "params": {
-                "textDocument": {
-                    "uri": "file:///color_hsl.scss",
-                    "languageId": "scss",
-                    "version": 1,
-                    "text": scss
-                }
-            }
-        }),
-    )
-    .await;
-    let _diag = recv_msg(&mut reader, &mut writer).await;
-
-    send_msg(
-        &mut writer,
-        &serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 53,
-            "method": "textDocument/documentColor",
-            "params": {
-                "textDocument": { "uri": "file:///color_hsl.scss" }
-            }
-        }),
-    )
-    .await;
-
-    let resp = recv_msg(&mut reader, &mut writer).await;
-    let colors = resp["result"].as_array().unwrap();
-    assert_eq!(colors.len(), 1, "should find one hsl color");
-
-    let c0 = &colors[0]["color"];
-    assert!((c0["red"].as_f64().unwrap()).abs() < 0.01);
-    assert!((c0["green"].as_f64().unwrap() - 1.0).abs() < 0.01);
-    assert!((c0["blue"].as_f64().unwrap()).abs() < 0.01);
-}
-
-#[tokio::test]
-async fn document_color_named() {
-    let (mut reader, mut writer) = spawn_server();
-    do_initialize(&mut reader, &mut writer).await;
-
-    let scss = ".btn { color: red; background: cornflowerblue; }\n";
-    send_msg(
-        &mut writer,
-        &serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "textDocument/didOpen",
-            "params": {
-                "textDocument": {
-                    "uri": "file:///color_named.scss",
-                    "languageId": "scss",
-                    "version": 1,
-                    "text": scss
-                }
-            }
-        }),
-    )
-    .await;
-    let _diag = recv_msg(&mut reader, &mut writer).await;
-
-    send_msg(
-        &mut writer,
-        &serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 54,
-            "method": "textDocument/documentColor",
-            "params": {
-                "textDocument": { "uri": "file:///color_named.scss" }
-            }
-        }),
-    )
-    .await;
-
-    let resp = recv_msg(&mut reader, &mut writer).await;
-    let colors = resp["result"].as_array().unwrap();
-    assert_eq!(colors.len(), 2, "should find two named colors");
-
-    // First: red
-    let c0 = &colors[0]["color"];
-    assert!((c0["red"].as_f64().unwrap() - 1.0).abs() < 0.01);
-    assert!((c0["green"].as_f64().unwrap()).abs() < 0.01);
-    assert!((c0["blue"].as_f64().unwrap()).abs() < 0.01);
-
-    // Second: cornflowerblue (100, 149, 237)
-    let c1 = &colors[1]["color"];
-    assert!((c1["red"].as_f64().unwrap() - 0.392).abs() < 0.01);
-    assert!((c1["green"].as_f64().unwrap() - 0.584).abs() < 0.01);
-    assert!((c1["blue"].as_f64().unwrap() - 0.929).abs() < 0.01);
-}
-
-#[tokio::test]
-async fn initialize_reports_color_provider_capability() {
-    let (mut reader, mut writer) = spawn_server();
-    let resp = do_initialize(&mut reader, &mut writer).await;
-
-    let caps = &resp["result"]["capabilities"];
-    assert_eq!(
-        caps["colorProvider"], true,
-        "server should advertise color provider"
-    );
-}
-
-// ---------------------------------------------------------------------------
 // Folding ranges
 // ---------------------------------------------------------------------------
 
@@ -5585,6 +5330,75 @@ async fn semantic_defined_variable_no_diagnostic() {
     assert!(
         semantic.is_empty(),
         "defined variable should produce no diagnostic"
+    );
+}
+
+#[tokio::test]
+async fn semantic_local_var_in_mixin_no_diagnostic() {
+    let (mut reader, mut writer) = spawn_server();
+    do_initialize(&mut reader, &mut writer).await;
+
+    let text = "\
+@mixin btnVariant($variant) {
+  $common: red;
+  background-color: $common;
+  &-disabled {
+    $disabled: blue;
+    background-color: $disabled;
+    color: $common;
+  }
+}";
+    let diags =
+        open_and_get_diagnostics(&mut reader, &mut writer, "file:///local_var.scss", text, 1).await;
+
+    let semantic: Vec<_> = diags
+        .iter()
+        .filter(|d| {
+            d["code"]
+                .as_str()
+                .is_some_and(|c| c.starts_with("undefined"))
+        })
+        .collect();
+    assert!(
+        semantic.is_empty(),
+        "local variables in mixin body should not be flagged as undefined, got: {semantic:?}"
+    );
+}
+
+#[tokio::test]
+async fn semantic_top_level_var_used_in_mixin_no_diagnostic() {
+    let (mut reader, mut writer) = spawn_server();
+    do_initialize(&mut reader, &mut writer).await;
+
+    let text = "@use 'sass:map';\n\
+$other-var: red;\n\
+$btn-size: (lg: 16px, sm: 13px);\n\
+@mixin btnSize($size) {\n\
+  font-size: map.get($btn-size, $size);\n\
+}";
+    let diags = open_and_get_diagnostics(
+        &mut reader,
+        &mut writer,
+        "file:///top_level_var.scss",
+        text,
+        1,
+    )
+    .await;
+
+    let semantic: Vec<_> = diags
+        .iter()
+        .filter(|d| {
+            d["code"]
+                .as_str()
+                .is_some_and(|c| c == "undefined-variable")
+                && d["message"]
+                    .as_str()
+                    .is_some_and(|m| m.contains("btn-size"))
+        })
+        .collect();
+    assert!(
+        semantic.is_empty(),
+        "top-level $btn-size should not be flagged as undefined, got: {semantic:?}"
     );
 }
 

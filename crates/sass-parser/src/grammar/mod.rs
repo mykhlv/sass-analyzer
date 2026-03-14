@@ -236,6 +236,8 @@ fn scan_past_interpolated_name(p: &Parser<'_>, start: usize) -> Option<usize> {
 
 /// Scan tokens from `offset` looking for `{`, `;`, or `}` at depth 0.
 /// Returns `true` if `;`/`}`/EOF found first (declaration), `false` if `{` found (selector).
+/// Also returns `true` for value-and-block: `margin: 10px { top: 20px; }` — when an
+/// unambiguously-value token (`NUMBER`, `QUOTED_STRING`, `DOLLAR`, etc.) precedes `{`.
 /// Scan is bounded to avoid O(n²) behavior on pathological inputs.
 fn scan_for_declaration_end(p: &Parser<'_>, start: usize) -> bool {
     const MAX_SCAN: usize = 100;
@@ -243,6 +245,9 @@ fn scan_for_declaration_end(p: &Parser<'_>, start: usize) -> bool {
     let mut brace_depth: u32 = 0;
     let mut offset = start;
     let limit = start + MAX_SCAN;
+    // Track whether we've seen a token that can only appear in a value, not a selector.
+    // Disambiguates `p:hover { }` (selector) from `margin: 0 { top: 20px; }` (declaration).
+    let mut has_value_only_token = false;
     loop {
         if offset >= limit {
             // Exceeded scan budget — guess declaration to avoid misparse as selector
@@ -262,11 +267,15 @@ fn scan_for_declaration_end(p: &Parser<'_>, start: usize) -> bool {
         match p.nth(offset) {
             EOF => return true,
             HASH_LBRACE => brace_depth += 1,
-            LBRACE if depth == 0 => return false,
+            LBRACE if depth == 0 => return has_value_only_token,
             RBRACE if depth == 0 => return true,
             SEMICOLON if depth == 0 => return true,
             LPAREN | LBRACKET => depth += 1,
             RPAREN | RBRACKET => depth = depth.saturating_sub(1),
+            // Tokens that can only appear in values, never in selectors
+            NUMBER | QUOTED_STRING | STRING_START | DOLLAR | UNICODE_RANGE => {
+                has_value_only_token = true;
+            }
             _ => {}
         }
         offset += 1;

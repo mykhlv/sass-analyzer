@@ -187,6 +187,12 @@ pub(crate) fn handle_goto_definition(
     };
 
     let root = SyntaxNode::new_root(green);
+
+    // If cursor is on the import path of @use/@forward/@import, jump to the file
+    if let Some(resp) = try_goto_import(&root, offset, &uri, module_graph) {
+        return Some(resp);
+    }
+
     let ref_info = find_reference_at_offset(&root, offset)?;
 
     let resolved = module_graph.resolve_reference(
@@ -202,6 +208,36 @@ pub(crate) fn handle_goto_definition(
     let target_source = module_graph.source_text(&target_uri)?;
 
     let range = text_range_to_lsp(symbol.selection_range, &target_line_index, &target_source);
+    Some(GotoDefinitionResponse::Scalar(Location {
+        uri: target_uri,
+        range,
+    }))
+}
+
+fn try_goto_import(
+    root: &SyntaxNode,
+    offset: sass_parser::text_range::TextSize,
+    uri: &Uri,
+    module_graph: &ModuleGraph,
+) -> Option<GotoDefinitionResponse> {
+    let token = root.token_at_offset(offset).right_biased()?;
+    if token.kind() != SyntaxKind::QUOTED_STRING {
+        return None;
+    }
+    let parent = token.parent()?;
+    if !matches!(
+        parent.kind(),
+        SyntaxKind::USE_RULE | SyntaxKind::FORWARD_RULE | SyntaxKind::IMPORT_RULE
+    ) {
+        return None;
+    }
+    let text = token.text();
+    if text.len() < 2 {
+        return None;
+    }
+    let spec = &text[1..text.len() - 1];
+    let target_uri = module_graph.resolve_import(uri, spec)?;
+    let range = tower_lsp_server::ls_types::Range::default();
     Some(GotoDefinitionResponse::Scalar(Location {
         uri: target_uri,
         range,

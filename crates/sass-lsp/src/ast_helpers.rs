@@ -23,6 +23,7 @@ pub(crate) fn namespace_of_ref(root: &SyntaxNode, ref_range: TextRange) -> Optio
                 | SyntaxKind::RULE_SET
                 | SyntaxKind::BLOCK
                 | SyntaxKind::SOURCE_FILE
+                | SyntaxKind::ARG_LIST
         ) {
             break;
         }
