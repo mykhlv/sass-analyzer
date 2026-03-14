@@ -112,6 +112,37 @@ async fn recv_response(
     }
 }
 
+/// Drain all pending server messages (notifications, diagnostics, requests)
+/// for a short period. Use after `didOpen` when the server may emit multiple
+/// cascading diagnostics and `semanticTokens/refresh` requests.
+async fn drain_notifications(
+    reader: &mut (impl AsyncReadExt + Unpin),
+    writer: &mut (impl AsyncWriteExt + Unpin),
+    duration: std::time::Duration,
+) {
+    let deadline = tokio::time::Instant::now() + duration;
+    loop {
+        match tokio::time::timeout_at(deadline, recv_msg_raw(reader)).await {
+            Ok(msg) => {
+                // Auto-respond to server→client requests
+                if msg.get("method").is_some() && msg.get("id").is_some() {
+                    send_msg(
+                        writer,
+                        &serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "id": msg["id"],
+                            "result": null
+                        }),
+                    )
+                    .await;
+                }
+                // Discard notifications
+            }
+            Err(_) => break, // Timeout — no more pending messages
+        }
+    }
+}
+
 /// Spawn the LSP server on in-memory duplex streams, return client-side handles.
 fn spawn_server() -> (tokio::io::DuplexStream, tokio::io::DuplexStream) {
     let (client_read, server_write) = tokio::io::duplex(1024 * 64);
@@ -6533,7 +6564,8 @@ async fn call_hierarchy_cross_file_incoming() {
     let helpers_uri = format!("file://{}", helpers_path.display());
     let main_uri = format!("file://{}", main_path.display());
 
-    // Open both files
+    // Open both files and drain all notifications (diagnostics, cascading
+    // re-diagnostics, semanticTokens/refresh) before sending requests.
     send_msg(
         &mut writer,
         &serde_json::json!({
@@ -6550,8 +6582,6 @@ async fn call_hierarchy_cross_file_incoming() {
         }),
     )
     .await;
-    let _diag = recv_msg(&mut reader, &mut writer).await;
-
     send_msg(
         &mut writer,
         &serde_json::json!({
@@ -6568,7 +6598,12 @@ async fn call_hierarchy_cross_file_incoming() {
         }),
     )
     .await;
-    let _diag = recv_msg(&mut reader, &mut writer).await;
+    drain_notifications(
+        &mut reader,
+        &mut writer,
+        std::time::Duration::from_millis(500),
+    )
+    .await;
 
     // Prepare on "double" definition in _helpers.scss
     send_msg(
@@ -6639,7 +6674,7 @@ async fn call_hierarchy_cross_file_outgoing() {
     let helpers_uri = format!("file://{}", helpers_path.display());
     let main_uri = format!("file://{}", main_path.display());
 
-    // Open both files
+    // Open both files and drain all notifications
     send_msg(
         &mut writer,
         &serde_json::json!({
@@ -6656,8 +6691,6 @@ async fn call_hierarchy_cross_file_outgoing() {
         }),
     )
     .await;
-    let _diag = recv_msg(&mut reader, &mut writer).await;
-
     send_msg(
         &mut writer,
         &serde_json::json!({
@@ -6674,7 +6707,12 @@ async fn call_hierarchy_cross_file_outgoing() {
         }),
     )
     .await;
-    let _diag = recv_msg(&mut reader, &mut writer).await;
+    drain_notifications(
+        &mut reader,
+        &mut writer,
+        std::time::Duration::from_millis(500),
+    )
+    .await;
 
     // Prepare on "quadruple" definition in main.scss
     send_msg(
