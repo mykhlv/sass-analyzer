@@ -146,3 +146,11 @@ jobs:
           done
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Publish to Open VSX Registry
+        run: |
+          for vsix in *.vsix; do
+            npx ovsx publish "$vsix" -p "$OVSX_PAT"
+          done
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
