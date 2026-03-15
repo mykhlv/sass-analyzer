@@ -1524,7 +1524,7 @@ fn round_trip_all_at_rules() {
     ];
 
     for input in inputs {
-        let (green, _errors) = sass_parser::parse(input);
+        let (green, _errors) = sass_parser::parse_scss(input);
         let tree = SyntaxNode::new_root(green);
         assert_eq!(
             tree.text().to_string(),

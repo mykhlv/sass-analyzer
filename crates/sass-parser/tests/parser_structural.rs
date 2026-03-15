@@ -9,7 +9,7 @@ fn parse(
     SyntaxNode,
     Vec<(String, sass_parser::text_range::TextRange)>,
 ) {
-    let (green, errors) = sass_parser::parse(source);
+    let (green, errors) = sass_parser::parse_scss(source);
     let tree = SyntaxNode::new_root(green);
     (tree, errors)
 }

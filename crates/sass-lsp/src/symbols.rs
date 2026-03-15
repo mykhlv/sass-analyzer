@@ -335,7 +335,7 @@ mod tests {
     use super::*;
 
     fn parse_symbols(input: &str) -> FileSymbols {
-        let (green, _errors) = sass_parser::parse(input);
+        let (green, _errors) = sass_parser::parse_scss(input);
         let root = SyntaxNode::new_root(green);
         collect_symbols(&root)
     }

@@ -33,7 +33,7 @@ fn generate_large_scss(target_bytes: usize) -> String {
 fn countme_normalize_css() {
     countme::enable(true);
 
-    let (green, errors) = sass_parser::parse(NORMALIZE_CSS);
+    let (green, errors) = sass_parser::parse_scss(NORMALIZE_CSS);
     let _tree = sass_parser::syntax::SyntaxNode::new_root(green);
 
     let nodes = countme::get::<rowan::GreenNode>();
@@ -74,7 +74,7 @@ fn countme_large_scss() {
     let baseline_tokens = countme::get::<rowan::GreenToken>().total;
 
     let source = generate_large_scss(1_000_000);
-    let (green, _errors) = sass_parser::parse(&source);
+    let (green, _errors) = sass_parser::parse_scss(&source);
     let _tree = sass_parser::syntax::SyntaxNode::new_root(green);
 
     let nodes = countme::get::<rowan::GreenNode>();

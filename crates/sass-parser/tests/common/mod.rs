@@ -5,7 +5,7 @@ use sass_parser::syntax::{SyntaxNode, debug_tree};
 /// against an expected snapshot.
 #[allow(clippy::needless_pass_by_value)]
 pub fn check(source: &str, expect: Expect) {
-    let (green, errors) = sass_parser::parse(source);
+    let (green, errors) = sass_parser::parse_scss(source);
     let tree = SyntaxNode::new_root(green);
 
     assert_eq!(

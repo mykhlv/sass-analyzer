@@ -60,7 +60,7 @@ fn parse_corpus_dir(dir: &Path) -> Vec<FileResult> {
             let source = std::fs::read_to_string(&path)
                 .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
 
-            let (green, errors) = sass_parser::parse(&source);
+            let (green, errors) = sass_parser::parse_scss(&source);
             let tree = SyntaxNode::new_root(green);
 
             let round_trip_ok = tree.text().to_string() == source;

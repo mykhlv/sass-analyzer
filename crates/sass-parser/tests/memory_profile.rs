@@ -39,7 +39,7 @@ fn dhat_heap_profile() {
     let _profiler = dhat::Profiler::builder().testing().build();
 
     // --- normalize.css (6 KB) ---
-    let (green, _) = sass_parser::parse(NORMALIZE_CSS);
+    let (green, _) = sass_parser::parse_scss(NORMALIZE_CSS);
     let tree = sass_parser::syntax::SyntaxNode::new_root(green);
 
     let stats = dhat::HeapStats::get();
@@ -61,7 +61,7 @@ fn dhat_heap_profile() {
     let source = generate_large_scss(1_000_000);
     let blocks_before = dhat::HeapStats::get().total_blocks;
 
-    let (green, _) = sass_parser::parse(&source);
+    let (green, _) = sass_parser::parse_scss(&source);
     let _tree = sass_parser::syntax::SyntaxNode::new_root(green);
 
     let stats = dhat::HeapStats::get();
