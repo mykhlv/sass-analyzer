@@ -350,3 +350,82 @@ pub(crate) fn parse_param_labels(signature: &str, params_text: &str) -> Vec<Para
 fn byte_offset_to_utf16(s: &str) -> u32 {
     s.encode_utf16().count() as u32
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sass_parser::syntax::SyntaxNode;
+    use sass_parser::text_range::TextSize;
+
+    fn call_at(input: &str, offset: u32) -> Option<CallInfo> {
+        let (green, _) = sass_parser::parse(input);
+        let root = SyntaxNode::new_root(green);
+        find_call_at_offset(&root, TextSize::from(offset))
+    }
+
+    #[test]
+    fn namespaced_function_call() {
+        let input = "@use 'x' as ns;\n$x: ns.func(1);";
+        // Cursor inside arg list — after the '('
+        let offset = input.find("(1").unwrap() + 1;
+        let info = call_at(input, offset as u32).unwrap();
+        assert_eq!(info.namespace.as_deref(), Some("ns"));
+        assert_eq!(info.name, "func");
+        assert_eq!(info.kind, symbols::SymbolKind::Function);
+    }
+
+    #[test]
+    fn namespaced_mixin_include() {
+        let input = "@use 'x' as ns;\n.a { @include ns.mix(1); }";
+        let offset = input.find("(1").unwrap() + 1;
+        let info = call_at(input, offset as u32).unwrap();
+        assert_eq!(info.namespace.as_deref(), Some("ns"));
+        assert_eq!(info.name, "mix");
+        assert_eq!(info.kind, symbols::SymbolKind::Mixin);
+    }
+
+    #[test]
+    fn count_active_parameter_nested_parens() {
+        // func(a, fn(1, 2), c) — cursor after last comma
+        let input = "@function f($a, $b, $c) {} $x: f(a, fn(1, 2), );";
+        let cursor_offset = input.find(", );").unwrap() + 2; // after ", " before ")"
+        let info = call_at(input, cursor_offset as u32).unwrap();
+        assert_eq!(info.name, "f");
+        let active = count_active_parameter(input, &info, TextSize::from(cursor_offset as u32));
+        assert_eq!(
+            active, 2,
+            "should be on 3rd param (index 2) after nested call"
+        );
+    }
+
+    #[test]
+    fn build_signature_info_with_sassdoc_param_type() {
+        let sym = symbols::Symbol {
+            name: "scale".to_string(),
+            kind: symbols::SymbolKind::Function,
+            params: Some("($value, $factor: 1)".to_string()),
+            range: sass_parser::text_range::TextRange::default(),
+            selection_range: sass_parser::text_range::TextRange::default(),
+            doc: Some("@param {Number} $value - The input value\n@param {Number} $factor - Scale factor\n@return {Number}".to_string()),
+            value: None,
+        };
+        let info = build_signature_info(&sym, sym.params.as_ref().unwrap());
+        let params = info.parameters.unwrap();
+        assert_eq!(params.len(), 2);
+        // First param should have type annotation in documentation
+        let doc = params[0].documentation.as_ref().unwrap();
+        match doc {
+            tower_lsp_server::ls_types::Documentation::MarkupContent(mc) => {
+                assert!(
+                    mc.value.contains("{Number}"),
+                    "should contain type annotation"
+                );
+                assert!(
+                    mc.value.contains("The input value"),
+                    "should contain description"
+                );
+            }
+            _ => panic!("expected MarkupContent"),
+        }
+    }
+}
