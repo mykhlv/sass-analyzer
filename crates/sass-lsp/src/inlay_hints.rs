@@ -320,7 +320,7 @@ mod tests {
     #[test]
     fn extract_call_name_with_namespace() {
         let input = "@use 'x' as ns;\n$x: ns.func(1, 2);";
-        let (green, _) = sass_parser::parse(input);
+        let (green, _) = sass_parser::parse_scss(input);
         let root = SyntaxNode::new_root(green);
         let func_call = root
             .descendants()
@@ -334,7 +334,7 @@ mod tests {
     #[test]
     fn extract_include_name_with_namespace() {
         let input = "@use 'x' as ns;\n.a { @include ns.mixin(a, b); }";
-        let (green, _) = sass_parser::parse(input);
+        let (green, _) = sass_parser::parse_scss(input);
         let root = SyntaxNode::new_root(green);
         let include_rule = root
             .descendants()
@@ -348,7 +348,7 @@ mod tests {
     #[test]
     fn is_splat_arg_detected() {
         let input = "@mixin m($a, $b) {} @include m($args...);";
-        let (green, _) = sass_parser::parse(input);
+        let (green, _) = sass_parser::parse_scss(input);
         let root = SyntaxNode::new_root(green);
         let arg = root
             .descendants()

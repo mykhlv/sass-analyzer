@@ -381,7 +381,7 @@ fn sass_spec_compatibility() {
     let results: Vec<CaseResult> = all_cases
         .iter()
         .map(|case| {
-            let (green, errors) = sass_parser::parse(&case.input_scss);
+            let (green, errors) = sass_parser::parse_scss(&case.input_scss);
 
             // Verify round-trip.
             let tree = SyntaxNode::new_root(green);

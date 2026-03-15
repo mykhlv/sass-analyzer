@@ -849,7 +849,7 @@ mod tests {
 
     #[test]
     fn insertion_point_empty_file() {
-        let (green, _) = sass_parser::parse("");
+        let (green, _) = sass_parser::parse_scss("");
         let root = SyntaxNode::new_root(green);
         let text = "";
         let li = sass_parser::line_index::LineIndex::new(text);
@@ -861,7 +861,7 @@ mod tests {
     #[test]
     fn insertion_point_after_existing_use() {
         let src = "@use \"colors\";\n.btn { color: red; }\n";
-        let (green, _) = sass_parser::parse(src);
+        let (green, _) = sass_parser::parse_scss(src);
         let root = SyntaxNode::new_root(green);
         let li = sass_parser::line_index::LineIndex::new(src);
         let (pos, nl) = find_use_insertion_point(&root, src, &li);
@@ -872,7 +872,7 @@ mod tests {
     #[test]
     fn insertion_point_after_multiple_uses() {
         let src = "@use \"colors\";\n@use \"mixins\";\n.btn { }\n";
-        let (green, _) = sass_parser::parse(src);
+        let (green, _) = sass_parser::parse_scss(src);
         let root = SyntaxNode::new_root(green);
         let li = sass_parser::line_index::LineIndex::new(src);
         let (pos, nl) = find_use_insertion_point(&root, src, &li);
@@ -883,7 +883,7 @@ mod tests {
     #[test]
     fn insertion_point_after_forward() {
         let src = "@forward \"colors\";\n@use \"mixins\";\n.btn { }\n";
-        let (green, _) = sass_parser::parse(src);
+        let (green, _) = sass_parser::parse_scss(src);
         let root = SyntaxNode::new_root(green);
         let li = sass_parser::line_index::LineIndex::new(src);
         let (pos, nl) = find_use_insertion_point(&root, src, &li);
@@ -894,7 +894,7 @@ mod tests {
     #[test]
     fn insertion_point_no_imports_with_rules() {
         let src = ".btn { color: red; }\n";
-        let (green, _) = sass_parser::parse(src);
+        let (green, _) = sass_parser::parse_scss(src);
         let root = SyntaxNode::new_root(green);
         let li = sass_parser::line_index::LineIndex::new(src);
         let (pos, nl) = find_use_insertion_point(&root, src, &li);
@@ -906,7 +906,7 @@ mod tests {
     fn insertion_point_use_after_rule_finds_last_use() {
         // Non-standard layout: @use after a rule (#12)
         let src = "@use \"a\";\n.btn { }\n@use \"b\";\n";
-        let (green, _) = sass_parser::parse(src);
+        let (green, _) = sass_parser::parse_scss(src);
         let root = SyntaxNode::new_root(green);
         let li = sass_parser::line_index::LineIndex::new(src);
         let (pos, nl) = find_use_insertion_point(&root, src, &li);
@@ -917,7 +917,7 @@ mod tests {
     #[test]
     fn insertion_point_no_trailing_newline_needs_prefix() {
         let src = "@use \"colors\";";
-        let (green, _) = sass_parser::parse(src);
+        let (green, _) = sass_parser::parse_scss(src);
         let root = SyntaxNode::new_root(green);
         let li = sass_parser::line_index::LineIndex::new(src);
         let (pos, nl) = find_use_insertion_point(&root, src, &li);
@@ -998,7 +998,7 @@ mod tests {
         sel_start: (u32, u32),
         sel_end: (u32, u32),
     ) -> Vec<TextEdit> {
-        let (green, _) = sass_parser::parse(src);
+        let (green, _) = sass_parser::parse_scss(src);
         let root = SyntaxNode::new_root(green);
         let li = sass_parser::line_index::LineIndex::new(src);
         let uri: Uri = "file:///test.scss".parse().unwrap();
@@ -1113,7 +1113,7 @@ mod tests {
     // ── extract mixin tests ─────────────────────────────────────────
 
     fn run_extract_mixin(src: &str, sel_start: (u32, u32), sel_end: (u32, u32)) -> Vec<TextEdit> {
-        let (green, _) = sass_parser::parse(src);
+        let (green, _) = sass_parser::parse_scss(src);
         let root = SyntaxNode::new_root(green);
         let li = sass_parser::line_index::LineIndex::new(src);
         let uri: Uri = "file:///test.scss".parse().unwrap();
@@ -1242,7 +1242,7 @@ mod tests {
             result,
             "$new-variable: #333;\n.btn {\n  color: $new-variable;\n}\n"
         );
-        let (_, errors) = sass_parser::parse(&result);
+        let (_, errors) = sass_parser::parse_scss(&result);
         assert!(errors.is_empty(), "Parse errors: {errors:?}");
     }
 
@@ -1254,7 +1254,7 @@ mod tests {
         assert_eq!(edits.len(), 2);
         let result = apply_edits(src, &edits);
         // Verify result parses without errors
-        let (_, errors) = sass_parser::parse(&result);
+        let (_, errors) = sass_parser::parse_scss(&result);
         assert!(errors.is_empty(), "Parse errors in:\n{result}\n{errors:?}");
         assert!(result.contains("@mixin new-mixin"));
         assert!(result.contains("@include new-mixin;"));
@@ -1279,7 +1279,7 @@ mod tests {
         assert_eq!(edits.len(), 2);
         assert!(edits[0].new_text.contains("@mixin new-mixin"));
         let result = apply_edits(src, &edits);
-        let (_, errors) = sass_parser::parse(&result);
+        let (_, errors) = sass_parser::parse_scss(&result);
         assert!(errors.is_empty(), "Parse errors in:\n{result}\n{errors:?}");
     }
 
@@ -1303,7 +1303,7 @@ mod tests {
         assert_eq!(edits.len(), 2);
         assert!(edits[0].new_text.contains("linear-gradient("));
         let result = apply_edits(src, &edits);
-        let (_, errors) = sass_parser::parse(&result);
+        let (_, errors) = sass_parser::parse_scss(&result);
         assert!(errors.is_empty(), "Parse errors in:\n{result}\n{errors:?}");
     }
 

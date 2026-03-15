@@ -1,6 +1,6 @@
 # sass-analyzer
 
-A hand-written recursive descent SCSS parser and language server in Rust, built for IDE tooling.
+A hand-written recursive descent SCSS/Sass parser and language server in Rust, built for IDE tooling. Supports both SCSS (`.scss`) and indented Sass (`.sass`) syntax.
 
 ## Why
 
@@ -62,24 +62,27 @@ Follows [rust-analyzer](https://rust-analyzer.github.io/book/contributing/archit
 - **Resilient error recovery** — every grammar production has first/follow token sets; parse errors are localized, and correct syntax after an error parses correctly
 
 ```
-Source text
-    │
-    ▼
-  Lexer ──► Input (token kinds + trivia offsets)
-    │
-    ▼
+Source text (.scss)              Source text (.sass)
+    │                                │
+    ▼                                ▼
+  Lexer ──► Input               SassLexer (indent → virtual {/}/;) ──► Input
+    │                                │
+    └──────────┬─────────────────────┘
+               ▼
   Parser ──► Events (Enter/Token/Exit/Error)
-    │
-    ▼
+               │
+               ▼
   Bridge ──► rowan GreenNode tree + diagnostics
-    │
-    ▼
+               │
+               ▼
   Typed AST wrappers (UseRule, FunctionCall, ...)
 ```
 
 ## Parser features
 
 **Full SCSS syntax** — selectors, declarations, nested rules, `&` parent selector, interpolation `#{...}` everywhere (selectors, properties, values, strings, `url()`).
+
+**Indented Sass syntax** (`.sass`) — whitespace-significant syntax without braces or semicolons. A dedicated lexer converts indentation into virtual `{`/`}`/`;` tokens, feeding the same parser — all features work identically for both syntaxes.
 
 **Expressions** — arithmetic, comparison, logical operators, Pratt-parsed with correct precedence. Maps, lists, bracketed lists, function calls with keyword/rest args.
 
@@ -108,7 +111,7 @@ $primary: #3498db;
 }
 "#;
 
-let (green, errors) = sass_parser::parse(source);
+let (green, errors) = sass_parser::parse_scss(source);
 let tree = SyntaxNode::new_root(green);
 
 // Lossless: every byte preserved
@@ -131,7 +134,7 @@ let source = r#"@use "sass:meta";
 @forward "mixins";
 "#;
 
-let (green, _) = sass_parser::parse(source);
+let (green, _) = sass_parser::parse_scss(source);
 let tree = SyntaxNode::new_root(green);
 
 for imp in collect_imports(&tree) {
@@ -149,8 +152,9 @@ for imp in collect_imports(&tree) {
 ```
 cargo install --path crates/sass-cli
 
-sass-cli parse file.scss     # Print syntax tree
-sass-cli check src/           # Check directory for errors
+sass-cli parse file.scss     # Print syntax tree (SCSS)
+sass-cli parse file.sass     # Print syntax tree (indented Sass)
+sass-cli check src/           # Check directory for errors (.scss + .sass)
 sass-cli lex file.scss        # Dump token stream
 ```
 
@@ -178,6 +182,7 @@ sass-analyzer/
 │   │   │   │   ├── declarations.rs
 │   │   │   │   ├── expressions.rs    # Pratt parser
 │   │   │   │   └── at_rules/         # 9 at-rule modules
+│   │   │   ├── sass_lexer.rs     # Indented Sass → virtual tokens
 │   │   │   ├── bridge.rs         # Events → rowan tree
 │   │   │   ├── ast/              # Typed AST wrappers
 │   │   │   ├── imports.rs        # Dependency extraction

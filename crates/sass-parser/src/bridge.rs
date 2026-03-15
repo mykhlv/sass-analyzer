@@ -45,7 +45,7 @@ impl DirectBuilder {
 
     #[inline]
     fn token(&mut self, kind: rowan::SyntaxKind, text: &str) {
-        let token = if kind.0 <= MAX_CACHED_KIND {
+        let token = if kind.0 <= MAX_CACHED_KIND && !text.is_empty() {
             let idx = kind.0 as usize;
             if let Some(cached) = &self.token_cache[idx] {
                 cached.clone()

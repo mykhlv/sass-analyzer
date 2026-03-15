@@ -1,7 +1,7 @@
 {
   "name": "sass-analyzer",
   "displayName": "sass-analyzer",
-  "description": "Fast SCSS language support: diagnostics, completions, go to definition, hover, rename, and more — powered by a hand-written Rust parser.",
+  "description": "Fast SCSS and Sass language support: diagnostics, completions, go to definition, hover, rename, and more — powered by a hand-written Rust parser.",
   "version": "0.2.0",
   "publisher": "mykhlv",
   "license": "MIT",
@@ -34,7 +34,8 @@
     "Linters"
   ],
   "activationEvents": [
-    "onLanguage:scss"
+    "onLanguage:scss",
+    "onLanguage:sass"
   ],
   "extensionKind": ["workspace"],
   "main": "./out/extension.js",

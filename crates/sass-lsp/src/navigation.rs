@@ -554,7 +554,7 @@ mod tests {
     use sass_parser::text_range::TextSize;
 
     fn ref_at(input: &str, offset: u32) -> Option<ReferenceInfo> {
-        let (green, _) = sass_parser::parse(input);
+        let (green, _) = sass_parser::parse_scss(input);
         let root = SyntaxNode::new_root(green);
         find_reference_at_offset(&root, TextSize::from(offset))
     }

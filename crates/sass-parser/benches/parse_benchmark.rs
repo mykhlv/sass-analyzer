@@ -74,7 +74,7 @@ fn parse_normalize_css(bencher: Bencher<'_, '_>) {
     bencher
         .counter(divan::counter::BytesCount::of_str(NORMALIZE_CSS))
         .with_inputs(|| NORMALIZE_CSS)
-        .bench_values(sass_parser::parse);
+        .bench_values(sass_parser::parse_scss);
 }
 
 #[divan::bench]
@@ -83,7 +83,7 @@ fn parse_and_build_tree_normalize_css(bencher: Bencher<'_, '_>) {
         .counter(divan::counter::BytesCount::of_str(NORMALIZE_CSS))
         .with_inputs(|| NORMALIZE_CSS)
         .bench_values(|source| {
-            let (green, _) = sass_parser::parse(source);
+            let (green, _) = sass_parser::parse_scss(source);
             SyntaxNode::new_root(green)
         });
 }
@@ -140,7 +140,7 @@ fn parse_angular_material(bencher: Bencher<'_, '_>) {
     bencher
         .counter(divan::counter::BytesCount::of_str(source))
         .with_inputs(|| source.as_str())
-        .bench_values(sass_parser::parse);
+        .bench_values(sass_parser::parse_scss);
 }
 
 #[divan::bench]
@@ -153,7 +153,7 @@ fn parse_and_build_tree_angular_material(bencher: Bencher<'_, '_>) {
         .counter(divan::counter::BytesCount::of_str(source))
         .with_inputs(|| source.as_str())
         .bench_values(|s| {
-            let (green, _) = sass_parser::parse(s);
+            let (green, _) = sass_parser::parse_scss(s);
             SyntaxNode::new_root(green)
         });
 }
@@ -172,7 +172,7 @@ fn prepare_incremental(
     sass_parser::reparse::TextEdit,
     String,
 ) {
-    let (old_green, old_errors) = sass_parser::parse(source);
+    let (old_green, old_errors) = sass_parser::parse_scss(source);
     let mut new_source = source.to_owned();
     new_source.insert_str(offset as usize, insert);
     let edit = sass_parser::reparse::TextEdit {
@@ -190,7 +190,7 @@ fn full_reparse_normalize_css(bencher: Bencher<'_, '_>) {
     new_source.insert(offset, 'x');
     bencher
         .with_inputs(|| new_source.clone())
-        .bench_values(|s| sass_parser::parse(&s));
+        .bench_values(|s| sass_parser::parse_scss(&s));
 }
 
 #[divan::bench]
@@ -214,7 +214,7 @@ fn full_reparse_angular_material(bencher: Bencher<'_, '_>) {
     bencher
         .counter(divan::counter::BytesCount::of_str(source))
         .with_inputs(|| new_source.clone())
-        .bench_values(|s| sass_parser::parse(&s));
+        .bench_values(|s| sass_parser::parse_scss(&s));
 }
 
 #[divan::bench]

@@ -7,7 +7,7 @@ fn main() {
     let path = match env::args().nth(1) {
         Some(p) => p,
         None => {
-            eprintln!("Usage: parse_file <path.scss>");
+            eprintln!("Usage: parse_file <path.scss|path.sass>");
             process::exit(1);
         }
     };
@@ -20,7 +20,11 @@ fn main() {
         }
     };
 
-    let (green, errors) = sass_parser::parse(&source);
+    let (green, errors) = if path.ends_with(".sass") {
+        sass_parser::parse_sass(&source)
+    } else {
+        sass_parser::parse_scss(&source)
+    };
     let tree = SyntaxNode::new_root(green);
 
     // Print the full syntax tree (S-expression format)

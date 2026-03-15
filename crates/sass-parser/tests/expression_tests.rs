@@ -2799,7 +2799,7 @@ fn integration_css_multi_value() {
 #[test]
 fn round_trip_complex_expr() {
     let source = "$result: ($a + $b) * 2 - ($c / 4);";
-    let (green, _) = sass_parser::parse(source);
+    let (green, _) = sass_parser::parse_scss(source);
     let tree = SyntaxNode::new_root(green);
     assert_eq!(tree.text().to_string(), source);
 }
@@ -2807,7 +2807,7 @@ fn round_trip_complex_expr() {
 #[test]
 fn round_trip_map_nested() {
     let source = "$m: (colors: (red: #f00, blue: #00f), sizes: (sm: 12px, lg: 24px));";
-    let (green, _) = sass_parser::parse(source);
+    let (green, _) = sass_parser::parse_scss(source);
     let tree = SyntaxNode::new_root(green);
     assert_eq!(tree.text().to_string(), source);
 }
@@ -2815,7 +2815,7 @@ fn round_trip_map_nested() {
 #[test]
 fn round_trip_calc_nested() {
     let source = "div { width: calc(100% - min(20px, 5vw)); }";
-    let (green, _) = sass_parser::parse(source);
+    let (green, _) = sass_parser::parse_scss(source);
     let tree = SyntaxNode::new_root(green);
     assert_eq!(tree.text().to_string(), source);
 }
@@ -2823,7 +2823,7 @@ fn round_trip_calc_nested() {
 #[test]
 fn round_trip_string_interpolation() {
     let source = "$s: \"#{$a}-#{$b}\";";
-    let (green, _) = sass_parser::parse(source);
+    let (green, _) = sass_parser::parse_scss(source);
     let tree = SyntaxNode::new_root(green);
     assert_eq!(tree.text().to_string(), source);
 }
@@ -2831,7 +2831,7 @@ fn round_trip_string_interpolation() {
 #[test]
 fn round_trip_variable_flags() {
     let source = "$x: 1 !default !global;";
-    let (green, _) = sass_parser::parse(source);
+    let (green, _) = sass_parser::parse_scss(source);
     let tree = SyntaxNode::new_root(green);
     assert_eq!(tree.text().to_string(), source);
 }
@@ -2839,7 +2839,7 @@ fn round_trip_variable_flags() {
 #[test]
 fn round_trip_url_interpolation() {
     let source = "div { background: url(#{$path}/img.png); }";
-    let (green, _) = sass_parser::parse(source);
+    let (green, _) = sass_parser::parse_scss(source);
     let tree = SyntaxNode::new_root(green);
     assert_eq!(tree.text().to_string(), source);
 }
@@ -2847,7 +2847,7 @@ fn round_trip_url_interpolation() {
 #[test]
 fn round_trip_function_keyword_args() {
     let source = "$x: rgba($red: 255, $green: 128, $blue: 0);";
-    let (green, _) = sass_parser::parse(source);
+    let (green, _) = sass_parser::parse_scss(source);
     let tree = SyntaxNode::new_root(green);
     assert_eq!(tree.text().to_string(), source);
 }
@@ -2855,7 +2855,7 @@ fn round_trip_function_keyword_args() {
 #[test]
 fn round_trip_bracketed_list() {
     let source = "$l: [1, 2, 3];";
-    let (green, _) = sass_parser::parse(source);
+    let (green, _) = sass_parser::parse_scss(source);
     let tree = SyntaxNode::new_root(green);
     assert_eq!(tree.text().to_string(), source);
 }
@@ -2863,7 +2863,7 @@ fn round_trip_bracketed_list() {
 #[test]
 fn round_trip_boolean_ops() {
     let source = "$a: not $x and $y or $z;";
-    let (green, _) = sass_parser::parse(source);
+    let (green, _) = sass_parser::parse_scss(source);
     let tree = SyntaxNode::new_root(green);
     assert_eq!(tree.text().to_string(), source);
 }
@@ -2882,7 +2882,7 @@ fn calc_deeply_nested_parens() {
         source.push(')');
     }
     source.push_str("); }");
-    let (green, errors) = sass_parser::parse(&source);
+    let (green, errors) = sass_parser::parse_scss(&source);
     let tree = SyntaxNode::new_root(green);
     // Should not stack-overflow — depth limit triggers an error instead
     assert!(

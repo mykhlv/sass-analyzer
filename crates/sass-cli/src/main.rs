@@ -14,14 +14,14 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Parse a single SCSS file and print its syntax tree.
+    /// Parse a single SCSS/Sass file and print its syntax tree.
     Parse {
-        /// Path to the .scss file.
+        /// Path to the .scss or .sass file.
         file: PathBuf,
     },
-    /// Check one or more SCSS files for parse errors.
+    /// Check one or more SCSS/Sass files for parse errors.
     Check {
-        /// Path to a .scss file or directory of .scss files.
+        /// Path to a .scss/.sass file or directory.
         path: PathBuf,
     },
     /// Lex a single SCSS file and dump its token stream.
@@ -46,16 +46,16 @@ fn main() {
 // ── parse ────────────────────────────────────────────────────────────
 
 fn cmd_parse(path: &Path) -> i32 {
-    if let Some(code) = reject_sass(path) {
-        return code;
-    }
-
     let source = match read_file(path) {
         Ok(s) => s,
         Err(code) => return code,
     };
 
-    let (green, errors) = sass_parser::parse(&source);
+    let (green, errors) = if is_sass(path) {
+        sass_parser::parse_sass(&source)
+    } else {
+        sass_parser::parse_scss(&source)
+    };
     let tree = SyntaxNode::new_root(green);
 
     print!("{}", debug_tree(&tree));
@@ -72,10 +72,10 @@ fn cmd_parse(path: &Path) -> i32 {
 // ── check ────────────────────────────────────────────────────────────
 
 fn cmd_check(path: &Path) -> i32 {
-    let files = collect_scss_files(path);
+    let files = collect_sass_files(path);
 
     if files.is_empty() {
-        eprintln!("no .scss files found in {}", path.display());
+        eprintln!("no .scss/.sass files found in {}", path.display());
         return 1;
     }
 
@@ -83,17 +83,16 @@ fn cmd_check(path: &Path) -> i32 {
     let mut failed_files = 0u64;
 
     for file in &files {
-        if reject_sass(file).is_some() {
-            failed_files += 1;
-            continue;
-        }
-
         let Ok(source) = read_file(file) else {
             failed_files += 1;
             continue;
         };
 
-        let (_, errors) = sass_parser::parse(&source);
+        let (_, errors) = if is_sass(file) {
+            sass_parser::parse_sass(&source)
+        } else {
+            sass_parser::parse_scss(&source)
+        };
 
         if !errors.is_empty() {
             let filename = file.display().to_string();
@@ -129,14 +128,27 @@ fn cmd_check(path: &Path) -> i32 {
 // ── lex ──────────────────────────────────────────────────────────────
 
 fn cmd_lex(path: &Path) -> i32 {
-    if let Some(code) = reject_sass(path) {
-        return code;
-    }
-
     let source = match read_file(path) {
         Ok(s) => s,
         Err(code) => return code,
     };
+
+    if is_sass(path) {
+        let tokens = sass_parser::sass_lexer::sass_tokenize(&source);
+        let mut has_errors = false;
+        for (kind, text) in &tokens {
+            if *kind == sass_parser::syntax_kind::SyntaxKind::ERROR {
+                has_errors = true;
+            }
+            if text.is_empty() {
+                println!("{kind:?} (virtual)");
+            } else {
+                println!("{kind:?} {text:?}");
+            }
+        }
+        println!("{:?}", sass_parser::syntax_kind::SyntaxKind::EOF);
+        return if has_errors { 2 } else { 0 };
+    }
 
     let mut lexer = sass_parser::lexer::Lexer::new(&source);
     let mut has_errors = false;
@@ -206,31 +218,22 @@ fn read_file(path: &Path) -> Result<String, i32> {
     }
 }
 
-fn reject_sass(path: &Path) -> Option<i32> {
-    if path.extension().is_some_and(|ext| ext == "sass") {
-        eprintln!(
-            "error: {} uses indented Sass syntax (.sass) which is not yet supported. \
-             Only SCSS (.scss) files are supported.",
-            path.display(),
-        );
-        Some(1)
-    } else {
-        None
-    }
+fn is_sass(path: &Path) -> bool {
+    path.extension().is_some_and(|ext| ext == "sass")
 }
 
-fn collect_scss_files(path: &Path) -> Vec<PathBuf> {
+fn collect_sass_files(path: &Path) -> Vec<PathBuf> {
     if path.is_file() {
         return vec![path.to_path_buf()];
     }
 
     let mut files = Vec::new();
-    collect_scss_recursive(path, &mut files);
+    collect_sass_recursive(path, &mut files);
     files.sort();
     files
 }
 
-fn collect_scss_recursive(dir: &Path, out: &mut Vec<PathBuf>) {
+fn collect_sass_recursive(dir: &Path, out: &mut Vec<PathBuf>) {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
         Err(e) => {
@@ -250,8 +253,11 @@ fn collect_scss_recursive(dir: &Path, out: &mut Vec<PathBuf>) {
             if name.starts_with('.') || name == "node_modules" {
                 continue;
             }
-            collect_scss_recursive(&path, out);
-        } else if path.extension().is_some_and(|ext| ext == "scss") {
+            collect_sass_recursive(&path, out);
+        } else if path
+            .extension()
+            .is_some_and(|ext| ext == "scss" || ext == "sass")
+        {
             out.push(path);
         }
     }

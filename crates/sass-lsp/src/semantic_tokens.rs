@@ -184,7 +184,7 @@ mod tests {
     use sass_parser::syntax::SyntaxNode;
 
     fn parse_tokens(input: &str) -> Vec<RawSemanticToken> {
-        let (green, _errors) = sass_parser::parse(input);
+        let (green, _errors) = sass_parser::parse_scss(input);
         let root = SyntaxNode::new_root(green);
         collect_semantic_tokens(&root)
     }
