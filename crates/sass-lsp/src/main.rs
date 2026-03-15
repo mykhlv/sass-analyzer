@@ -340,6 +340,33 @@ impl LanguageServer for Backend {
             return;
         }
         self.source_texts.insert(doc.uri.clone(), doc.text.clone());
+
+        // Eagerly parse and insert into `documents` so that goto-definition,
+        // hover, etc. work immediately — before the debounced worker fires.
+        // Deliberately skips `module_graph.index_file`: cross-file resolution
+        // is deferred to the worker, which overwrites this entry with full
+        // indexing + diagnostics after debounce.
+        if let Some((green, errors)) =
+            worker::parse_document(&doc.text, worker::is_sass_file(&doc.uri))
+        {
+            let line_index = sass_parser::line_index::LineIndex::new(&doc.text);
+            let file_symbols = {
+                let root = SyntaxNode::new_root(green.clone());
+                Arc::new(symbols::collect_symbols(&root))
+            };
+            self.documents.insert(
+                doc.uri.clone(),
+                DocumentState {
+                    version: doc.version,
+                    text: doc.text.clone(),
+                    green,
+                    errors,
+                    line_index,
+                    symbols: file_symbols,
+                },
+            );
+        }
+
         if self
             .task_tx
             .send(Task::Parse {

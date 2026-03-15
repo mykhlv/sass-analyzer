@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## 0.3.1 — 2026-03-15
+
+### Fixed
+- LSP: first Cmd+Click / hover after opening a file no longer fails (eagerly parse on `didOpen` instead of waiting for debounced worker)
+
 ## 0.3.0 — 2026-03-15
 
 ### Added
