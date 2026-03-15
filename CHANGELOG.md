@@ -7,11 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## 0.3.0 — 2026-03-15
+
 ### Added
 - Indented Sass syntax (`.sass`) support: parse `.sass` files using whitespace-significant syntax (no braces/semicolons). All LSP features (hover, completions, go-to-definition, rename, references, diagnostics, etc.) work with `.sass` files. Includes CLI support (`sass-cli parse/check`) and VS Code extension activation for the `sass` language
+- Open VSX Registry publishing in release workflow (available in Cursor, Windsurf, VSCodium, Gitpod)
+
+### Changed
+- MSRV updated from 1.85 to 1.94
 
 ### Fixed
 - Parser: sass-spec compatibility improved from 99.13% to 99.78% (95 → 24 false negatives). Fixes include: trailing commas in selectors, `@elseif` (deprecated no-space form), `@extend` with comma-separated selectors, `@at-root` query with quoted strings, keyframe flexibility (interpolated selectors, variable declarations, nested at-rules, anonymous names), interpolated at-rule names, CSS `@function` declarations, `@import` with media query commas, calc with interpolation/variables/space-separated values, `alpha()`/`progid:`/`expression()` special functions, `#{}` in ID selectors and placeholders, `-#{}` in property names and selectors, `!important` in mixin arguments, `@each` with space-separated lists
+- README inaccuracies corrected
 
 ## 0.2.0 — 2026-03-14
 
