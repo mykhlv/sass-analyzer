@@ -316,4 +316,44 @@ mod tests {
         let names = parse_param_names("($a, $b: fn(1, 2), $c)");
         assert_eq!(names, vec!["$a", "$b", "$c"]);
     }
+
+    #[test]
+    fn extract_call_name_with_namespace() {
+        let input = "@use 'x' as ns;\n$x: ns.func(1, 2);";
+        let (green, _) = sass_parser::parse(input);
+        let root = SyntaxNode::new_root(green);
+        let func_call = root
+            .descendants()
+            .find(|n| n.kind() == SyntaxKind::FUNCTION_CALL)
+            .unwrap();
+        let (ns, name) = extract_call_name(&func_call);
+        assert_eq!(ns.as_deref(), Some("ns"));
+        assert_eq!(name, "func");
+    }
+
+    #[test]
+    fn extract_include_name_with_namespace() {
+        let input = "@use 'x' as ns;\n.a { @include ns.mixin(a, b); }";
+        let (green, _) = sass_parser::parse(input);
+        let root = SyntaxNode::new_root(green);
+        let include_rule = root
+            .descendants()
+            .find(|n| n.kind() == SyntaxKind::INCLUDE_RULE)
+            .unwrap();
+        let (ns, name) = extract_include_name(&include_rule);
+        assert_eq!(ns.as_deref(), Some("ns"));
+        assert_eq!(name.as_deref(), Some("mixin"));
+    }
+
+    #[test]
+    fn is_splat_arg_detected() {
+        let input = "@mixin m($a, $b) {} @include m($args...);";
+        let (green, _) = sass_parser::parse(input);
+        let root = SyntaxNode::new_root(green);
+        let arg = root
+            .descendants()
+            .find(|n| n.kind() == SyntaxKind::ARG)
+            .unwrap();
+        assert!(is_splat_arg(&arg), "$args... should be detected as splat");
+    }
 }
