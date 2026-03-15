@@ -2,7 +2,7 @@
   "name": "sass-analyzer",
   "displayName": "sass-analyzer",
   "description": "Fast SCSS and Sass language support: diagnostics, completions, go to definition, hover, rename, and more — powered by a hand-written Rust parser.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "publisher": "mykhlv",
   "license": "MIT",
   "icon": "icon.png",
