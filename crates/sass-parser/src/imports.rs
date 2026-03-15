@@ -42,25 +42,25 @@ pub fn collect_imports(root: &SyntaxNode) -> Vec<ImportRef> {
 fn collect_rec(node: &SyntaxNode, out: &mut Vec<ImportRef>) {
     match node.kind() {
         SyntaxKind::USE_RULE => {
-            if let Some(rule) = ast::UseRule::cast(node.clone()) {
-                if let Some(path) = rule.module_path() {
-                    out.push(ImportRef {
-                        kind: ImportKind::Use,
-                        path,
-                        range: node.text_range(),
-                    });
-                }
+            if let Some(rule) = ast::UseRule::cast(node.clone())
+                && let Some(path) = rule.module_path()
+            {
+                out.push(ImportRef {
+                    kind: ImportKind::Use,
+                    path,
+                    range: node.text_range(),
+                });
             }
         }
         SyntaxKind::FORWARD_RULE => {
-            if let Some(rule) = ast::ForwardRule::cast(node.clone()) {
-                if let Some(path) = rule.module_path() {
-                    out.push(ImportRef {
-                        kind: ImportKind::Forward,
-                        path,
-                        range: node.text_range(),
-                    });
-                }
+            if let Some(rule) = ast::ForwardRule::cast(node.clone())
+                && let Some(path) = rule.module_path()
+            {
+                out.push(ImportRef {
+                    kind: ImportKind::Forward,
+                    path,
+                    range: node.text_range(),
+                });
             }
         }
         SyntaxKind::IMPORT_RULE => {

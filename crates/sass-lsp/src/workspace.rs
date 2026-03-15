@@ -187,7 +187,6 @@ impl ModuleGraph {
                     info.green = None;
                 } else {
                     kept.push(evicted_uri);
-                    continue;
                 }
             }
         }
@@ -213,7 +212,6 @@ impl ModuleGraph {
                     info.source_text = None;
                 } else {
                     kept.push(evicted_uri);
-                    continue;
                 }
             }
         }
@@ -231,9 +229,10 @@ impl ModuleGraph {
         // Re-parse from stored text (invariant: source_text is Some when green is None).
         let source = info.source_text.clone()?;
         drop(info);
-        let (green, _) =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sass_parser::parse(&source)))
-                .ok()?;
+        let (green, _) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            sass_parser::parse_scss(&source)
+        }))
+        .ok()?;
         if let Some(mut info) = self.files.get_mut(uri) {
             info.green = Some(green.clone());
         }
@@ -364,10 +363,8 @@ impl ModuleGraph {
 
         self.edges.insert(uri.clone(), resolved_edges);
 
-        if has_unresolved_use {
-            if let Some(mut info) = self.files.get_mut(uri) {
-                info.has_unresolved_use = true;
-            }
+        if has_unresolved_use && let Some(mut info) = self.files.get_mut(uri) {
+            info.has_unresolved_use = true;
         }
     }
 
@@ -464,15 +461,14 @@ impl ModuleGraph {
         kind: symbols::SymbolKind,
     ) -> Option<(Uri, symbols::Symbol)> {
         // 1. Local definitions
-        if let Some(info) = self.files.get(from) {
-            if let Some(sym) = info
+        if let Some(info) = self.files.get(from)
+            && let Some(sym) = info
                 .symbols
                 .definitions
                 .iter()
                 .find(|s| s.name == name && s.kind == kind)
-            {
-                return Some((from.clone(), sym.clone()));
-            }
+        {
+            return Some((from.clone(), sym.clone()));
         }
 
         // 2. Star imports and @import (merged scope)
@@ -869,15 +865,15 @@ impl ModuleGraph {
         for file_uri in &file_uris {
             if let Some(info) = self.files.get(file_uri) {
                 // Include declaration if requested
-                if include_declaration && file_uri == target_uri {
-                    if let Some(sym) = info
+                if include_declaration
+                    && file_uri == target_uri
+                    && let Some(sym) = info
                         .symbols
                         .definitions
                         .iter()
                         .find(|s| s.name == target_name && s.kind == target_kind)
-                    {
-                        results.push((target_uri.clone(), sym.selection_range));
-                    }
+                {
+                    results.push((target_uri.clone(), sym.selection_range));
                 }
 
                 // Check unqualified references from SymbolRef
@@ -887,10 +883,9 @@ impl ModuleGraph {
                     }
                     if let Some((resolved_uri, _)) =
                         self.resolve_unqualified(file_uri, &sym_ref.name, target_kind)
+                        && &resolved_uri == target_uri
                     {
-                        if &resolved_uri == target_uri {
-                            results.push((file_uri.clone(), sym_ref.selection_range));
-                        }
+                        results.push((file_uri.clone(), sym_ref.selection_range));
                     }
                 }
             }
@@ -902,16 +897,14 @@ impl ModuleGraph {
                     if node.kind() != SyntaxKind::NAMESPACE_REF {
                         continue;
                     }
-                    if let Some((ns, name, kind, range)) = extract_ns_ref_info(&node) {
-                        if name == target_name && kind == target_kind {
-                            if let Some((resolved_uri, _)) =
-                                self.resolve_qualified(file_uri, &ns, &name, target_kind)
-                            {
-                                if &resolved_uri == target_uri {
-                                    results.push((file_uri.clone(), range));
-                                }
-                            }
-                        }
+                    if let Some((ns, name, kind, range)) = extract_ns_ref_info(&node)
+                        && name == target_name
+                        && kind == target_kind
+                        && let Some((resolved_uri, _)) =
+                            self.resolve_qualified(file_uri, &ns, &name, target_kind)
+                        && &resolved_uri == target_uri
+                    {
+                        results.push((file_uri.clone(), range));
                     }
                 }
             }
@@ -1043,9 +1036,13 @@ impl ModuleGraph {
         let Ok(source) = std::fs::read_to_string(path) else {
             return;
         };
+        let parse_fn = if path.extension().is_some_and(|ext| ext == "sass") {
+            sass_parser::parse_sass
+        } else {
+            sass_parser::parse_scss
+        };
         let Some((green, _errors)) =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sass_parser::parse(&source)))
-                .ok()
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| parse_fn(&source))).ok()
         else {
             return;
         };
@@ -1087,20 +1084,21 @@ pub(crate) fn extract_namespace(root: &SyntaxNode, import_ref: &ImportRef) -> Na
         .collect();
 
     for (i, token) in tokens.iter().enumerate() {
-        if token.kind() == SyntaxKind::IDENT && token.text() == "as" {
-            if let Some(next) = tokens.get(i + 1) {
-                let val = if next.kind() == SyntaxKind::WHITESPACE {
-                    tokens.get(i + 2)
-                } else {
-                    Some(next)
-                };
-                if let Some(val) = val {
-                    if val.kind() == SyntaxKind::STAR {
-                        return Namespace::Star;
-                    }
-                    if val.kind() == SyntaxKind::IDENT {
-                        return Namespace::Named(val.text().to_string());
-                    }
+        if token.kind() == SyntaxKind::IDENT
+            && token.text() == "as"
+            && let Some(next) = tokens.get(i + 1)
+        {
+            let val = if next.kind() == SyntaxKind::WHITESPACE {
+                tokens.get(i + 2)
+            } else {
+                Some(next)
+            };
+            if let Some(val) = val {
+                if val.kind() == SyntaxKind::STAR {
+                    return Namespace::Star;
+                }
+                if val.kind() == SyntaxKind::IDENT {
+                    return Namespace::Named(val.text().to_string());
                 }
             }
         }
@@ -1261,13 +1259,13 @@ fn find_name_in_forward_clauses(
             }
 
             // Variable: $name
-            if kind == symbols::SymbolKind::Variable && tok.kind() == SyntaxKind::DOLLAR {
-                if let Some(next) = tokens.get(i + 1) {
-                    if next.kind() == SyntaxKind::IDENT && next.text() == name {
-                        // Range covers just the ident (without $), matching name_only_range
-                        results.push(next.text_range());
-                    }
-                }
+            if kind == symbols::SymbolKind::Variable
+                && tok.kind() == SyntaxKind::DOLLAR
+                && let Some(next) = tokens.get(i + 1)
+                && next.kind() == SyntaxKind::IDENT
+                && next.text() == name
+            {
+                results.push(next.text_range());
                 i += 2;
                 continue;
             }
@@ -1473,7 +1471,7 @@ mod tests {
 
     #[test]
     fn extract_namespace_as_alias() {
-        let (green, _) = sass_parser::parse("@use \"colors\" as c;");
+        let (green, _) = sass_parser::parse_scss("@use \"colors\" as c;");
         let root = SyntaxNode::new_root(green);
         let imports = imports::collect_imports(&root);
         assert_eq!(imports.len(), 1);
@@ -1483,7 +1481,7 @@ mod tests {
 
     #[test]
     fn extract_namespace_as_star() {
-        let (green, _) = sass_parser::parse("@use \"colors\" as *;");
+        let (green, _) = sass_parser::parse_scss("@use \"colors\" as *;");
         let root = SyntaxNode::new_root(green);
         let imports = imports::collect_imports(&root);
         let ns = extract_namespace(&root, &imports[0]);
@@ -1492,7 +1490,7 @@ mod tests {
 
     #[test]
     fn extract_namespace_default() {
-        let (green, _) = sass_parser::parse("@use \"sass:math\";");
+        let (green, _) = sass_parser::parse_scss("@use \"sass:math\";");
         let root = SyntaxNode::new_root(green);
         let imports = imports::collect_imports(&root);
         let ns = extract_namespace(&root, &imports[0]);
@@ -1501,7 +1499,7 @@ mod tests {
 
     #[test]
     fn extract_namespace_default_path() {
-        let (green, _) = sass_parser::parse("@use \"src/utils\";");
+        let (green, _) = sass_parser::parse_scss("@use \"src/utils\";");
         let root = SyntaxNode::new_root(green);
         let imports = imports::collect_imports(&root);
         let ns = extract_namespace(&root, &imports[0]);
@@ -1509,7 +1507,7 @@ mod tests {
     }
 
     fn make_info(source: &str) -> ModuleInfo {
-        let (green, _) = sass_parser::parse(source);
+        let (green, _) = sass_parser::parse_scss(source);
         let root = SyntaxNode::new_root(green.clone());
         let syms = symbols::collect_symbols(&root);
         let li = sass_parser::line_index::LineIndex::new(source);
@@ -1839,7 +1837,7 @@ mod tests {
     #[test]
     fn forward_as_does_not_create_namespace() {
         // @forward "lib" as btn-* should NOT create Named("btn-") namespace
-        let (green, _) = sass_parser::parse("@forward \"lib\" as btn-*;");
+        let (green, _) = sass_parser::parse_scss("@forward \"lib\" as btn-*;");
         let root = SyntaxNode::new_root(green);
         let imports = imports::collect_imports(&root);
         assert_eq!(imports.len(), 1);
@@ -2043,7 +2041,7 @@ mod tests {
     #[test]
     fn find_forward_show_hide_variable() {
         let source = "@forward \"lib\" show $primary, $secondary;";
-        let (green, _) = sass_parser::parse(source);
+        let (green, _) = sass_parser::parse_scss(source);
         let root = SyntaxNode::new_root(green);
 
         let ranges = find_name_in_forward_clauses(&root, "primary", symbols::SymbolKind::Variable);
@@ -2055,7 +2053,7 @@ mod tests {
     #[test]
     fn find_forward_show_hide_mixin() {
         let source = "@forward \"lib\" show btn, card;";
-        let (green, _) = sass_parser::parse(source);
+        let (green, _) = sass_parser::parse_scss(source);
         let root = SyntaxNode::new_root(green);
 
         let ranges = find_name_in_forward_clauses(&root, "btn", symbols::SymbolKind::Mixin);
@@ -2067,7 +2065,7 @@ mod tests {
     #[test]
     fn find_forward_hide_clause() {
         let source = "@forward \"lib\" hide $internal;";
-        let (green, _) = sass_parser::parse(source);
+        let (green, _) = sass_parser::parse_scss(source);
         let root = SyntaxNode::new_root(green);
 
         let ranges = find_name_in_forward_clauses(&root, "internal", symbols::SymbolKind::Variable);
@@ -2077,7 +2075,7 @@ mod tests {
     #[test]
     fn find_forward_clause_no_match() {
         let source = "@forward \"lib\" show $primary;";
-        let (green, _) = sass_parser::parse(source);
+        let (green, _) = sass_parser::parse_scss(source);
         let root = SyntaxNode::new_root(green);
 
         let ranges =

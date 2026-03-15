@@ -197,15 +197,19 @@ fn import_argument(p: &mut Parser<'_>) {
     import_conditions(p);
 }
 
-/// Consume optional import conditions (everything between the URL and `;`/`,`).
+/// Consume optional import conditions (everything between the URL and `;`).
+/// Once conditions start (any non-comma token after the path), commas become
+/// part of the media query list rather than import path separators.
 fn import_conditions(p: &mut Parser<'_>) {
     let mut depth: u32 = 0;
+    let mut has_conditions = false;
     while !p.at_end() {
         match p.current() {
             SEMICOLON | RBRACE if depth == 0 => break,
-            COMMA if depth == 0 => break,
+            COMMA if depth == 0 && !has_conditions => break,
             LPAREN => {
                 depth += 1;
+                has_conditions = true;
                 p.bump();
             }
             RPAREN => {
@@ -213,9 +217,13 @@ fn import_conditions(p: &mut Parser<'_>) {
                 p.bump();
             }
             HASH_LBRACE => {
+                has_conditions = true;
                 let _ = super::selectors::interpolation(p);
             }
-            _ => p.bump(),
+            _ => {
+                has_conditions = true;
+                p.bump();
+            }
         }
     }
 }

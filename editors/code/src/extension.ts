@@ -80,7 +80,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
   const outputChannel = window.createOutputChannel("sass-analyzer", "log");
 
   const clientOptions: LanguageClientOptions = {
-    documentSelector: [{ language: "scss" }],
+    documentSelector: [{ language: "scss" }, { language: "sass" }],
     connectionOptions: {
       maxRestartCount: 4,
     },

@@ -25,9 +25,8 @@ pub fn selector_list(p: &mut Parser<'_>) {
         p.bump(); // ,
         if p.at_ts(SELECTOR_START) || p.at_ts(COMBINATOR_TOKEN) {
             selector(p);
-        } else {
-            p.error("expected selector after `,`");
         }
+        // Empty position after comma (trailing/extra commas) — silently skip
     }
     let _ = m.complete(p, SELECTOR_LIST);
 }
@@ -108,21 +107,29 @@ fn simple_selector(p: &mut Parser<'_>) {
             let _ = m.complete(p, SIMPLE_SELECTOR);
         }
         DOT => {
-            // .class or .#{$var}
+            // .class, .#{$var}, or .-#{$name}
             let m = p.start();
             p.bump(); // .
             if p.at(HASH_LBRACE) {
                 let _ = interpolation(p);
+            } else if p.at(MINUS) && !p.has_whitespace_before() {
+                // `.-#{$name}` — class name starting with hyphen
+                p.bump(); // -
+                if p.at(HASH_LBRACE) && !p.has_whitespace_before() {
+                    let _ = interpolation(p);
+                }
             } else {
                 p.expect(IDENT);
             }
             let _ = m.complete(p, SIMPLE_SELECTOR);
         }
         HASH => {
-            // #id
+            // #id or ##{$var}
             let m = p.start();
             p.bump(); // #
-            if p.at(IDENT) || p.at(NUMBER) {
+            if p.at(HASH_LBRACE) {
+                let _ = interpolation(p);
+            } else if p.at(IDENT) || p.at(NUMBER) {
                 p.bump();
             } else {
                 p.error("expected identifier after `#`");
@@ -143,7 +150,11 @@ fn simple_selector(p: &mut Parser<'_>) {
             // %placeholder selector (2.11)
             let m = p.start();
             p.bump(); // %
-            p.expect(IDENT);
+            if p.at(HASH_LBRACE) {
+                let _ = interpolation(p);
+            } else {
+                p.expect(IDENT);
+            }
             let _ = m.complete(p, SIMPLE_SELECTOR);
         }
         COLON_COLON => {

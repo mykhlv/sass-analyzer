@@ -57,6 +57,8 @@ fn has_sass_signals(p: &Parser<'_>) -> bool {
             LBRACKET => return true,
             // Strings — not valid CSS calc atoms
             STRING_START | QUOTED_STRING => return true,
+            // Sass variables — not valid in CSS calc
+            DOLLAR => return true,
             // Namespace member access: ns.func(), ns.$var — not valid in CSS calc
             IDENT if p.nth(offset + 1) == DOT && !p.nth_has_whitespace_before(offset + 1) => {
                 let after_dot = p.nth(offset + 2);
@@ -84,22 +86,21 @@ fn has_sass_signals(p: &Parser<'_>) -> bool {
 pub(super) fn function_dispatch(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
     let name = p.current_text();
 
-    // Special functions: url(), element(), progid:...()
+    // Special functions: url(), element(), expression()
     if name.eq_ignore_ascii_case("url") {
         return special_function_call(p);
     }
-    if name.eq_ignore_ascii_case("element") || name.starts_with("progid:") {
+    if name.eq_ignore_ascii_case("element") || name.eq_ignore_ascii_case("expression") {
         return special_function_call(p);
     }
-
     // CSS if() function: `if(condition: value; else: alternate)`.
     // Distinguished from Sass if() by `:` (not after $ident) before any `,` at depth 1.
     if name == "if" && is_css_if(p) {
         return special_function_call(p);
     }
 
-    // Legacy MS filter syntax: `alpha(opacity=50)` — contains `=` at depth 1.
-    if name.eq_ignore_ascii_case("alpha") && has_eq_in_args(p) {
+    // Legacy MS filter syntax: `alpha(opacity=50)`, `blah(hux=mumble)` — `=` at depth 1.
+    if has_eq_in_args(p) {
         return special_function_call(p);
     }
 
@@ -234,12 +235,55 @@ fn arg(p: &mut Parser<'_>, ctx: ParseContext) {
         p.bump();
     }
 
+    // `!important` in argument: `@include foo(1px !important)`
+    if p.at(BANG) && p.nth(1) == IDENT && p.nth_text(1) == "important" {
+        let fm = p.start();
+        p.bump(); // !
+        p.bump(); // important
+        let _ = fm.complete(p, IMPORTANT);
+    }
+
     let _ = m.complete(p, ARG);
 }
 
 // ── Special functions ──────────────────────────────────────────────
 
-/// Parse `url(...)`, `element(...)`, `progid:...(...)`.
+/// Parse `progid:Namespace.Class(args)` — multi-token IE filter function name.
+pub(super) fn progid_function_call(p: &mut Parser<'_>) -> CompletedMarker {
+    let m = p.start();
+    // Consume `progid : Namespace . Class` until `(`
+    while !p.at(LPAREN) && !p.at(SEMICOLON) && !p.at(RBRACE) && !p.at_end() {
+        p.bump();
+    }
+    if p.at(LPAREN) {
+        p.bump(); // (
+        let mut depth: u32 = 1;
+        while !p.at_end() && depth > 0 {
+            match p.current() {
+                LPAREN => {
+                    depth += 1;
+                    p.bump();
+                }
+                RPAREN => {
+                    depth -= 1;
+                    if depth > 0 {
+                        p.bump();
+                    }
+                }
+                HASH_LBRACE => {
+                    let _ = super::super::selectors::interpolation(p);
+                }
+                _ => p.bump(),
+            }
+        }
+        if depth == 0 {
+            p.bump(); // final )
+        }
+    }
+    m.complete(p, SPECIAL_FUNCTION_CALL)
+}
+
+/// Parse `url(...)`, `element(...)`, `expression(...)`.
 /// For `url("quoted")`, falls through to normal function call.
 fn special_function_call(p: &mut Parser<'_>) -> CompletedMarker {
     let m = p.start();

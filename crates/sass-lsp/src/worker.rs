@@ -19,8 +19,26 @@ use crate::symbols;
 use crate::workspace;
 use crate::{DocumentState, IncrementalEdit, Task};
 
-pub(crate) fn parse_document(text: &str) -> Option<(rowan::GreenNode, Vec<(String, TextRange)>)> {
-    std::panic::catch_unwind(AssertUnwindSafe(|| sass_parser::parse(text))).ok()
+#[allow(clippy::case_sensitive_file_extension_comparisons)]
+pub(crate) fn is_sass_file(uri: &Uri) -> bool {
+    // Extract the path component before the query/fragment, then check extension.
+    // Case-sensitive intentionally — matches filesystem behavior on Linux and
+    // is consistent with collect_sass_recursive / check_workspace.
+    let s = uri.as_str();
+    let path_end = s.find(['?', '#']).unwrap_or(s.len());
+    s[..path_end].ends_with(".sass")
+}
+
+pub(crate) fn parse_document(
+    text: &str,
+    sass: bool,
+) -> Option<(rowan::GreenNode, Vec<(String, TextRange)>)> {
+    let parse_fn = if sass {
+        sass_parser::parse_sass
+    } else {
+        sass_parser::parse_scss
+    };
+    std::panic::catch_unwind(AssertUnwindSafe(|| parse_fn(text))).ok()
 }
 
 pub(crate) fn try_incremental_or_full(
@@ -28,7 +46,10 @@ pub(crate) fn try_incremental_or_full(
     text: &str,
     uri: &Uri,
 ) -> Option<(rowan::GreenNode, Vec<(String, TextRange)>)> {
-    if let Some(inc) = incremental {
+    let sass = is_sass_file(uri);
+    // Incremental reparse uses the SCSS lexer internally, so it's not
+    // compatible with indented Sass files — always do a full reparse.
+    if !sass && let Some(inc) = incremental {
         let result = sass_parser::reparse::incremental_reparse(
             &inc.old_green,
             &inc.old_errors,
@@ -41,7 +62,7 @@ pub(crate) fn try_incremental_or_full(
         }
         tracing::debug!(?uri, "incremental reparse fell back");
     }
-    let result = parse_document(text);
+    let result = parse_document(text, sass);
     if result.is_none() {
         tracing::error!(?uri, "parser panic");
     }
@@ -126,7 +147,7 @@ pub(crate) async fn run_worker(
                         client.publish_diagnostics(uri, vec![], None).await;
                     }
                     Task::ExternalChange { uri, text } => {
-                        let Some((green, _errors)) = parse_document(&text) else {
+                        let Some((green, _errors)) = parse_document(&text, is_sass_file(&uri)) else {
                             continue;
                         };
                         let line_index = LineIndex::new(&text);
@@ -279,12 +300,12 @@ async fn check_workspace(
     module_graph: &workspace::ModuleGraph,
     runtime_config: &RuntimeConfig,
 ) {
-    let files = collect_scss_files(root);
+    let files = collect_sass_files(root);
     if files.is_empty() {
         () = client
             .show_message(
                 tower_lsp_server::ls_types::MessageType::INFO,
-                "sass-analyzer: no SCSS files found in workspace",
+                "sass-analyzer: no SCSS/Sass files found in workspace",
             )
             .await;
         return;
@@ -324,7 +345,8 @@ async fn check_workspace(
             continue;
         }
 
-        let Some((green, errors)) = parse_document(&text) else {
+        let sass = path.extension().is_some_and(|ext| ext == "sass");
+        let Some((green, errors)) = parse_document(&text, sass) else {
             continue;
         };
         let line_index = LineIndex::new(&text);
@@ -425,14 +447,14 @@ fn path_to_uri(path: &Path) -> Uri {
     })
 }
 
-fn collect_scss_files(root: &Path) -> Vec<PathBuf> {
+fn collect_sass_files(root: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
-    collect_scss_recursive(root, &mut files);
+    collect_sass_recursive(root, &mut files);
     files.sort();
     files
 }
 
-fn collect_scss_recursive(dir: &Path, out: &mut Vec<PathBuf>) {
+fn collect_sass_recursive(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -446,8 +468,11 @@ fn collect_scss_recursive(dir: &Path, out: &mut Vec<PathBuf>) {
             {
                 continue;
             }
-            collect_scss_recursive(&path, out);
-        } else if path.extension().is_some_and(|ext| ext == "scss") {
+            collect_sass_recursive(&path, out);
+        } else if path
+            .extension()
+            .is_some_and(|ext| ext == "scss" || ext == "sass")
+        {
             out.push(path);
         }
     }

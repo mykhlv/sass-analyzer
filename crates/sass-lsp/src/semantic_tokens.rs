@@ -176,3 +176,104 @@ pub(crate) fn delta_encode(
 
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sass_parser::line_index::LineIndex;
+    use sass_parser::syntax::SyntaxNode;
+
+    fn parse_tokens(input: &str) -> Vec<RawSemanticToken> {
+        let (green, _errors) = sass_parser::parse_scss(input);
+        let root = SyntaxNode::new_root(green);
+        collect_semantic_tokens(&root)
+    }
+
+    #[test]
+    fn function_call() {
+        let tokens = parse_tokens("$x: my-fn(1);");
+        let tok = tokens
+            .iter()
+            .find(|t| t.token_type == TOK_FUNCTION)
+            .unwrap();
+        assert_eq!(tok.len, 5); // "my-fn"
+        assert_eq!(tok.modifiers, 0);
+    }
+
+    #[test]
+    fn function_rule() {
+        let tokens = parse_tokens("@function add($a, $b) { @return $a + $b; }");
+        let tok = tokens
+            .iter()
+            .find(|t| t.token_type == TOK_FUNCTION && t.modifiers == MOD_DECLARATION)
+            .unwrap();
+        assert_eq!(tok.len, 3); // "add"
+    }
+
+    #[test]
+    fn mixin_rule() {
+        let tokens = parse_tokens("@mixin flex { display: flex; }");
+        let tok = tokens
+            .iter()
+            .find(|t| t.token_type == TOK_MIXIN && t.modifiers == MOD_DECLARATION)
+            .unwrap();
+        assert_eq!(tok.len, 4); // "flex"
+    }
+
+    #[test]
+    fn include_rule() {
+        let tokens = parse_tokens("@include flex;");
+        let tok = tokens.iter().find(|t| t.token_type == TOK_MIXIN).unwrap();
+        assert_eq!(tok.len, 4); // "flex"
+        assert_eq!(tok.modifiers, 0);
+    }
+
+    #[test]
+    fn param() {
+        let tokens = parse_tokens("@mixin m($size) {}");
+        let tok = tokens
+            .iter()
+            .find(|t| t.token_type == TOK_PARAMETER)
+            .unwrap();
+        assert_eq!(tok.len, 5); // "$size"
+        assert_eq!(tok.modifiers, 0);
+    }
+
+    #[test]
+    fn placeholder_selector() {
+        let tokens = parse_tokens("%base { color: red; }");
+        let tok = tokens.iter().find(|t| t.token_type == TOK_TYPE).unwrap();
+        assert_eq!(tok.start, 0);
+        assert_eq!(tok.len, 5); // "%base"
+        assert_eq!(tok.modifiers, 0);
+    }
+
+    #[test]
+    fn delta_encode_multiline() {
+        let input = "$a: 1;\n$b: 2;";
+        let tokens = parse_tokens(input);
+        let line_index = LineIndex::new(input);
+        let encoded = delta_encode(&tokens, input, &line_index);
+
+        // $a on line 0, $b on line 1
+        assert_eq!(encoded.len(), 2);
+        assert_eq!(encoded[0].delta_line, 0);
+        assert_eq!(encoded[0].delta_start, 0);
+        assert_eq!(encoded[1].delta_line, 1);
+        assert_eq!(encoded[1].delta_start, 0); // column resets on new line
+    }
+
+    #[test]
+    fn delta_encode_same_line() {
+        let input = "$a: $b;";
+        let tokens = parse_tokens(input);
+        let line_index = LineIndex::new(input);
+        let encoded = delta_encode(&tokens, input, &line_index);
+
+        // $a (decl) and $b (ref) on the same line
+        assert_eq!(encoded.len(), 2);
+        assert_eq!(encoded[0].delta_line, 0);
+        assert_eq!(encoded[1].delta_line, 0);
+        assert!(encoded[1].delta_start > 0); // relative offset
+    }
+}

@@ -2187,8 +2187,6 @@ fn error_trailing_comma_selector() {
                   LBRACE@4..5 "{"
                   WHITESPACE@5..6 " "
                   RBRACE@6..7 "}"
-            errors:
-              4..5: expected selector after `,`
         "#]],
     );
 }
@@ -3095,6 +3093,153 @@ fn error_bad_expr_inside_interpolation() {
             errors:
               15..16: expected IDENT
               17..18: expected expression
+        "##]],
+    );
+}
+
+// ── sass-spec false negative regression tests ────────────────────────────
+
+#[test]
+fn id_selector_interpolation() {
+    check(
+        "##{$zzz} { a: b; }",
+        expect![[r##"
+            SOURCE_FILE@0..18
+              RULE_SET@0..18
+                SELECTOR_LIST@0..8
+                  SELECTOR@0..8
+                    SIMPLE_SELECTOR@0..8
+                      HASH@0..1 "#"
+                      INTERPOLATION@1..8
+                        HASH_LBRACE@1..3 "#{"
+                        VARIABLE_REF@3..7
+                          DOLLAR@3..4 "$"
+                          IDENT@4..7 "zzz"
+                        RBRACE@7..8 "}"
+                BLOCK@8..18
+                  WHITESPACE@8..9 " "
+                  LBRACE@9..10 "{"
+                  DECLARATION@10..16
+                    PROPERTY@10..12
+                      WHITESPACE@10..11 " "
+                      IDENT@11..12 "a"
+                    COLON@12..13 ":"
+                    VALUE@13..15
+                      VALUE@13..15
+                        WHITESPACE@13..14 " "
+                        IDENT@14..15 "b"
+                    SEMICOLON@15..16 ";"
+                  WHITESPACE@16..17 " "
+                  RBRACE@17..18 "}"
+        "##]],
+    );
+}
+
+#[test]
+fn placeholder_selector_interpolation() {
+    check(
+        "%#{$name} { a: b; }",
+        expect![[r##"
+            SOURCE_FILE@0..19
+              RULE_SET@0..19
+                SELECTOR_LIST@0..9
+                  SELECTOR@0..9
+                    SIMPLE_SELECTOR@0..9
+                      PERCENT@0..1 "%"
+                      INTERPOLATION@1..9
+                        HASH_LBRACE@1..3 "#{"
+                        VARIABLE_REF@3..8
+                          DOLLAR@3..4 "$"
+                          IDENT@4..8 "name"
+                        RBRACE@8..9 "}"
+                BLOCK@9..19
+                  WHITESPACE@9..10 " "
+                  LBRACE@10..11 "{"
+                  DECLARATION@11..17
+                    PROPERTY@11..13
+                      WHITESPACE@11..12 " "
+                      IDENT@12..13 "a"
+                    COLON@13..14 ":"
+                    VALUE@14..16
+                      VALUE@14..16
+                        WHITESPACE@14..15 " "
+                        IDENT@15..16 "b"
+                    SEMICOLON@16..17 ";"
+                  WHITESPACE@17..18 " "
+                  RBRACE@18..19 "}"
+        "##]],
+    );
+}
+
+#[test]
+fn class_selector_hyphen_interpolation() {
+    check(
+        ".-#{$name} { a: b; }",
+        expect![[r##"
+            SOURCE_FILE@0..20
+              RULE_SET@0..20
+                SELECTOR_LIST@0..10
+                  SELECTOR@0..10
+                    SIMPLE_SELECTOR@0..10
+                      DOT@0..1 "."
+                      MINUS@1..2 "-"
+                      INTERPOLATION@2..10
+                        HASH_LBRACE@2..4 "#{"
+                        VARIABLE_REF@4..9
+                          DOLLAR@4..5 "$"
+                          IDENT@5..9 "name"
+                        RBRACE@9..10 "}"
+                BLOCK@10..20
+                  WHITESPACE@10..11 " "
+                  LBRACE@11..12 "{"
+                  DECLARATION@12..18
+                    PROPERTY@12..14
+                      WHITESPACE@12..13 " "
+                      IDENT@13..14 "a"
+                    COLON@14..15 ":"
+                    VALUE@15..17
+                      VALUE@15..17
+                        WHITESPACE@15..16 " "
+                        IDENT@16..17 "b"
+                    SEMICOLON@17..18 ";"
+                  WHITESPACE@18..19 " "
+                  RBRACE@19..20 "}"
+        "##]],
+    );
+}
+
+#[test]
+fn property_hyphen_interpolation() {
+    check(
+        "a { -#{\"foo\"}-bar: b; }",
+        expect![[r##"
+            SOURCE_FILE@0..23
+              RULE_SET@0..23
+                SELECTOR_LIST@0..1
+                  SELECTOR@0..1
+                    SIMPLE_SELECTOR@0..1
+                      IDENT@0..1 "a"
+                BLOCK@1..23
+                  WHITESPACE@1..2 " "
+                  LBRACE@2..3 "{"
+                  DECLARATION@3..21
+                    PROPERTY@3..17
+                      WHITESPACE@3..4 " "
+                      MINUS@4..5 "-"
+                      INTERPOLATION@5..13
+                        HASH_LBRACE@5..7 "#{"
+                        STRING_LITERAL@7..12
+                          QUOTED_STRING@7..12 "\"foo\""
+                        RBRACE@12..13 "}"
+                      IDENT@13..17 "-bar"
+                    COLON@17..18 ":"
+                    VALUE@18..20
+                      VALUE@18..20
+                        WHITESPACE@18..19 " "
+                        IDENT@19..20 "b"
+                    SEMICOLON@20..21 ";"
+                  WHITESPACE@21..22 " "
+                  RBRACE@22..23 "}"
         "##]],
     );
 }

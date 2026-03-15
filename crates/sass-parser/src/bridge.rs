@@ -45,7 +45,7 @@ impl DirectBuilder {
 
     #[inline]
     fn token(&mut self, kind: rowan::SyntaxKind, text: &str) {
-        let token = if kind.0 <= MAX_CACHED_KIND {
+        let token = if kind.0 <= MAX_CACHED_KIND && !text.is_empty() {
             let idx = kind.0 as usize;
             if let Some(cached) = &self.token_cache[idx] {
                 cached.clone()
@@ -123,7 +123,7 @@ pub fn build_tree(
     let all_trivia = input.all_trivia();
     let mut trivia_pos: usize = 0;
 
-    #[allow(clippy::match_on_vec_items)]
+    #[allow(clippy::indexing_slicing)]
     for i in 0..events.len() {
         match events[i] {
             // Fast path: Enter without forward_parent (>95% of Enter events).

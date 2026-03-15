@@ -326,7 +326,7 @@ fn resolve_not_found() {
 
 #[test]
 fn use_rule_module_path() {
-    let (green, _) = sass_parser::parse("@use \"sass:math\";");
+    let (green, _) = sass_parser::parse_scss("@use \"sass:math\";");
     let root = sass_parser::syntax::SyntaxNode::new_root(green);
     let use_rule = root
         .children()
@@ -337,7 +337,7 @@ fn use_rule_module_path() {
 
 #[test]
 fn forward_rule_module_path() {
-    let (green, _) = sass_parser::parse("@forward \"colors\";");
+    let (green, _) = sass_parser::parse_scss("@forward \"colors\";");
     let root = sass_parser::syntax::SyntaxNode::new_root(green);
     let fwd = root
         .children()
@@ -347,3 +347,62 @@ fn forward_rule_module_path() {
 }
 
 use sass_parser::ast::AstNode;
+
+// ── .sass file resolution ───────────────────────────────────────────
+
+#[test]
+fn resolve_sass_extension() {
+    let r = resolver_with(&["/project/src/colors.sass"]);
+    assert_eq!(
+        r.resolve("colors", Path::new("/project/src/main.scss")),
+        Ok(ResolvedModule::File("/project/src/colors.sass".into())),
+    );
+}
+
+#[test]
+fn resolve_sass_partial() {
+    let r = resolver_with(&["/project/src/_colors.sass"]);
+    assert_eq!(
+        r.resolve("colors", Path::new("/project/src/main.scss")),
+        Ok(ResolvedModule::File("/project/src/_colors.sass".into())),
+    );
+}
+
+#[test]
+fn resolve_sass_index() {
+    let r = resolver_with(&["/project/src/utils/index.sass"]);
+    assert_eq!(
+        r.resolve("utils", Path::new("/project/src/main.scss")),
+        Ok(ResolvedModule::File("/project/src/utils/index.sass".into())),
+    );
+}
+
+#[test]
+fn resolve_sass_partial_index() {
+    let r = resolver_with(&["/project/src/utils/_index.sass"]);
+    assert_eq!(
+        r.resolve("utils", Path::new("/project/src/main.scss")),
+        Ok(ResolvedModule::File(
+            "/project/src/utils/_index.sass".into()
+        )),
+    );
+}
+
+#[test]
+fn resolve_scss_preferred_over_sass() {
+    // When both .scss and .sass exist, .scss wins (more common)
+    let r = resolver_with(&["/project/src/colors.scss", "/project/src/colors.sass"]);
+    assert_eq!(
+        r.resolve("colors", Path::new("/project/src/main.scss")),
+        Ok(ResolvedModule::File("/project/src/colors.scss".into())),
+    );
+}
+
+#[test]
+fn resolve_explicit_sass_extension() {
+    let r = resolver_with(&["/project/src/colors.sass"]);
+    assert_eq!(
+        r.resolve("colors.sass", Path::new("/project/src/main.scss")),
+        Ok(ResolvedModule::File("/project/src/colors.sass".into())),
+    );
+}

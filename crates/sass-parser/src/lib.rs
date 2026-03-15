@@ -8,7 +8,7 @@
 //!
 //! ```
 //! let source = "$color: #fff;\n.btn { color: $color; }";
-//! let (green, errors) = sass_parser::parse(source);
+//! let (green, errors) = sass_parser::parse_scss(source);
 //!
 //! // The tree round-trips losslessly
 //! let root = sass_parser::syntax::SyntaxNode::new_root(green);
@@ -18,7 +18,7 @@
 //!
 //! # Key types
 //!
-//! - [`parse()`] — entry point, returns a green tree + diagnostics
+//! - [`parse_scss()`] / [`parse_sass()`] — entry points, return a green tree + diagnostics
 //! - [`syntax_kind::SyntaxKind`] — all node and token kinds
 //! - [`syntax::SyntaxNode`] / [`syntax::SyntaxToken`] — typed tree accessors
 //! - [`line_index::LineIndex`] — byte offset ↔ line/column mapping
@@ -67,11 +67,28 @@ pub mod token_set;
 mod bridge;
 pub use bridge::build_tree;
 
+#[doc(hidden)]
+pub mod sass_lexer;
+
 use text_range::TextRange;
 
 /// Parse SCSS source into a rowan green tree + diagnostics.
-pub fn parse(source: &str) -> (rowan::GreenNode, Vec<(String, TextRange)>) {
+pub fn parse_scss(source: &str) -> (rowan::GreenNode, Vec<(String, TextRange)>) {
     let input = input::Input::from_source(source);
+    let mut parser = parser::Parser::new(input, source);
+    grammar::source_file(&mut parser);
+    let (events, errors, input, src) = parser.finish();
+    build_tree(events, &errors, &input, src)
+}
+
+/// Parse indented Sass (`.sass`) source into a rowan green tree + diagnostics.
+///
+/// Uses the same parser and bridge as [`parse_scss()`], but pre-processes tokens
+/// with [`sass_lexer::sass_tokenize()`] to insert virtual `{`/`}`/`;` tokens
+/// based on indentation and newlines.
+pub fn parse_sass(source: &str) -> (rowan::GreenNode, Vec<(String, TextRange)>) {
+    let tokens = sass_lexer::sass_tokenize(source);
+    let input = input::Input::from_tokens(&tokens);
     let mut parser = parser::Parser::new(input, source);
     grammar::source_file(&mut parser);
     let (events, errors, input, src) = parser.finish();

@@ -546,3 +546,59 @@ pub(crate) fn to_lsp_document_symbol(
         children: None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sass_parser::syntax::SyntaxNode;
+    use sass_parser::text_range::TextSize;
+
+    fn ref_at(input: &str, offset: u32) -> Option<ReferenceInfo> {
+        let (green, _) = sass_parser::parse_scss(input);
+        let root = SyntaxNode::new_root(green);
+        find_reference_at_offset(&root, TextSize::from(offset))
+    }
+
+    #[test]
+    fn extend_rule_placeholder() {
+        // "%base { } .x { @extend %base; }"
+        let input = "%base { }\n.x { @extend %base; }";
+        // cursor on "%base" inside @extend — offset at the '%' char
+        let offset = input.find("@extend").unwrap() + "@extend ".len();
+        let info = ref_at(input, offset as u32).unwrap();
+        assert_eq!(info.name, "base");
+        assert_eq!(info.kind, symbols::SymbolKind::Placeholder);
+        assert!(info.namespace.is_none());
+    }
+
+    #[test]
+    fn namespace_ref_variable() {
+        let input = "@use 'x' as ns;\n.a { color: ns.$var; }";
+        // cursor on "$var" in "ns.$var"
+        let offset = input.find("$var").unwrap();
+        let info = ref_at(input, offset as u32).unwrap();
+        assert_eq!(info.namespace.as_deref(), Some("ns"));
+        assert_eq!(info.name, "var");
+        assert_eq!(info.kind, symbols::SymbolKind::Variable);
+    }
+
+    #[test]
+    fn namespace_ref_function() {
+        let input = "@use 'x' as ns;\n$x: ns.func(1);";
+        let offset = input.find("func").unwrap();
+        let info = ref_at(input, offset as u32).unwrap();
+        assert_eq!(info.namespace.as_deref(), Some("ns"));
+        assert_eq!(info.name, "func");
+        assert_eq!(info.kind, symbols::SymbolKind::Function);
+    }
+
+    #[test]
+    fn namespace_ref_mixin() {
+        let input = "@use 'x' as ns;\n.a { @include ns.mix; }";
+        let offset = input.find("mix").unwrap();
+        let info = ref_at(input, offset as u32).unwrap();
+        assert_eq!(info.namespace.as_deref(), Some("ns"));
+        assert_eq!(info.name, "mix");
+        assert_eq!(info.kind, symbols::SymbolKind::Mixin);
+    }
+}

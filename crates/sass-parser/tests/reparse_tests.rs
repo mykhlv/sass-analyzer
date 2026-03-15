@@ -12,8 +12,8 @@ fn apply_edit(source: &str, offset: u32, delete: u32, insert: &str) -> String {
 /// Returns true if incremental succeeded, false if it fell back.
 fn check(old: &str, offset: u32, delete: u32, insert: &str) -> bool {
     let new_source = apply_edit(old, offset, delete, insert);
-    let (old_green, old_errors) = sass_parser::parse(old);
-    let (full_green, full_errors) = sass_parser::parse(&new_source);
+    let (old_green, old_errors) = sass_parser::parse_scss(old);
+    let (full_green, full_errors) = sass_parser::parse_scss(&new_source);
 
     let edit = TextEdit {
         offset: TextSize::from(offset),
@@ -256,7 +256,7 @@ fn add_opening_brace_structural_edit() {
     // We only verify text round-trips and no panics.
     let src = ".a color: red; }";
     let new_source = apply_edit(src, 2, 0, " {");
-    let (old_green, old_errors) = sass_parser::parse(src);
+    let (old_green, old_errors) = sass_parser::parse_scss(src);
     let edit = TextEdit {
         offset: TextSize::from(2),
         delete: TextSize::from(0),

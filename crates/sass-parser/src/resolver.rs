@@ -177,10 +177,10 @@ impl<V: Vfs> ModuleResolver<V> {
         }
 
         // 6. Walk up node_modules
-        if self.node_modules_enabled {
-            if let Some(path) = self.resolve_node_modules(spec, base) {
-                return Ok(ResolvedModule::File(path));
-            }
+        if self.node_modules_enabled
+            && let Some(path) = self.resolve_node_modules(spec, base)
+        {
+            return Ok(ResolvedModule::File(path));
         }
 
         Err(ResolveError::NotFound(spec.to_owned()))
@@ -202,10 +202,10 @@ impl<V: Vfs> ModuleResolver<V> {
             None => dir.to_path_buf(),
         };
 
-        // If spec already has .scss extension, try direct path + partial first.
+        // If spec already has an explicit extension, try direct path + partial first.
         if Path::new(stem)
             .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("scss"))
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("scss") || ext.eq_ignore_ascii_case("sass"))
         {
             let direct = search_dir.join(stem);
             if self.vfs.file_exists(&direct) {
@@ -217,16 +217,18 @@ impl<V: Vfs> ModuleResolver<V> {
             }
         }
 
-        // Candidate order per Sass spec:
-        // 1. {stem}.scss
-        // 2. _{stem}.scss
-        // 3. {stem}/index.scss
-        // 4. {stem}/_index.scss
+        // Candidate order: .scss before .sass (SCSS is far more common).
+        // Dart Sass errors when both exist; we silently pick the first match,
+        // which is acceptable for an LSP (diagnostics can flag the ambiguity later).
         let candidates = [
             search_dir.join(format!("{stem}.scss")),
             search_dir.join(format!("_{stem}.scss")),
+            search_dir.join(format!("{stem}.sass")),
+            search_dir.join(format!("_{stem}.sass")),
             search_dir.join(stem).join("index.scss"),
             search_dir.join(stem).join("_index.scss"),
+            search_dir.join(stem).join("index.sass"),
+            search_dir.join(stem).join("_index.sass"),
         ];
 
         candidates.into_iter().find(|c| self.vfs.file_exists(c))
@@ -252,10 +254,10 @@ impl<V: Vfs> ModuleResolver<V> {
             let best = targets
                 .iter()
                 .max_by_key(|t| common_prefix_len(t, base_dir));
-            if let Some(target) = best {
-                if let Some(path) = self.resolve_in_dir(target, rest) {
-                    return Some(path);
-                }
+            if let Some(target) = best
+                && let Some(path) = self.resolve_in_dir(target, rest)
+            {
+                return Some(path);
             }
             // Fallback: try all targets in order.
             for target in targets {

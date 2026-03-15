@@ -2,13 +2,13 @@ use crate::parser::Parser;
 #[allow(clippy::wildcard_imports)]
 use crate::syntax_kind::*;
 
-/// `@extend selector !optional;`
+/// `@extend selector !optional;` or `@extend sel1, sel2 !optional;`
 pub fn extend_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // extend
 
-    // Parse selector — consume tokens until `;`, `!`, `}` or EOF
+    // Parse selector(s) — comma-separated simple/compound selectors
     // @extend only allows simple/compound selectors (no descendant combinators)
     if p.at(SEMICOLON) || p.at(RBRACE) || p.at_end() {
         p.error("expected selector");
@@ -16,6 +16,12 @@ pub fn extend_rule(p: &mut Parser<'_>) {
     let mut has_selector_token = false;
     let mut has_combinator = false;
     while !p.at(SEMICOLON) && !p.at(BANG) && !p.at(RBRACE) && !p.at_end() {
+        if p.at(COMMA) {
+            // Comma separates multiple selectors: `@extend .a, .b;`
+            has_selector_token = false;
+            p.bump();
+            continue;
+        }
         if p.at(HASH_LBRACE) {
             has_selector_token = true;
             let _ = super::interpolation(p);
