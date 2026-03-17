@@ -7,13 +7,13 @@ use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 use tower_lsp_server::LspService;
-use tower_lsp_server::ls_types::{ParameterLabel, Position, Range, TextDocumentContentChangeEvent};
+use tower_lsp_server::ls_types::ParameterLabel;
 
 use std::path::Path;
 
 use crate::completion::fuzzy_score;
 use crate::config;
-use crate::convert::{apply_content_changes, byte_to_lsp_pos, lsp_pos_to_byte};
+use crate::convert::byte_to_lsp_pos;
 use crate::semantic_tokens::{MOD_DECLARATION, TOK_VARIABLE};
 use crate::signature_help::parse_param_labels;
 use crate::worker::run_worker;
@@ -190,7 +190,7 @@ async fn initialize_returns_capabilities() {
     let resp = do_initialize(&mut reader, &mut writer).await;
 
     let caps = &resp["result"]["capabilities"];
-    assert_eq!(caps["textDocumentSync"], 2);
+    assert_eq!(caps["textDocumentSync"], 1);
 
     let legend = &caps["semanticTokensProvider"]["legend"];
     let types: Vec<&str> = legend["tokenTypes"]
@@ -3645,15 +3645,16 @@ fn completion_context_detection() {
     // Decimal number must NOT trigger Namespace (e.g., `font-size: 1.`)
     let ctx = detect_completion_context("  font-size: 1.", 15);
     assert!(
-        !matches!(ctx, CompletionContext::Namespace(_)),
+        !matches!(ctx, CompletionContext::Namespace(..)),
         "decimal 1. should not be Namespace, got {ctx:?}"
     );
 
     // @include with namespace prefix → Namespace, not IncludeMixin
+    // "  @include math." — after dot = col 16
     let ctx = detect_completion_context("  @include math.", 16);
     assert!(
-        matches!(ctx, CompletionContext::Namespace(ref ns) if ns == "math"),
-        "expected Namespace(\"math\"), got {ctx:?}"
+        matches!(ctx, CompletionContext::Namespace(ref ns, 16) if ns == "math"),
+        "expected Namespace(\"math\", 16), got {ctx:?}"
     );
 
     // @include without namespace → IncludeMixin
@@ -3663,6 +3664,29 @@ fn completion_context_detection() {
     // @extend → Extend
     let ctx = detect_completion_context("  @extend %btn", 14);
     assert!(matches!(ctx, CompletionContext::Extend));
+
+    // Namespace inside parentheses: `@include t.subtitle1(cc.`
+    // "cc" at col 23, dot at 25, after dot = 26
+    let ctx = detect_completion_context("  @include t.subtitle1(cc.", 26);
+    assert!(
+        matches!(ctx, CompletionContext::Namespace(ref ns, 26) if ns == "cc"),
+        "expected Namespace(\"cc\", 26), got {ctx:?}"
+    );
+
+    // Namespace variable inside parentheses: `@include t.subtitle1(cc.$`
+    let ctx = detect_completion_context("  @include t.subtitle1(cc.$", 27);
+    assert!(
+        matches!(ctx, CompletionContext::Namespace(ref ns, 26) if ns == "cc"),
+        "expected Namespace(\"cc\", 26) for cc.$, got {ctx:?}"
+    );
+
+    // Namespace with cursor mid-line (text after cursor): `c.` with `)` after
+    // "c" at col 23, dot at 24, after dot = 25
+    let ctx = detect_completion_context("  @include t.subtitle1(c.)", 25);
+    assert!(
+        matches!(ctx, CompletionContext::Namespace(ref ns, 25) if ns == "c"),
+        "expected Namespace(\"c\", 25) mid-line, got {ctx:?}"
+    );
 }
 
 async fn do_initialize_with_root(
@@ -3752,110 +3776,6 @@ async fn initialize_with_empty_config() {
     assert!(resp["result"]["capabilities"].is_object());
 }
 
-#[test]
-fn lsp_pos_to_byte_ascii() {
-    let text = "abc\ndef\nghi";
-    assert_eq!(lsp_pos_to_byte(text, Position::new(0, 0)), Some(0));
-    assert_eq!(lsp_pos_to_byte(text, Position::new(0, 2)), Some(2));
-    assert_eq!(lsp_pos_to_byte(text, Position::new(1, 0)), Some(4));
-    assert_eq!(lsp_pos_to_byte(text, Position::new(1, 2)), Some(6));
-    assert_eq!(lsp_pos_to_byte(text, Position::new(2, 1)), Some(9));
-}
-
-#[test]
-fn lsp_pos_to_byte_multibyte() {
-    // "ä" is 2 UTF-8 bytes, 1 UTF-16 code unit
-    let text = "äbc";
-    assert_eq!(lsp_pos_to_byte(text, Position::new(0, 0)), Some(0));
-    assert_eq!(lsp_pos_to_byte(text, Position::new(0, 1)), Some(2)); // after ä
-    assert_eq!(lsp_pos_to_byte(text, Position::new(0, 2)), Some(3)); // after b
-}
-
-#[test]
-fn lsp_pos_to_byte_emoji() {
-    // "😀" is 4 UTF-8 bytes, 2 UTF-16 code units (surrogate pair)
-    let text = "😀b";
-    assert_eq!(lsp_pos_to_byte(text, Position::new(0, 0)), Some(0));
-    assert_eq!(lsp_pos_to_byte(text, Position::new(0, 2)), Some(4)); // after 😀
-    assert_eq!(lsp_pos_to_byte(text, Position::new(0, 3)), Some(5)); // after b
-}
-
-#[test]
-fn lsp_pos_to_byte_out_of_bounds() {
-    let text = "ab";
-    // Line 1 doesn't exist (no newline)
-    assert_eq!(lsp_pos_to_byte(text, Position::new(1, 0)), None);
-}
-
-#[test]
-fn apply_content_changes_insert() {
-    let mut text = String::from("ab\ncd");
-    let changes = vec![TextDocumentContentChangeEvent {
-        range: Some(Range::new(Position::new(0, 1), Position::new(0, 1))),
-        range_length: None,
-        text: "X".into(),
-    }];
-    assert!(apply_content_changes(&mut text, changes));
-    assert_eq!(text, "aXb\ncd");
-}
-
-#[test]
-fn apply_content_changes_delete() {
-    let mut text = String::from("abcd");
-    let changes = vec![TextDocumentContentChangeEvent {
-        range: Some(Range::new(Position::new(0, 1), Position::new(0, 3))),
-        range_length: None,
-        text: String::new(),
-    }];
-    assert!(apply_content_changes(&mut text, changes));
-    assert_eq!(text, "ad");
-}
-
-#[test]
-fn apply_content_changes_replace_across_lines() {
-    let mut text = String::from("ab\ncd\nef");
-    let changes = vec![TextDocumentContentChangeEvent {
-        range: Some(Range::new(Position::new(0, 1), Position::new(1, 1))),
-        range_length: None,
-        text: "XY".into(),
-    }];
-    assert!(apply_content_changes(&mut text, changes));
-    assert_eq!(text, "aXYd\nef");
-}
-
-#[test]
-fn apply_content_changes_full_replacement() {
-    let mut text = String::from("old");
-    let changes = vec![TextDocumentContentChangeEvent {
-        range: None,
-        range_length: None,
-        text: "new content".into(),
-    }];
-    assert!(apply_content_changes(&mut text, changes));
-    assert_eq!(text, "new content");
-}
-
-#[test]
-fn apply_content_changes_sequential() {
-    let mut text = String::from("abc");
-    // Two sequential changes: insert X at pos 1, then insert Y at pos 3
-    // After first: "aXbc", after second: "aXbYc"
-    let changes = vec![
-        TextDocumentContentChangeEvent {
-            range: Some(Range::new(Position::new(0, 1), Position::new(0, 1))),
-            range_length: None,
-            text: "X".into(),
-        },
-        TextDocumentContentChangeEvent {
-            range: Some(Range::new(Position::new(0, 3), Position::new(0, 3))),
-            range_length: None,
-            text: "Y".into(),
-        },
-    ];
-    assert!(apply_content_changes(&mut text, changes));
-    assert_eq!(text, "aXbYc");
-}
-
 // ── Non-ASCII / UTF-16 tests ─────────────────────────────────────
 
 #[test]
@@ -3890,32 +3810,38 @@ fn byte_to_lsp_pos_surrogate_pair() {
     assert_eq!((line, col), (0, 3));
 }
 
+// ── compute_diff_edit tests ──────────────────────────────────────
+
 #[test]
-fn apply_content_changes_multibyte() {
-    // LSP positions use UTF-16 columns. 'é' is 1 UTF-16 unit.
-    let mut text = String::from("café");
-    // Insert 'X' after 'f' (UTF-16 col 3)
-    let changes = vec![TextDocumentContentChangeEvent {
-        range: Some(Range::new(Position::new(0, 3), Position::new(0, 3))),
-        range_length: None,
-        text: "X".into(),
-    }];
-    assert!(apply_content_changes(&mut text, changes));
-    assert_eq!(text, "cafXé");
+fn diff_edit_insert() {
+    use crate::compute_diff_edit;
+    let old = ".a { color: red; }";
+    let (green, errors) = sass_parser::parse_scss(old);
+    let new = ".a { color: blue; }";
+    let edit = compute_diff_edit(&green, &errors, old, new).unwrap();
+    assert_eq!(u32::from(edit.edit.offset), 12); // "red" starts at byte 12
+    assert_eq!(u32::from(edit.edit.delete), 3); // "red" = 3 bytes
+    assert_eq!(u32::from(edit.edit.insert_len), 4); // "blue" = 4 bytes
 }
 
 #[test]
-fn apply_content_changes_surrogate_pair() {
-    // '𝕊' (U+1D54A) is 2 UTF-16 code units.
-    let mut text = String::from("a𝕊b");
-    // Delete 'b' at UTF-16 col 3 (a=1, 𝕊=2)
-    let changes = vec![TextDocumentContentChangeEvent {
-        range: Some(Range::new(Position::new(0, 3), Position::new(0, 4))),
-        range_length: None,
-        text: String::new(),
-    }];
-    assert!(apply_content_changes(&mut text, changes));
-    assert_eq!(text, "a𝕊");
+fn diff_edit_identical() {
+    use crate::compute_diff_edit;
+    let text = ".a { color: red; }";
+    let (green, errors) = sass_parser::parse_scss(text);
+    assert!(compute_diff_edit(&green, &errors, text, text).is_none());
+}
+
+#[test]
+fn diff_edit_append() {
+    use crate::compute_diff_edit;
+    let old = ".a { }";
+    let (green, errors) = sass_parser::parse_scss(old);
+    let new = ".a { }\n.b { }";
+    let edit = compute_diff_edit(&green, &errors, old, new).unwrap();
+    assert_eq!(u32::from(edit.edit.offset), 6);
+    assert_eq!(u32::from(edit.edit.delete), 0);
+    assert_eq!(u32::from(edit.edit.insert_len), 7); // "\n.b { }"
 }
 
 #[tokio::test]
@@ -3978,8 +3904,7 @@ async fn incremental_sync_updates_diagnostics() {
     let diags = notif["params"]["diagnostics"].as_array().unwrap();
     assert!(diags.is_empty(), "valid SCSS should have 0 diagnostics");
 
-    // Send incremental change: replace "red" with "blue"
-    // "red" is at line 1, col 14..17
+    // Send full-text change: replace "red" with "blue"
     send_msg(
         &mut writer,
         &serde_json::json!({
@@ -3988,11 +3913,7 @@ async fn incremental_sync_updates_diagnostics() {
             "params": {
                 "textDocument": { "uri": "file:///incr.scss", "version": 2 },
                 "contentChanges": [{
-                    "range": {
-                        "start": { "line": 1, "character": 14 },
-                        "end": { "line": 1, "character": 17 }
-                    },
-                    "text": "blue"
+                    "text": "$x: 1;\n.a { color: blue; }"
                 }]
             }
         }),
@@ -4002,7 +3923,7 @@ async fn incremental_sync_updates_diagnostics() {
     let notif = recv_msg(&mut reader, &mut writer).await;
     assert_eq!(notif["method"], "textDocument/publishDiagnostics");
     let diags = notif["params"]["diagnostics"].as_array().unwrap();
-    assert!(diags.is_empty(), "incremental edit should still be valid");
+    assert!(diags.is_empty(), "full-sync edit should still be valid");
 }
 
 #[tokio::test]
@@ -4029,7 +3950,7 @@ async fn incremental_sync_hover_after_edit() {
     .await;
     let _ = recv_msg(&mut reader, &mut writer).await; // diagnostics
 
-    // Incremental change: replace "red" with "blue" (line 0, col 8..11)
+    // Full-text change: replace "red" with "blue"
     send_msg(
         &mut writer,
         &serde_json::json!({
@@ -4038,11 +3959,7 @@ async fn incremental_sync_hover_after_edit() {
             "params": {
                 "textDocument": { "uri": "file:///incr2.scss", "version": 2 },
                 "contentChanges": [{
-                    "range": {
-                        "start": { "line": 0, "character": 8 },
-                        "end": { "line": 0, "character": 11 }
-                    },
-                    "text": "blue"
+                    "text": "$color: blue;\n.a { color: $color; }"
                 }]
             }
         }),
@@ -4390,7 +4307,7 @@ async fn execute_command_unknown_returns_error() {
 }
 
 #[tokio::test]
-async fn did_change_multiple_incremental_edits() {
+async fn did_change_full_sync_updates_correctly() {
     let (mut reader, mut writer) = spawn_server();
     do_initialize(&mut reader, &mut writer).await;
 
@@ -4414,9 +4331,7 @@ async fn did_change_multiple_incremental_edits() {
     .await;
     let _diag = recv_msg(&mut reader, &mut writer).await;
 
-    // Send two changes in one notification:
-    // 1. Replace "1" with "10" on line 0
-    // 2. Replace "2" with "20" on line 1
+    // Full-text change: both values updated
     send_msg(
         &mut writer,
         &serde_json::json!({
@@ -4424,22 +4339,9 @@ async fn did_change_multiple_incremental_edits() {
             "method": "textDocument/didChange",
             "params": {
                 "textDocument": { "uri": "file:///multi_edit.scss", "version": 2 },
-                "contentChanges": [
-                    {
-                        "range": {
-                            "start": { "line": 0, "character": 4 },
-                            "end": { "line": 0, "character": 5 }
-                        },
-                        "text": "10"
-                    },
-                    {
-                        "range": {
-                            "start": { "line": 1, "character": 4 },
-                            "end": { "line": 1, "character": 5 }
-                        },
-                        "text": "20"
-                    }
-                ]
+                "contentChanges": [{
+                    "text": "$x: 10;\n$y: 20;\n"
+                }]
             }
         }),
     )
@@ -4448,7 +4350,7 @@ async fn did_change_multiple_incremental_edits() {
     let notif = recv_msg(&mut reader, &mut writer).await;
     assert_eq!(notif["method"], "textDocument/publishDiagnostics");
     let diags = notif["params"]["diagnostics"].as_array().unwrap();
-    assert!(diags.is_empty(), "multi-edit should produce valid SCSS");
+    assert!(diags.is_empty(), "full-sync edit should produce valid SCSS");
 
     // Verify the edit took effect by hovering on $x
     send_msg(

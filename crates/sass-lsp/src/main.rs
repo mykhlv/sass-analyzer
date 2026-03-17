@@ -47,9 +47,8 @@ use tower_lsp_server::ls_types::{
     SemanticTokensFullOptions, SemanticTokensLegend, SemanticTokensOptions, SemanticTokensParams,
     SemanticTokensResult, SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo,
     SignatureHelp, SignatureHelpOptions, SignatureHelpParams, SymbolInformation,
-    TextDocumentContentChangeEvent, TextDocumentPositionParams, TextDocumentSyncCapability,
-    TextDocumentSyncKind, Uri, WorkDoneProgressOptions, WorkspaceEdit, WorkspaceSymbolParams,
-    WorkspaceSymbolResponse,
+    TextDocumentPositionParams, TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
+    WorkDoneProgressOptions, WorkspaceEdit, WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
 use tower_lsp_server::{Client, LanguageServer, LspService, Server};
 
@@ -87,12 +86,12 @@ pub(crate) struct IncrementalEdit {
 ///
 /// Two maps hold per-file state at different stages of the pipeline:
 ///
-/// - **`source_texts`** — updated *synchronously* in `did_open`/`did_change` on the
-///   main LSP task. Always reflects the latest editor content. Cleaned on `did_close`;
-///   entries may leak if a client never sends `textDocument/didClose`.
+/// - **`source_texts`** — tracks which URIs are open in the editor. Updated
+///   synchronously in `did_open`/`did_change`/`did_close`. Used by
+///   `did_change_watched_files` to skip external changes for open files.
 ///
 /// - **`documents`** — updated *asynchronously* by the debounced worker after parsing.
-///   May lag behind `source_texts` by up to `DEBOUNCE_MS`.
+///   May lag behind `source_texts` by up to `debounce_ms`.
 ///
 /// Read-only handlers (hover, completions, goto-def) read from `documents` and thus
 /// operate on a slightly stale but internally consistent snapshot.
@@ -100,9 +99,8 @@ struct Backend {
     client: Client,
     /// Parsed state per file, updated asynchronously by the worker after debounce.
     documents: Arc<DashMap<Uri, DocumentState>>,
-    /// Latest source text per file, updated synchronously in `did_open`/`did_change`.
-    /// Needed for incremental sync: we apply text edits here before sending to worker.
-    /// Cleaned on `did_close`; may leak if the client never sends `didClose`.
+    /// Tracks open files. Updated synchronously in `did_open`/`did_change`/`did_close`.
+    /// Used by `did_change_watched_files` to skip external changes for open files.
     source_texts: Arc<DashMap<Uri, String>>,
     module_graph: Arc<workspace::ModuleGraph>,
     runtime_config: Arc<config::RuntimeConfig>,
@@ -120,37 +118,54 @@ pub(crate) struct DocumentState {
     pub(crate) symbols: Arc<symbols::FileSymbols>,
 }
 
-use convert::{apply_content_changes, lsp_pos_to_byte};
 use navigation::to_lsp_document_symbol;
 use semantic_tokens::{collect_semantic_tokens, delta_encode};
 use worker::run_worker;
 
-#[allow(clippy::cast_possible_truncation)]
-fn compute_incremental_edit(
-    documents: &DashMap<Uri, DocumentState>,
-    uri: &Uri,
+/// Compute an incremental edit by diffing old and new full texts.
+///
+/// Finds the single changed region by scanning from both ends and constructs
+/// an `IncrementalEdit` suitable for `incremental_reparse`.
+#[allow(clippy::cast_possible_truncation, dead_code)]
+pub(crate) fn compute_diff_edit(
+    old_green: &rowan::GreenNode,
+    old_errors: &[(String, TextRange)],
     old_text: &str,
-    changes: &[TextDocumentContentChangeEvent],
+    new_text: &str,
 ) -> Option<IncrementalEdit> {
-    if changes.len() != 1 {
+    let old_bytes = old_text.as_bytes();
+    let new_bytes = new_text.as_bytes();
+
+    // Common prefix length.
+    let prefix = old_bytes
+        .iter()
+        .zip(new_bytes.iter())
+        .take_while(|(a, b)| a == b)
+        .count();
+
+    // Common suffix length (not overlapping with prefix).
+    let suffix = old_bytes[prefix..]
+        .iter()
+        .rev()
+        .zip(new_bytes[prefix..].iter().rev())
+        .take_while(|(a, b)| a == b)
+        .count();
+
+    let delete = old_bytes.len() - prefix - suffix;
+    let insert = new_bytes.len() - prefix - suffix;
+
+    // Identical texts — no edit needed.
+    if delete == 0 && insert == 0 {
         return None;
     }
-    let range = changes[0].range?;
-    let doc = documents.get(uri)?;
-    let start = lsp_pos_to_byte(old_text, range.start)?;
-    let end = lsp_pos_to_byte(old_text, range.end)?;
-    if start > end || end > old_text.len() {
-        return None;
-    }
-    let delete = u32::try_from(end - start).ok()?;
-    let insert_len = u32::try_from(changes[0].text.len()).ok()?;
+
     Some(IncrementalEdit {
-        old_green: doc.green.clone(),
-        old_errors: doc.errors.clone(),
+        old_green: old_green.clone(),
+        old_errors: old_errors.to_vec(),
         edit: sass_parser::reparse::TextEdit {
-            offset: TextSize::from(start as u32),
-            delete: TextSize::from(delete),
-            insert_len: TextSize::from(insert_len),
+            offset: TextSize::from(u32::try_from(prefix).ok()?),
+            delete: TextSize::from(u32::try_from(delete).ok()?),
+            insert_len: TextSize::from(u32::try_from(insert).ok()?),
         },
     })
 }
@@ -213,7 +228,7 @@ impl LanguageServer for Backend {
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                    TextDocumentSyncKind::INCREMENTAL,
+                    TextDocumentSyncKind::FULL,
                 )),
                 semantic_tokens_provider: Some(
                     SemanticTokensServerCapabilities::SemanticTokensOptions(
@@ -246,6 +261,8 @@ impl LanguageServer for Backend {
                         ".".into(),
                         "@".into(),
                         "\"".into(),
+                        "'".into(),
+                        "/".into(),
                         ":".into(),
                     ]),
                     ..CompletionOptions::default()
@@ -385,43 +402,13 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri;
         let version = params.text_document.version;
 
-        let Some(mut text) = self.source_texts.get(&uri).map(|t| t.clone()) else {
-            // No prior text — take last full-content change if available.
-            if let Some(change) = params.content_changes.into_iter().last() {
-                if change.text.len() > self.runtime_config.max_file_size() {
-                    tracing::warn!(
-                        ?uri,
-                        size = change.text.len(),
-                        limit = self.runtime_config.max_file_size(),
-                        "file exceeds size limit, skipping"
-                    );
-                    return;
-                }
-                self.source_texts.insert(uri.clone(), change.text.clone());
-                if self
-                    .task_tx
-                    .send(Task::Parse {
-                        uri,
-                        version,
-                        text: change.text,
-                        incremental: None,
-                    })
-                    .is_err()
-                {
-                    tracing::error!("worker channel closed, parse task dropped");
-                }
-            }
+        // FULL sync: contentChanges always contains exactly one entry with the
+        // complete document text. No incremental application needed — desync
+        // is impossible.
+        let Some(change) = params.content_changes.into_iter().last() else {
             return;
         };
-
-        // Compute incremental edit info before apply_content_changes consumes changes.
-        let incremental =
-            compute_incremental_edit(&self.documents, &uri, &text, &params.content_changes);
-
-        if !apply_content_changes(&mut text, params.content_changes) {
-            tracing::warn!(?uri, "incremental edit failed, dropping change");
-            return;
-        }
+        let text = change.text;
 
         if text.len() > self.runtime_config.max_file_size() {
             tracing::warn!(
@@ -432,6 +419,7 @@ impl LanguageServer for Backend {
             );
             return;
         }
+
         self.source_texts.insert(uri.clone(), text.clone());
         if self
             .task_tx
@@ -439,7 +427,7 @@ impl LanguageServer for Backend {
                 uri,
                 version,
                 text,
-                incremental,
+                incremental: None,
             })
             .is_err()
         {

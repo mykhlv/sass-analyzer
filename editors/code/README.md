@@ -6,7 +6,7 @@ Built for monorepos and large codebases where existing SCSS extensions slow down
 
 ## Why sass-analyzer?
 
-- **Speed** -- parses 1.6 MB of SCSS (Angular Material) in ~25 ms. Incremental reparsing keeps edits sub-millisecond.
+- **Speed** -- parses 1.6 MB of SCSS (Angular Material) in ~25 ms.
 - **Accuracy** -- lossless concrete syntax tree preserves every byte. Error recovery isolates problems to the smallest possible region.
 - **Monorepo-ready** -- import aliases, load paths, and `node_modules` resolution work out of the box.
 - **Lightweight** -- single native binary, no Node.js runtime required at startup.
@@ -35,7 +35,7 @@ Built for monorepos and large codebases where existing SCSS extensions slow down
 
 ### Performance
 
-- **Incremental reparsing** -- only the affected subtree is re-parsed on each keystroke
+- **Full text sync** -- the server always receives the complete document, eliminating desync issues
 - **50 ms debounce** -- batches rapid edits to avoid redundant work (configurable)
 - **LRU caching** -- green trees and source texts are evicted under memory pressure
 

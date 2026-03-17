@@ -196,6 +196,18 @@ fn resolve_alias_with_extension() {
 }
 
 #[test]
+fn resolve_alias_with_extension_partial() {
+    let mut r = resolver_with(&["/project/src/sass/_typography.scss"]);
+    r.add_import_alias("@sass".into(), vec![PathBuf::from("/project/src/sass")]);
+    assert_eq!(
+        r.resolve("@sass/typography.scss", Path::new("/project/app/main.scss"),),
+        Ok(ResolvedModule::File(
+            "/project/src/sass/_typography.scss".into()
+        )),
+    );
+}
+
+#[test]
 fn resolve_alias_multiple_targets_picks_closest() {
     let mut r = resolver_with(&[
         "/project/frontend/src/Sass/colors.scss",
