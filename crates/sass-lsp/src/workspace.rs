@@ -725,7 +725,8 @@ impl ModuleGraph {
     }
 
     /// Provide completion items for `@use "` / `@forward "` import paths.
-    /// Returns built-in module names and relative SCSS files from the same directory.
+    /// Returns built-in module names and relative/load-path SCSS files,
+    /// navigating into subdirectories when the partial contains `/`.
     pub fn complete_use_paths(
         &self,
         from: &Uri,
@@ -735,105 +736,118 @@ impl ModuleGraph {
 
         let mut items = Vec::new();
 
-        // Built-in modules: sass:math, sass:color, etc.
-        let builtins = ["math", "color", "list", "map", "selector", "string", "meta"];
-        for name in &builtins {
-            let label = format!("sass:{name}");
-            if partial.is_empty() || label.starts_with(partial) {
-                items.push(CompletionItem {
-                    label,
-                    kind: Some(CompletionItemKind::MODULE),
-                    sort_text: Some(format!("1_{name}")),
-                    ..CompletionItem::default()
-                });
+        // Split partial into directory prefix and name filter.
+        // e.g. "@sass/" → dir_prefix="@sass", name_filter=""
+        // e.g. "@sass/col" → dir_prefix="@sass", name_filter="col"
+        // e.g. "sass:" → dir_prefix="", name_filter="sass:"
+        let (dir_prefix, name_filter) = match partial.rfind('/') {
+            Some(pos) => (&partial[..pos], &partial[pos + 1..]),
+            None => ("", partial),
+        };
+
+        // Built-in modules (only when at top level)
+        if dir_prefix.is_empty() {
+            let builtins = ["math", "color", "list", "map", "selector", "string", "meta"];
+            for name in &builtins {
+                let label = format!("sass:{name}");
+                if name_filter.is_empty() || label.starts_with(name_filter) {
+                    items.push(CompletionItem {
+                        label,
+                        kind: Some(CompletionItemKind::MODULE),
+                        sort_text: Some(format!("1_{name}")),
+                        ..CompletionItem::default()
+                    });
+                }
             }
         }
 
-        // Relative SCSS files from the same directory
+        // Relative SCSS files from the file's directory
         let Some(base_path) = uri_to_path(from) else {
             return items;
         };
-        let Some(dir) = base_path.parent() else {
+        let Some(file_dir) = base_path.parent() else {
             return items;
         };
 
-        if let Ok(entries) = std::fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path == base_path {
-                    continue;
-                }
-                let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-                    continue;
-                };
-
-                if path.is_dir() {
-                    // Directory — could be an index import
-                    if partial.is_empty() || name.starts_with(partial) {
-                        items.push(CompletionItem {
-                            label: name.to_owned(),
-                            kind: Some(CompletionItemKind::FOLDER),
-                            sort_text: Some(format!("0_{name}")),
-                            ..CompletionItem::default()
-                        });
-                    }
-                } else if is_scss_or_css(name) {
-                    // Normalize: strip leading _, strip .scss extension
-                    let stem = name.strip_prefix('_').unwrap_or(name);
-                    let stem = stem
-                        .strip_suffix(".scss")
-                        .or_else(|| stem.strip_suffix(".css"))
-                        .unwrap_or(stem);
-                    if partial.is_empty() || stem.starts_with(partial) {
-                        items.push(CompletionItem {
-                            label: stem.to_owned(),
-                            kind: Some(CompletionItemKind::FILE),
-                            sort_text: Some(format!("0_{stem}")),
-                            ..CompletionItem::default()
-                        });
-                    }
-                }
-            }
-        }
-
-        // Also scan load_paths
         let resolver = self
             .resolver
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        for load_path in resolver.load_paths() {
-            if let Ok(entries) = std::fs::read_dir(load_path) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-                        continue;
-                    };
 
-                    if path.is_dir() {
-                        if partial.is_empty() || name.starts_with(partial) {
-                            items.push(CompletionItem {
-                                label: name.to_owned(),
-                                kind: Some(CompletionItemKind::FOLDER),
-                                sort_text: Some(format!("0_{name}")),
-                                ..CompletionItem::default()
-                            });
-                        }
-                    } else if is_scss_or_css(name) {
-                        let stem = name.strip_prefix('_').unwrap_or(name);
-                        let stem = stem
-                            .strip_suffix(".scss")
-                            .or_else(|| stem.strip_suffix(".css"))
-                            .unwrap_or(stem);
-                        if partial.is_empty() || stem.starts_with(partial) {
-                            items.push(CompletionItem {
-                                label: stem.to_owned(),
-                                kind: Some(CompletionItemKind::FILE),
-                                sort_text: Some(format!("0_{stem}")),
-                                ..CompletionItem::default()
-                            });
-                        }
+        // Check if dir_prefix matches an import alias (e.g. "@sass" or "@sass/sub").
+        let mut alias_matched = false;
+        if !dir_prefix.is_empty() {
+            for (prefix, targets) in resolver.import_aliases() {
+                // "@sass" matches "@sass", "@sass/sub" matches "@sass" with rest="sub"
+                if let Some(rest) = dir_prefix.strip_prefix(prefix.as_str()) {
+                    if !rest.is_empty() && !rest.starts_with('/') {
+                        continue; // "@sass-utils" must not match "@sass"
+                    }
+                    let rest = rest.strip_prefix('/').unwrap_or(rest);
+                    alias_matched = true;
+                    for target in targets {
+                        let scan_dir = if rest.is_empty() {
+                            target.clone()
+                        } else {
+                            target.join(rest)
+                        };
+                        Self::scan_dir_for_completions(
+                            &scan_dir,
+                            dir_prefix,
+                            name_filter,
+                            None,
+                            &mut items,
+                        );
                     }
                 }
+            }
+        }
+
+        // Also offer alias prefixes when at top level
+        if dir_prefix.is_empty() {
+            for (prefix, _) in resolver.import_aliases() {
+                if name_filter.is_empty() || prefix.starts_with(name_filter) {
+                    items.push(CompletionItem {
+                        label: prefix.clone(),
+                        kind: Some(CompletionItemKind::FOLDER),
+                        sort_text: Some(format!("0_{prefix}")),
+                        ..CompletionItem::default()
+                    });
+                }
+            }
+        }
+
+        // Scan relative to file directory (skip if alias already handled dir_prefix)
+        if !alias_matched {
+            let scan_dir = if dir_prefix.is_empty() {
+                file_dir.to_path_buf()
+            } else {
+                file_dir.join(dir_prefix)
+            };
+            Self::scan_dir_for_completions(
+                &scan_dir,
+                dir_prefix,
+                name_filter,
+                Some(&base_path),
+                &mut items,
+            );
+        }
+
+        // Also scan load_paths (skip if alias already handled dir_prefix)
+        if !alias_matched {
+            for load_path in resolver.load_paths() {
+                let scan_dir = if dir_prefix.is_empty() {
+                    load_path.clone()
+                } else {
+                    load_path.join(dir_prefix)
+                };
+                Self::scan_dir_for_completions(
+                    &scan_dir,
+                    dir_prefix,
+                    name_filter,
+                    None,
+                    &mut items,
+                );
             }
         }
 
@@ -841,6 +855,64 @@ impl ModuleGraph {
         items.sort_by(|a, b| a.label.cmp(&b.label));
         items.dedup_by(|a, b| a.label == b.label);
         items
+    }
+
+    fn scan_dir_for_completions(
+        dir: &std::path::Path,
+        dir_prefix: &str,
+        name_filter: &str,
+        exclude: Option<&std::path::Path>,
+        items: &mut Vec<tower_lsp_server::ls_types::CompletionItem>,
+    ) {
+        use tower_lsp_server::ls_types::{CompletionItem, CompletionItemKind};
+
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+
+        let label_prefix = if dir_prefix.is_empty() {
+            String::new()
+        } else {
+            format!("{dir_prefix}/")
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if exclude.is_some_and(|ex| path == ex) {
+                continue;
+            }
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+
+            if path.is_dir() {
+                if name_filter.is_empty() || name.starts_with(name_filter) {
+                    let label = format!("{label_prefix}{name}");
+                    items.push(CompletionItem {
+                        label: label.clone(),
+                        kind: Some(CompletionItemKind::FOLDER),
+                        sort_text: Some(format!("0_{label}")),
+                        ..CompletionItem::default()
+                    });
+                }
+            } else if is_scss_sass_or_css(name) {
+                let stem = name.strip_prefix('_').unwrap_or(name);
+                let stem = stem
+                    .strip_suffix(".scss")
+                    .or_else(|| stem.strip_suffix(".sass"))
+                    .or_else(|| stem.strip_suffix(".css"))
+                    .unwrap_or(stem);
+                if name_filter.is_empty() || stem.starts_with(name_filter) {
+                    let label = format!("{label_prefix}{stem}");
+                    items.push(CompletionItem {
+                        label: label.clone(),
+                        kind: Some(CompletionItemKind::FILE),
+                        sort_text: Some(format!("0_{label}")),
+                        ..CompletionItem::default()
+                    });
+                }
+            }
+        }
     }
 
     /// Find all references to a symbol across the entire workspace.
@@ -1285,10 +1357,12 @@ fn find_name_in_forward_clauses(
     results
 }
 
-fn is_scss_or_css(name: &str) -> bool {
-    Path::new(name)
-        .extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("scss") || ext.eq_ignore_ascii_case("css"))
+fn is_scss_sass_or_css(name: &str) -> bool {
+    Path::new(name).extension().is_some_and(|ext| {
+        ext.eq_ignore_ascii_case("scss")
+            || ext.eq_ignore_ascii_case("sass")
+            || ext.eq_ignore_ascii_case("css")
+    })
 }
 
 fn is_visible(vis: &ForwardVisibility, name: &str) -> bool {

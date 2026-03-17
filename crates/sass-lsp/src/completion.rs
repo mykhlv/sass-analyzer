@@ -5,8 +5,8 @@ use sass_parser::syntax::SyntaxNode;
 use sass_parser::syntax_kind::SyntaxKind;
 use sass_parser::text_range::TextSize;
 use tower_lsp_server::ls_types::{
-    CompletionItem, CompletionItemKind, CompletionParams, CompletionResponse, MarkupContent,
-    MarkupKind, Uri,
+    CompletionItem, CompletionItemKind, CompletionParams, CompletionResponse, CompletionTextEdit,
+    MarkupContent, MarkupKind, Position, Range, TextEdit, Uri,
 };
 
 use crate::DocumentState;
@@ -26,8 +26,9 @@ pub(crate) enum CompletionContext {
     IncludeMixin,
     /// After `@extend %` — only placeholders
     Extend,
-    /// After `ns.` — only symbols from that namespace
-    Namespace(String),
+    /// After `ns.` — only symbols from that namespace.
+    /// Contains `(namespace_name, utf16_column_after_dot)`.
+    Namespace(String, u32),
     /// After `@use "` or `@forward "` — module path completions
     UseModulePath(String),
     /// In property-name position (start of line or after `;`/`{`)
@@ -79,7 +80,10 @@ pub(crate) fn detect_completion_context(line: &str, character: u32) -> Completio
             if let Some(dot_pos) = partial.rfind('.') {
                 let ns = &partial[..dot_pos];
                 if !ns.is_empty() && ns.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
-                    return CompletionContext::Namespace(ns.to_owned());
+                    // Column right after the dot character.
+                    let dot_byte = ns.as_ptr() as usize - line.as_ptr() as usize + ns.len();
+                    let after_dot_col = byte_offset_to_utf16(line, dot_byte + 1);
+                    return CompletionContext::Namespace(ns.to_owned(), after_dot_col);
                 }
             }
             return CompletionContext::IncludeMixin;
@@ -105,7 +109,9 @@ pub(crate) fn detect_completion_context(line: &str, character: u32) -> Completio
             .collect();
         // Must start with a letter or underscore (not a digit — avoids `1.5` false positive)
         if ns.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
-            return CompletionContext::Namespace(ns);
+            // Column right after the dot character.
+            let after_dot_col = byte_offset_to_utf16(line, dot_pos + 1);
+            return CompletionContext::Namespace(ns, after_dot_col);
         }
     }
 
@@ -169,6 +175,15 @@ pub(crate) fn detect_completion_context(line: &str, character: u32) -> Completio
     }
 
     CompletionContext::General
+}
+
+/// Convert a byte offset within a line to a UTF-16 column offset.
+#[allow(clippy::cast_possible_truncation)]
+fn byte_offset_to_utf16(line: &str, byte_offset: usize) -> u32 {
+    line[..byte_offset]
+        .chars()
+        .map(|ch| ch.len_utf16() as u32)
+        .sum()
 }
 
 /// Refine line-based completion context using the parsed CST. Corrects two cases:
@@ -298,15 +313,14 @@ pub(crate) fn symbol_to_completion_item(
     sym: &symbols::Symbol,
     is_builtin: bool,
 ) -> CompletionItem {
-    let (label, insert_text, kind, detail) = match sym.kind {
+    let (label, kind, detail) = match sym.kind {
         symbols::SymbolKind::Variable => {
             let label = if let Some(ns) = prefix {
                 format!("{ns}.${}", sym.name)
             } else {
                 format!("${}", sym.name)
             };
-            let detail = sym.value.clone();
-            (label, None, CompletionItemKind::VARIABLE, detail)
+            (label, CompletionItemKind::VARIABLE, sym.value.clone())
         }
         symbols::SymbolKind::Function => {
             let label = if let Some(ns) = prefix {
@@ -314,8 +328,7 @@ pub(crate) fn symbol_to_completion_item(
             } else {
                 sym.name.clone()
             };
-            let detail = sym.params.clone();
-            (label, None, CompletionItemKind::FUNCTION, detail)
+            (label, CompletionItemKind::FUNCTION, sym.params.clone())
         }
         symbols::SymbolKind::Mixin => {
             let label = if let Some(ns) = prefix {
@@ -328,11 +341,11 @@ pub(crate) fn symbol_to_completion_item(
                     .as_ref()
                     .map_or_else(|| "@mixin".to_owned(), |p| format!("@mixin{p}")),
             );
-            (label, None, CompletionItemKind::METHOD, detail)
+            (label, CompletionItemKind::METHOD, detail)
         }
         symbols::SymbolKind::Placeholder => {
             let label = format!("%{}", sym.name);
-            (label, None, CompletionItemKind::CLASS, None)
+            (label, CompletionItemKind::CLASS, None)
         }
     };
 
@@ -363,7 +376,6 @@ pub(crate) fn symbol_to_completion_item(
         label,
         kind: Some(kind),
         detail,
-        insert_text,
         sort_text,
         documentation,
         ..CompletionItem::default()
@@ -413,10 +425,24 @@ pub(crate) async fn handle(
         CompletionContext::UseModulePath(partial) => {
             let graph = Arc::clone(module_graph);
             let uri_clone = uri.clone();
-            let items =
+            let partial_len_utf16 = byte_offset_to_utf16(&partial, partial.len());
+            let edit_range = Range {
+                start: Position {
+                    line: position.line,
+                    character: position.character.saturating_sub(partial_len_utf16),
+                },
+                end: position,
+            };
+            let mut items =
                 tokio::task::spawn_blocking(move || graph.complete_use_paths(&uri_clone, &partial))
                     .await
                     .unwrap_or_default();
+            for item in &mut items {
+                item.text_edit = Some(CompletionTextEdit::Edit(TextEdit {
+                    range: edit_range,
+                    new_text: item.label.clone(),
+                }));
+            }
             if items.is_empty() {
                 return Ok(None);
             }
@@ -527,7 +553,7 @@ pub(crate) async fn handle(
         .filter(|(prefix, _, sym)| match &ctx {
             CompletionContext::Variable => sym.kind == symbols::SymbolKind::Variable,
             CompletionContext::IncludeMixin => sym.kind == symbols::SymbolKind::Mixin,
-            CompletionContext::Namespace(ns) => prefix.as_ref().is_some_and(|p| p == ns),
+            CompletionContext::Namespace(ns, _) => prefix.as_ref().is_some_and(|p| p == ns),
             CompletionContext::Extend => sym.kind == symbols::SymbolKind::Placeholder,
             CompletionContext::General => true,
             // These contexts are handled above and return early.
@@ -537,7 +563,31 @@ pub(crate) async fn handle(
         })
         .map(|(prefix, sym_uri, sym)| {
             let is_builtin = crate::builtins::is_builtin_uri(sym_uri.as_str());
-            symbol_to_completion_item(prefix.as_deref(), &sym, is_builtin)
+            let mut item = symbol_to_completion_item(prefix.as_deref(), &sym, is_builtin);
+            // For namespace completions, text_edit replaces only the part AFTER the
+            // dot. This way `.` trigger yields an empty prefix → all items shown.
+            // The member text depends on symbol kind:
+            //   variable  → "$name"
+            //   mixin/fn  → "name"
+            if let CompletionContext::Namespace(_, after_dot_col) = &ctx {
+                let edit_range = Range {
+                    start: Position {
+                        line: position.line,
+                        character: *after_dot_col,
+                    },
+                    end: position,
+                };
+                let member = match sym.kind {
+                    symbols::SymbolKind::Variable => format!("${}", sym.name),
+                    _ => sym.name.clone(),
+                };
+                item.filter_text = Some(member.clone());
+                item.text_edit = Some(CompletionTextEdit::Edit(TextEdit {
+                    range: edit_range,
+                    new_text: member,
+                }));
+            }
+            item
         })
         .collect();
 
