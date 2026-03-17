@@ -1,6 +1,6 @@
 use sass_parser::line_index::LineIndex;
 use sass_parser::text_range::{TextRange, TextSize};
-use tower_lsp_server::ls_types::{Position, Range, TextDocumentContentChangeEvent};
+use tower_lsp_server::ls_types::{Position, Range};
 
 /// Convert a byte offset to a 0-based (line, UTF-16 column) pair.
 ///
@@ -28,55 +28,6 @@ pub(crate) fn byte_to_lsp_pos(
 #[allow(clippy::cast_possible_truncation)]
 pub(crate) fn utf16_len(s: &str) -> u32 {
     s.encode_utf16().count() as u32
-}
-
-/// Apply incremental text edits from LSP to a source string.
-/// Converts LSP positions (0-based line, UTF-16 column) to byte offsets via linear scan.
-/// Returns `false` if any position is out of bounds.
-pub(crate) fn apply_content_changes(
-    text: &mut String,
-    changes: Vec<TextDocumentContentChangeEvent>,
-) -> bool {
-    for change in changes {
-        match change.range {
-            Some(range) => {
-                let Some(start) = lsp_pos_to_byte(text, range.start) else {
-                    return false;
-                };
-                let Some(end) = lsp_pos_to_byte(text, range.end) else {
-                    return false;
-                };
-                if start > end || end > text.len() {
-                    return false;
-                }
-                text.replace_range(start..end, &change.text);
-            }
-            None => {
-                *text = change.text;
-            }
-        }
-    }
-    true
-}
-
-/// Convert an LSP Position (0-based line, UTF-16 column) to a byte offset in `text`.
-#[allow(clippy::cast_possible_truncation)]
-pub(crate) fn lsp_pos_to_byte(text: &str, pos: Position) -> Option<usize> {
-    let mut byte_offset = 0usize;
-    for _ in 0..pos.line {
-        let remaining = &text[byte_offset..];
-        let nl = remaining.find('\n')?;
-        byte_offset += nl + 1;
-    }
-    let mut utf16_count = 0u32;
-    for ch in text[byte_offset..].chars() {
-        if utf16_count >= pos.character || ch == '\n' {
-            break;
-        }
-        utf16_count += ch.len_utf16() as u32;
-        byte_offset += ch.len_utf8();
-    }
-    Some(byte_offset)
 }
 
 /// Convert a `TextRange` (byte offsets) to an LSP `Range` (line/UTF-16 column).

@@ -123,6 +123,11 @@ impl<V: Vfs> ModuleResolver<V> {
         &self.load_paths
     }
 
+    /// The configured import aliases (prefix → target directories).
+    pub fn import_aliases(&self) -> &[(String, Vec<PathBuf>)] {
+        &self.import_aliases
+    }
+
     /// Register an import alias. `targets` must be absolute paths.
     /// For monorepos, multiple targets can map to the same prefix;
     /// the resolver picks the target closest to the importing file.

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Fixed
+- Diagnostics no longer persist after accepting a completion (e.g. `ns.$variable` inside mixin arguments)
+- Namespace completions (`ns.`) now insert only the member name instead of duplicating the prefix
+- `@use`/`@forward` path completions now navigate into subdirectories and resolve import aliases (e.g. `@sass/sub/`)
+
+### Added
+- Completion trigger on `'`, `/` for better `@use`/`@forward` path suggestions
+- `.sass` files now appear in `@use`/`@forward` path completions
+
 ## 0.3.1 — 2026-03-15
 
 ### Fixed
