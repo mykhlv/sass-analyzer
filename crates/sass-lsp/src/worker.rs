@@ -485,3 +485,143 @@ fn collect_sass_recursive(dir: &Path, out: &mut Vec<PathBuf>) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── is_sass_file ────────────────────────────────────────────────
+
+    #[test]
+    fn is_sass_file_scss_extension() {
+        let uri: Uri = "file:///project/styles.scss".parse().unwrap();
+        assert!(!is_sass_file(&uri));
+    }
+
+    #[test]
+    fn is_sass_file_sass_extension() {
+        let uri: Uri = "file:///project/styles.sass".parse().unwrap();
+        assert!(is_sass_file(&uri));
+    }
+
+    #[test]
+    fn is_sass_file_css_extension() {
+        let uri: Uri = "file:///project/styles.css".parse().unwrap();
+        assert!(!is_sass_file(&uri));
+    }
+
+    #[test]
+    fn is_sass_file_no_extension() {
+        let uri: Uri = "file:///project/styles".parse().unwrap();
+        assert!(!is_sass_file(&uri));
+    }
+
+    #[test]
+    fn is_sass_file_with_query_params() {
+        let uri: Uri = "file:///project/styles.sass?version=1".parse().unwrap();
+        assert!(is_sass_file(&uri));
+    }
+
+    #[test]
+    fn is_sass_file_partial_underscore() {
+        let uri: Uri = "file:///project/_mixins.sass".parse().unwrap();
+        assert!(is_sass_file(&uri));
+    }
+
+    // ── parse_document ──────────────────────────────────────────────
+
+    #[test]
+    fn parse_document_scss_valid() {
+        let result = parse_document(".btn { color: red; }", false);
+        assert!(result.is_some());
+        let (green, errors) = result.unwrap();
+        assert!(errors.is_empty());
+        let root = SyntaxNode::new_root(green);
+        assert_eq!(root.text().to_string(), ".btn { color: red; }");
+    }
+
+    #[test]
+    fn parse_document_scss_with_errors() {
+        let result = parse_document("{{ invalid", false);
+        assert!(result.is_some());
+        let (green, errors) = result.unwrap();
+        assert!(
+            !errors.is_empty(),
+            "malformed SCSS should produce parse errors"
+        );
+        let root = SyntaxNode::new_root(green);
+        assert_eq!(root.text().to_string(), "{{ invalid");
+    }
+
+    #[test]
+    fn parse_document_sass_syntax() {
+        let result = parse_document(".btn\n  color: red\n", true);
+        assert!(result.is_some());
+        let (green, errors) = result.unwrap();
+        assert!(errors.is_empty(), "errors: {errors:?}");
+        let root = SyntaxNode::new_root(green);
+        assert_eq!(root.text().to_string(), ".btn\n  color: red\n");
+    }
+
+    #[test]
+    fn parse_document_empty_input() {
+        let result = parse_document("", false);
+        assert!(result.is_some());
+        let (_green, errors) = result.unwrap();
+        assert!(errors.is_empty());
+    }
+
+    // ── errors_to_diagnostics ───────────────────────────────────────
+
+    #[test]
+    fn errors_to_diagnostics_empty() {
+        let li = sass_parser::line_index::LineIndex::new("");
+        let diags = errors_to_diagnostics(&[], &li, "");
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn errors_to_diagnostics_single_error() {
+        let src = ".btn { color: ; }";
+        let li = sass_parser::line_index::LineIndex::new(src);
+        let errors = vec![(
+            "expected value".to_owned(),
+            TextRange::new(14.into(), 14.into()),
+        )];
+        let diags = errors_to_diagnostics(&errors, &li, src);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].message, "expected value");
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
+        assert_eq!(diags[0].source.as_deref(), Some("sass-analyzer"));
+    }
+
+    #[test]
+    fn errors_to_diagnostics_multiple_errors() {
+        let src = ".btn { }";
+        let li = sass_parser::line_index::LineIndex::new(src);
+        let errors = vec![
+            ("error one".to_owned(), TextRange::new(0.into(), 1.into())),
+            ("error two".to_owned(), TextRange::new(5.into(), 6.into())),
+        ];
+        let diags = errors_to_diagnostics(&errors, &li, src);
+        assert_eq!(diags.len(), 2);
+        assert_eq!(diags[0].message, "error one");
+        assert_eq!(diags[1].message, "error two");
+    }
+
+    // ── try_incremental_or_full ─────────────────────────────────────
+
+    #[test]
+    fn try_incremental_or_full_no_incremental() {
+        let uri: Uri = "file:///test.scss".parse().unwrap();
+        let result = try_incremental_or_full(None, ".btn { color: red; }", &uri);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn try_incremental_or_full_sass_file_always_full() {
+        let uri: Uri = "file:///test.sass".parse().unwrap();
+        let result = try_incremental_or_full(None, ".btn\n  color: red\n", &uri);
+        assert!(result.is_some());
+    }
+}

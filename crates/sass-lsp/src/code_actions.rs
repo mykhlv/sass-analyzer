@@ -1318,4 +1318,221 @@ mod tests {
             "Expected tab indent in mixin body"
         );
     }
+
+    // ── normalize_extension_only ────────────────────────────────────
+
+    #[test]
+    fn normalize_extension_only_strips_scss() {
+        assert_eq!(
+            normalize_extension_only(Path::new("_colors.scss")),
+            "_colors"
+        );
+    }
+
+    #[test]
+    fn normalize_extension_only_strips_sass() {
+        assert_eq!(normalize_extension_only(Path::new("_base.sass")), "_base");
+    }
+
+    #[test]
+    fn normalize_extension_only_strips_css() {
+        assert_eq!(normalize_extension_only(Path::new("vendor.css")), "vendor");
+    }
+
+    #[test]
+    fn normalize_extension_only_preserves_underscore() {
+        assert_eq!(
+            normalize_extension_only(Path::new("utils/_mixins.scss")),
+            "utils/_mixins"
+        );
+    }
+
+    #[test]
+    fn normalize_extension_only_no_extension() {
+        assert_eq!(normalize_extension_only(Path::new("module")), "module");
+    }
+
+    // ── path_to_forward_slash ───────────────────────────────────────
+
+    #[test]
+    fn forward_slash_unix_path_unchanged() {
+        assert_eq!(
+            path_to_forward_slash(Path::new("utils/mixins")),
+            "utils/mixins"
+        );
+    }
+
+    #[test]
+    fn forward_slash_single_component() {
+        assert_eq!(path_to_forward_slash(Path::new("colors")), "colors");
+    }
+
+    // ── unused_use_actions ──────────────────────────────────────────
+
+    fn run_unused_use(
+        src: &str,
+        request_line_start: u32,
+        request_line_end: u32,
+    ) -> Vec<CodeAction> {
+        let (green, _) = sass_parser::parse_scss(src);
+        let root = SyntaxNode::new_root(green);
+        let li = sass_parser::line_index::LineIndex::new(src);
+        let uri: Uri = "file:///test.scss".parse().unwrap();
+        let file_symbols = Arc::new(crate::symbols::collect_symbols(&root));
+        let import_refs = sass_parser::imports::collect_imports(&root);
+        let request_range = Range::new(
+            Position::new(request_line_start, 0),
+            Position::new(request_line_end, 999),
+        );
+        let mut actions = Vec::new();
+        unused_use_actions(
+            &uri,
+            &root,
+            src,
+            &li,
+            &file_symbols,
+            &import_refs,
+            request_range,
+            &mut actions,
+        );
+        actions
+    }
+
+    #[test]
+    fn unused_use_offers_removal() {
+        let src = "@use \"colors\";\n.btn { color: red; }\n";
+        let actions = run_unused_use(src, 0, 0);
+        assert_eq!(actions.len(), 1);
+        assert!(actions[0].title.contains("Remove unused"));
+        assert!(actions[0].title.contains("colors"));
+    }
+
+    #[test]
+    fn unused_use_outside_request_range_no_action() {
+        let src = "@use \"colors\";\n.btn { color: red; }\n";
+        // Request range is on the .btn rule, not the @use line
+        let actions = run_unused_use(src, 1, 1);
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn multiple_unused_uses_both_offered() {
+        let src = "@use \"colors\";\n@use \"mixins\";\n.btn { color: red; }\n";
+        let actions = run_unused_use(src, 0, 1);
+        assert_eq!(actions.len(), 2);
+        let titles: Vec<&str> = actions.iter().map(|a| a.title.as_str()).collect();
+        assert!(titles.iter().any(|t| t.contains("colors")));
+        assert!(titles.iter().any(|t| t.contains("mixins")));
+    }
+
+    #[test]
+    fn unused_use_star_skipped() {
+        let src = "@use \"colors\" as *;\n.btn { color: red; }\n";
+        let actions = run_unused_use(src, 0, 0);
+        assert!(actions.is_empty());
+    }
+
+    // ── indentation_at ──────────────────────────────────────────────
+
+    #[test]
+    fn indentation_at_first_line() {
+        assert_eq!(indentation_at("  .btn { }", 2), "  ");
+    }
+
+    #[test]
+    fn indentation_at_second_line() {
+        assert_eq!(indentation_at(".parent {\n    .child { }\n}", 14), "    ");
+    }
+
+    #[test]
+    fn indentation_at_no_indent() {
+        assert_eq!(indentation_at(".btn { }", 0), "");
+    }
+
+    // ── is_expression_node ──────────────────────────────────────────
+
+    #[test]
+    fn is_expression_node_known_kinds() {
+        assert!(is_expression_node(SyntaxKind::NUMBER_LITERAL));
+        assert!(is_expression_node(SyntaxKind::STRING_LITERAL));
+        assert!(is_expression_node(SyntaxKind::BINARY_EXPR));
+        assert!(is_expression_node(SyntaxKind::FUNCTION_CALL));
+        assert!(is_expression_node(SyntaxKind::VARIABLE_REF));
+        assert!(is_expression_node(SyntaxKind::MAP_EXPR));
+    }
+
+    #[test]
+    fn is_expression_node_non_expr_kinds() {
+        assert!(!is_expression_node(SyntaxKind::RULE_SET));
+        assert!(!is_expression_node(SyntaxKind::DECLARATION));
+        assert!(!is_expression_node(SyntaxKind::BLOCK));
+        assert!(!is_expression_node(SyntaxKind::SOURCE_FILE));
+    }
+
+    // ── is_declaration_node ─────────────────────────────────────────
+
+    #[test]
+    fn is_declaration_node_known_kinds() {
+        assert!(is_declaration_node(SyntaxKind::DECLARATION));
+        assert!(is_declaration_node(SyntaxKind::VARIABLE_DECL));
+        assert!(is_declaration_node(SyntaxKind::CUSTOM_PROPERTY_DECL));
+    }
+
+    #[test]
+    fn is_declaration_node_non_decl_kinds() {
+        assert!(!is_declaration_node(SyntaxKind::RULE_SET));
+        assert!(!is_declaration_node(SyntaxKind::FUNCTION_CALL));
+    }
+
+    // ── extract_name_from_message edge cases ────────────────────────
+
+    #[test]
+    fn extract_name_no_backticks_returns_none() {
+        assert_eq!(extract_name_from_message("no backticks here"), None);
+    }
+
+    #[test]
+    fn extract_name_single_backtick_returns_none() {
+        assert_eq!(extract_name_from_message("only one ` backtick"), None);
+    }
+
+    #[test]
+    fn extract_name_empty_between_backticks() {
+        assert_eq!(extract_name_from_message("empty ``"), Some(String::new()));
+    }
+
+    // ── insertion point with @import ────────────────────────────────
+
+    #[test]
+    fn insertion_point_after_import_rule() {
+        let src = "@import \"legacy\";\n.btn { }\n";
+        let (green, _) = sass_parser::parse_scss(src);
+        let root = SyntaxNode::new_root(green);
+        let li = sass_parser::line_index::LineIndex::new(src);
+        let (pos, nl) = find_use_insertion_point(&root, src, &li);
+        assert_eq!(pos, Position::new(1, 0));
+        assert!(!nl);
+    }
+
+    // ── extract variable: custom property ───────────────────────────
+
+    #[test]
+    fn extract_var_custom_property_value() {
+        let src = ".btn { --my-color: #ff0; }\n";
+        // Select #ff0 → bytes 19..23
+        // Custom property values are inside CUSTOM_PROPERTY_DECL, not VALUE —
+        // extract variable is not supported for this node type.
+        let edits = run_extract_variable(src, (0, 19), (0, 23));
+        assert!(edits.is_empty());
+    }
+
+    // ── extract mixin: custom property decl ─────────────────────────
+
+    #[test]
+    fn extract_mixin_custom_property_decl() {
+        let src = ".btn {\n  --gap: 10px;\n}\n";
+        let edits = run_extract_mixin(src, (1, 2), (1, 14));
+        assert_eq!(edits.len(), 2);
+        assert!(edits[0].new_text.contains("--gap: 10px;"));
+    }
 }

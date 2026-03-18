@@ -370,3 +370,188 @@ fn selector_symbols() -> Vec<Symbol> {
         ),
     ]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── builtin_symbols dispatch ────────────────────────────────────
+
+    #[test]
+    fn math_module_returns_symbols() {
+        let syms = builtin_symbols("math").unwrap();
+        assert!(!syms.is_empty());
+        let names: Vec<&str> = syms.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"pi"));
+        assert!(names.contains(&"ceil"));
+        assert!(names.contains(&"sqrt"));
+        assert!(names.contains(&"random"));
+    }
+
+    #[test]
+    fn color_module_returns_symbols() {
+        let syms = builtin_symbols("color").unwrap();
+        let names: Vec<&str> = syms.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"red"));
+        assert!(names.contains(&"adjust"));
+        assert!(names.contains(&"mix"));
+        assert!(names.contains(&"hwb"));
+    }
+
+    #[test]
+    fn list_module_returns_symbols() {
+        let syms = builtin_symbols("list").unwrap();
+        assert!(!syms.is_empty());
+        let names: Vec<&str> = syms.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"append"));
+        assert!(names.contains(&"join"));
+        assert!(names.contains(&"nth"));
+        assert!(names.contains(&"length"));
+        assert!(names.contains(&"zip"));
+        assert!(names.contains(&"slash"));
+        // All should be functions
+        assert!(syms.iter().all(|s| s.kind == SymbolKind::Function));
+    }
+
+    #[test]
+    fn map_module_returns_symbols() {
+        let syms = builtin_symbols("map").unwrap();
+        assert!(!syms.is_empty());
+        let names: Vec<&str> = syms.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"get"));
+        assert!(names.contains(&"has-key"));
+        assert!(names.contains(&"keys"));
+        assert!(names.contains(&"values"));
+        assert!(names.contains(&"merge"));
+        assert!(names.contains(&"deep-merge"));
+        assert!(names.contains(&"set"));
+        assert!(syms.iter().all(|s| s.kind == SymbolKind::Function));
+    }
+
+    #[test]
+    fn string_module_returns_symbols() {
+        let syms = builtin_symbols("string").unwrap();
+        assert!(!syms.is_empty());
+        let names: Vec<&str> = syms.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"quote"));
+        assert!(names.contains(&"unquote"));
+        assert!(names.contains(&"index"));
+        assert!(names.contains(&"slice"));
+        assert!(names.contains(&"split"));
+        assert!(names.contains(&"to-lower-case"));
+        assert!(names.contains(&"unique-id"));
+        assert!(syms.iter().all(|s| s.kind == SymbolKind::Function));
+    }
+
+    #[test]
+    fn meta_module_returns_symbols() {
+        let syms = builtin_symbols("meta").unwrap();
+        assert!(!syms.is_empty());
+        let names: Vec<&str> = syms.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"call"));
+        assert!(names.contains(&"type-of"));
+        assert!(names.contains(&"inspect"));
+        assert!(names.contains(&"get-function"));
+        assert!(names.contains(&"variable-exists"));
+        // meta has both functions and mixins
+        assert!(names.contains(&"load-css"));
+        assert!(names.contains(&"apply"));
+        let mixins: Vec<&Symbol> = syms
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Mixin)
+            .collect();
+        assert_eq!(mixins.len(), 2);
+    }
+
+    #[test]
+    fn selector_module_returns_symbols() {
+        let syms = builtin_symbols("selector").unwrap();
+        assert!(!syms.is_empty());
+        let names: Vec<&str> = syms.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"append"));
+        assert!(names.contains(&"extend"));
+        assert!(names.contains(&"nest"));
+        assert!(names.contains(&"parse"));
+        assert!(names.contains(&"unify"));
+        assert!(syms.iter().all(|s| s.kind == SymbolKind::Function));
+    }
+
+    #[test]
+    fn unknown_module_returns_none() {
+        assert!(builtin_symbols("unknown").is_none());
+        assert!(builtin_symbols("").is_none());
+        assert!(builtin_symbols("Math").is_none());
+    }
+
+    #[test]
+    fn all_builtins_have_doc_comments() {
+        for module in &["math", "color", "list", "map", "string", "meta", "selector"] {
+            let syms = builtin_symbols(module).unwrap();
+            for sym in &syms {
+                assert!(sym.doc.is_some(), "{module}.{} is missing doc", sym.name);
+                assert!(
+                    !sym.doc.as_ref().unwrap().is_empty(),
+                    "{module}.{} has empty doc",
+                    sym.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn all_functions_have_params() {
+        for module in &["math", "color", "list", "map", "string", "meta", "selector"] {
+            let syms = builtin_symbols(module).unwrap();
+            for sym in &syms {
+                if sym.kind == SymbolKind::Function || sym.kind == SymbolKind::Mixin {
+                    assert!(
+                        sym.params.is_some(),
+                        "{module}.{} is missing params",
+                        sym.name
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn math_module_has_variables() {
+        let syms = builtin_symbols("math").unwrap();
+        let vars: Vec<&Symbol> = syms
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Variable)
+            .collect();
+        assert!(vars.len() >= 7, "Expected at least 7 math variables");
+        let var_names: Vec<&str> = vars.iter().map(|s| s.name.as_str()).collect();
+        assert!(var_names.contains(&"pi"));
+        assert!(var_names.contains(&"e"));
+        assert!(var_names.contains(&"infinity"));
+        assert!(var_names.contains(&"nan"));
+    }
+
+    // ── URI helpers ─────────────────────────────────────────────────
+
+    #[test]
+    fn builtin_uri_format() {
+        assert_eq!(builtin_uri("math"), "sass-builtin:///math");
+        assert_eq!(builtin_uri("color"), "sass-builtin:///color");
+    }
+
+    #[test]
+    fn is_builtin_uri_matches() {
+        assert!(is_builtin_uri("sass-builtin:///math"));
+        assert!(is_builtin_uri("sass-builtin:///color"));
+        assert!(!is_builtin_uri("file:///foo.scss"));
+        assert!(!is_builtin_uri(""));
+    }
+
+    #[test]
+    fn builtin_name_from_uri_extracts() {
+        assert_eq!(builtin_name_from_uri("sass-builtin:///math"), Some("math"));
+        assert_eq!(
+            builtin_name_from_uri("sass-builtin:///color"),
+            Some("color")
+        );
+        assert_eq!(builtin_name_from_uri("file:///foo.scss"), None);
+    }
+}
