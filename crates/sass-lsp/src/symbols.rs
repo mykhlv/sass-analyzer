@@ -1,4 +1,4 @@
-use sass_parser::syntax::{SyntaxNode, SyntaxToken};
+use sass_parser::syntax::{NodeOrToken, SyntaxNode, SyntaxToken};
 use sass_parser::syntax_kind::SyntaxKind;
 use sass_parser::text_range::TextRange;
 
@@ -10,15 +10,6 @@ pub enum SymbolKind {
     Placeholder,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RefKind {
-    Variable,
-    Function,
-    Mixin,
-    Placeholder,
-}
-
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct Symbol {
     pub name: String,
@@ -30,11 +21,10 @@ pub struct Symbol {
     pub doc: Option<String>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct SymbolRef {
     pub name: String,
-    pub kind: RefKind,
+    pub kind: SymbolKind,
     pub range: TextRange,
     pub selection_range: TextRange,
 }
@@ -161,7 +151,7 @@ fn collect_variable_ref(node: &SyntaxNode, symbols: &mut FileSymbols) {
     };
     symbols.references.push(SymbolRef {
         name,
-        kind: RefKind::Variable,
+        kind: SymbolKind::Variable,
         range: node.text_range(),
         selection_range: sel_range,
     });
@@ -173,7 +163,7 @@ fn collect_function_call(node: &SyntaxNode, symbols: &mut FileSymbols) {
     };
     symbols.references.push(SymbolRef {
         name: ident.text().to_string(),
-        kind: RefKind::Function,
+        kind: SymbolKind::Function,
         range: node.text_range(),
         selection_range: ident.text_range(),
     });
@@ -185,7 +175,7 @@ fn collect_include_ref(node: &SyntaxNode, symbols: &mut FileSymbols) {
     };
     symbols.references.push(SymbolRef {
         name: ident.text().to_string(),
-        kind: RefKind::Mixin,
+        kind: SymbolKind::Mixin,
         range: node.text_range(),
         selection_range: ident.text_range(),
     });
@@ -215,7 +205,7 @@ fn collect_extend_ref(node: &SyntaxNode, symbols: &mut FileSymbols) {
     let sel_range = TextRange::new(start, end);
     symbols.references.push(SymbolRef {
         name,
-        kind: RefKind::Placeholder,
+        kind: SymbolKind::Placeholder,
         range: node.text_range(),
         selection_range: sel_range,
     });
@@ -225,13 +215,13 @@ fn collect_extend_ref(node: &SyntaxNode, symbols: &mut FileSymbols) {
 
 fn first_ident_token(node: &SyntaxNode) -> Option<SyntaxToken> {
     node.children_with_tokens()
-        .filter_map(rowan::NodeOrToken::into_token)
+        .filter_map(NodeOrToken::into_token)
         .find(|t| t.kind() == SyntaxKind::IDENT)
 }
 
 fn nth_ident_token(node: &SyntaxNode, n: usize) -> Option<SyntaxToken> {
     node.children_with_tokens()
-        .filter_map(rowan::NodeOrToken::into_token)
+        .filter_map(NodeOrToken::into_token)
         .filter(|t| t.kind() == SyntaxKind::IDENT)
         .nth(n)
 }
@@ -300,7 +290,7 @@ fn extract_doc_comment(node: &SyntaxNode) -> Option<String> {
 
     for element in target.children_with_tokens() {
         match element {
-            rowan::NodeOrToken::Token(token) => match token.kind() {
+            NodeOrToken::Token(token) => match token.kind() {
                 SyntaxKind::SINGLE_LINE_COMMENT => {
                     if had_blank_line {
                         // Blank line between comment and declaration means it's not a doc comment
@@ -320,7 +310,7 @@ fn extract_doc_comment(node: &SyntaxNode) -> Option<String> {
                 }
                 _ => break, // Hit actual content (DOLLAR, IDENT, AT_KEYWORD, etc.)
             },
-            rowan::NodeOrToken::Node(_) => break,
+            NodeOrToken::Node(_) => break,
         }
     }
 
@@ -358,7 +348,7 @@ mod tests {
         assert_eq!(s.definitions[0].name, "color");
         assert_eq!(s.references.len(), 1);
         assert_eq!(s.references[0].name, "color");
-        assert_eq!(s.references[0].kind, RefKind::Variable);
+        assert_eq!(s.references[0].kind, SymbolKind::Variable);
     }
 
     #[test]
@@ -386,7 +376,7 @@ mod tests {
         let s = parse_symbols(".btn { @include size(10px, 20px); }");
         assert_eq!(s.references.len(), 1);
         assert_eq!(s.references[0].name, "size");
-        assert_eq!(s.references[0].kind, RefKind::Mixin);
+        assert_eq!(s.references[0].kind, SymbolKind::Mixin);
     }
 
     #[test]
@@ -398,7 +388,7 @@ mod tests {
 
         assert_eq!(s.references.len(), 1);
         assert_eq!(s.references[0].name, "base");
-        assert_eq!(s.references[0].kind, RefKind::Placeholder);
+        assert_eq!(s.references[0].kind, SymbolKind::Placeholder);
     }
 
     #[test]
@@ -407,7 +397,7 @@ mod tests {
         let func_refs: Vec<_> = s
             .references
             .iter()
-            .filter(|r| r.kind == RefKind::Function)
+            .filter(|r| r.kind == SymbolKind::Function)
             .collect();
         assert_eq!(func_refs.len(), 1);
         assert_eq!(func_refs[0].name, "darken");
@@ -440,22 +430,22 @@ $primary: blue;
         let var_refs: Vec<_> = s
             .references
             .iter()
-            .filter(|r| r.kind == RefKind::Variable)
+            .filter(|r| r.kind == SymbolKind::Variable)
             .collect();
         let mixin_refs: Vec<_> = s
             .references
             .iter()
-            .filter(|r| r.kind == RefKind::Mixin)
+            .filter(|r| r.kind == SymbolKind::Mixin)
             .collect();
         let func_refs: Vec<_> = s
             .references
             .iter()
-            .filter(|r| r.kind == RefKind::Function)
+            .filter(|r| r.kind == SymbolKind::Function)
             .collect();
         let placeholder_refs: Vec<_> = s
             .references
             .iter()
-            .filter(|r| r.kind == RefKind::Placeholder)
+            .filter(|r| r.kind == SymbolKind::Placeholder)
             .collect();
 
         assert!(var_refs.len() >= 2, "at least $primary + $size refs");

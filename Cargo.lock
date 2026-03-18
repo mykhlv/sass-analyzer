@@ -749,7 +749,7 @@ dependencies = [
 
 [[package]]
 name = "sass-cli"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "clap",
  "miette",
@@ -758,10 +758,9 @@ dependencies = [
 
 [[package]]
 name = "sass-lsp"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "dashmap 6.1.0",
- "rowan",
  "sass-parser",
  "serde",
  "serde_json",
@@ -773,7 +772,7 @@ dependencies = [
 
 [[package]]
 name = "sass-parser"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "countme",
  "dhat",
@@ -1252,7 +1251,7 @@ checksum = "d6bbff5f0aada427a1e5a6da5f1f98158182f26556f345ac9e04d36d0ebed650"
 
 [[package]]
 name = "xtask"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "proc-macro2",
  "quote",

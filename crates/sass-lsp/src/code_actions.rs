@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use dashmap::DashMap;
 use sass_parser::imports::{ImportKind, collect_imports};
-use sass_parser::syntax::SyntaxNode;
+use sass_parser::syntax::{NodeOrToken, SyntaxNode};
 use sass_parser::syntax_kind::SyntaxKind;
 use sass_parser::text_range::{TextRange, TextSize};
 use tower_lsp_server::ls_types::{
@@ -478,8 +478,8 @@ fn is_expression_node(kind: SyntaxKind) -> bool {
 fn find_expression_at_range(root: &SyntaxNode, range: TextRange) -> Option<SyntaxNode> {
     let elem = root.covering_element(range);
     let start_node = match elem {
-        rowan::NodeOrToken::Node(n) => n,
-        rowan::NodeOrToken::Token(t) => t.parent()?,
+        NodeOrToken::Node(n) => n,
+        NodeOrToken::Token(t) => t.parent()?,
     };
 
     for node in start_node.ancestors() {
@@ -545,7 +545,7 @@ fn indentation_at(text: &str, byte_offset: usize) -> &str {
 fn first_content_offset(node: &SyntaxNode) -> TextSize {
     node.descendants_with_tokens()
         .find_map(|e| match e {
-            rowan::NodeOrToken::Token(t) if !t.kind().is_trivia() => Some(t.text_range().start()),
+            NodeOrToken::Token(t) if !t.kind().is_trivia() => Some(t.text_range().start()),
             _ => None,
         })
         .unwrap_or(node.text_range().start())
@@ -655,8 +655,8 @@ fn find_declarations_at_range(
 ) -> Option<(SyntaxNode, Vec<SyntaxNode>)> {
     let elem = root.covering_element(range);
     let start_node = match elem {
-        rowan::NodeOrToken::Node(n) => n,
-        rowan::NodeOrToken::Token(t) => t.parent()?,
+        NodeOrToken::Node(n) => n,
+        NodeOrToken::Token(t) => t.parent()?,
     };
 
     // Find enclosing BLOCK

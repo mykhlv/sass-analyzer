@@ -20,7 +20,22 @@
     "sass",
     "css",
     "language-server",
-    "lsp"
+    "lsp",
+    "intellisense",
+    "autocomplete",
+    "go-to-definition",
+    "find-references",
+    "hover",
+    "rename",
+    "diagnostics",
+    "linter",
+    "monorepo",
+    "sass-language-server",
+    "scss-intellisense",
+    "code-completion",
+    "semantic-highlighting",
+    "workspace-symbols",
+    "signature-help"
   ],
   "galleryBanner": {
     "color": "#bf4080",

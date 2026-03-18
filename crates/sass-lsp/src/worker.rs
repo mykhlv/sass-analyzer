@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use dashmap::DashMap;
 use sass_parser::line_index::LineIndex;
-use sass_parser::syntax::SyntaxNode;
+use sass_parser::syntax::{GreenNode, SyntaxNode};
 use sass_parser::text_range::TextRange;
 use tokio::sync::mpsc;
 use tower_lsp_server::Client;
@@ -32,7 +32,7 @@ pub(crate) fn is_sass_file(uri: &Uri) -> bool {
 pub(crate) fn parse_document(
     text: &str,
     sass: bool,
-) -> Option<(rowan::GreenNode, Vec<(String, TextRange)>)> {
+) -> Option<(GreenNode, Vec<(String, TextRange)>)> {
     let parse_fn = if sass {
         sass_parser::parse_sass
     } else {
@@ -45,7 +45,7 @@ pub(crate) fn try_incremental_or_full(
     incremental: Option<IncrementalEdit>,
     text: &str,
     uri: &Uri,
-) -> Option<(rowan::GreenNode, Vec<(String, TextRange)>)> {
+) -> Option<(GreenNode, Vec<(String, TextRange)>)> {
     let sass = is_sass_file(uri);
     // Incremental reparse uses the SCSS lexer internally, so it's not
     // compatible with indented Sass files — always do a full reparse.
@@ -146,7 +146,20 @@ pub(crate) async fn run_worker(
                         // go-to-definition, which would destroy indexed dependencies.
                         client.publish_diagnostics(uri, vec![], None).await;
                     }
-                    Task::ExternalChange { uri, text } => {
+                    Task::ExternalChange { uri, path } => {
+                        let text = match std::fs::read_to_string(&path) {
+                            Ok(t) => t,
+                            Err(e) => {
+                                tracing::warn!(
+                                    "failed to read {}: {e}",
+                                    path.display(),
+                                );
+                                continue;
+                            }
+                        };
+                        if text.len() > runtime_config.max_file_size() {
+                            continue;
+                        }
                         let Some((green, _errors)) = parse_document(&text, is_sass_file(&uri)) else {
                             continue;
                         };
@@ -285,7 +298,7 @@ async fn refresh_dependents(
 
 struct ParsedFile {
     uri: Uri,
-    green: rowan::GreenNode,
+    green: GreenNode,
     errors: Vec<(String, TextRange)>,
     line_index: LineIndex,
     text: String,
@@ -439,12 +452,7 @@ async fn check_workspace(
 }
 
 fn path_to_uri(path: &Path) -> Uri {
-    let url_string = format!("file://{}", path.display());
-    url_string.parse().unwrap_or_else(|_| {
-        format!("file:///{}", path.display())
-            .parse()
-            .expect("valid URI")
-    })
+    workspace::path_to_uri(path)
 }
 
 fn collect_sass_files(root: &Path) -> Vec<PathBuf> {

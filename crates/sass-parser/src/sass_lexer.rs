@@ -136,6 +136,7 @@ fn measure_indent_after_last_newline(text: &str) -> u32 {
     let mut indent = 0u32;
     for b in after.bytes() {
         match b {
+            // Tabs count as 1 column, matching Dart Sass behavior.
             b' ' | b'\t' => indent += 1,
             _ => break,
         }

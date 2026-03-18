@@ -6,7 +6,7 @@ use miette::{Diagnostic, NamedSource, Report, SourceSpan};
 use sass_parser::syntax::{SyntaxNode, debug_tree};
 
 #[derive(Parser)]
-#[command(name = "sass-cli", about = "SCSS parser and linter")]
+#[command(name = "sass-cli", about = "SCSS parser and linter", version)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -24,9 +24,9 @@ enum Command {
         /// Path to a .scss/.sass file or directory.
         path: PathBuf,
     },
-    /// Lex a single SCSS file and dump its token stream.
+    /// Lex a single SCSS/Sass file and dump its token stream.
     Lex {
-        /// Path to the .scss file.
+        /// Path to the .scss or .sass file.
         file: PathBuf,
     },
 }
@@ -192,12 +192,13 @@ fn print_diagnostics(
     source: &str,
     errors: &[(String, sass_parser::text_range::TextRange)],
 ) {
+    let src = NamedSource::new(filename, source.to_owned());
     for (msg, range) in errors {
         let start: usize = range.start().into();
         let len: usize = range.len().into();
 
         let err = ParseError {
-            src: NamedSource::new(filename, source.to_owned()),
+            src: src.clone(),
             span: (start, len).into(),
             msg: msg.clone(),
         };

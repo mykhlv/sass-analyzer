@@ -75,7 +75,7 @@ The extension is a thin TypeScript client that spawns `sass-lsp` -- a Rust binar
 
 ### Prerequisites
 
-- Rust 1.85+ (`cargo`)
+- Rust 1.94+ (`cargo`)
 - Node.js 20+ (`npm`)
 
 ### Build from source

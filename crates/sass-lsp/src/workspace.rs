@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use dashmap::DashMap;
 use sass_parser::imports::{self, ImportKind, ImportRef};
 use sass_parser::resolver::{ModuleResolver, ResolvedModule};
-use sass_parser::syntax::SyntaxNode;
+use sass_parser::syntax::{GreenNode, NodeOrToken, SyntaxNode};
 use sass_parser::syntax_kind::SyntaxKind;
 use sass_parser::text_range::TextRange;
 use sass_parser::vfs::OsFileSystem;
@@ -50,7 +50,7 @@ pub struct ImportEdge {
 #[derive(Debug, Clone)]
 pub struct ModuleInfo {
     pub symbols: Arc<FileSymbols>,
-    pub green: Option<rowan::GreenNode>,
+    pub green: Option<GreenNode>,
     pub line_index: sass_parser::line_index::LineIndex,
     pub source_text: Option<String>,
     /// True if the file uses `@import` or `meta.load-css()`, which merge scopes
@@ -221,7 +221,7 @@ impl ModuleGraph {
     }
 
     /// Get the green tree for a URI, re-parsing from stored source if evicted.
-    fn get_or_reparse_green(&self, uri: &Uri) -> Option<rowan::GreenNode> {
+    fn get_or_reparse_green(&self, uri: &Uri) -> Option<GreenNode> {
         let info = self.files.get(uri)?;
         if let Some(green) = &info.green {
             return Some(green.clone());
@@ -256,7 +256,7 @@ impl ModuleGraph {
     pub fn index_file(
         &self,
         uri: &Uri,
-        green: rowan::GreenNode,
+        green: GreenNode,
         symbols: Arc<FileSymbols>,
         line_index: sass_parser::line_index::LineIndex,
         source_text: String,
@@ -696,7 +696,7 @@ impl ModuleGraph {
         self.files.get(uri).map(|info| info.symbols.clone())
     }
 
-    pub fn get_green(&self, uri: &Uri) -> Option<rowan::GreenNode> {
+    pub fn get_green(&self, uri: &Uri) -> Option<GreenNode> {
         self.get_or_reparse_green(uri)
     }
 
@@ -929,7 +929,7 @@ impl ModuleGraph {
         include_declaration: bool,
     ) -> Vec<(Uri, TextRange)> {
         let mut results = Vec::new();
-        let ref_kind = symbol_to_ref_kind(target_kind);
+        let ref_kind = target_kind;
 
         // Collect URIs + symbol-level matches first (releases DashMap shard locks).
         let file_uris: Vec<Uri> = self.files.iter().map(|e| e.key().clone()).collect();
@@ -1152,7 +1152,7 @@ pub(crate) fn extract_namespace(root: &SyntaxNode, import_ref: &ImportRef) -> Na
 
     let tokens: Vec<_> = node
         .children_with_tokens()
-        .filter_map(rowan::NodeOrToken::into_token)
+        .filter_map(NodeOrToken::into_token)
         .collect();
 
     for (i, token) in tokens.iter().enumerate() {
@@ -1208,7 +1208,7 @@ fn extract_forward_visibility(root: &SyntaxNode, import_ref: &ImportRef) -> Forw
 
     let tokens: Vec<_> = node
         .children_with_tokens()
-        .filter_map(rowan::NodeOrToken::into_token)
+        .filter_map(NodeOrToken::into_token)
         .collect();
 
     let mut vis = ForwardVisibility::default();
@@ -1303,7 +1303,7 @@ fn find_name_in_forward_clauses(
 
         let tokens: Vec<_> = node
             .children_with_tokens()
-            .filter_map(rowan::NodeOrToken::into_token)
+            .filter_map(NodeOrToken::into_token)
             .collect();
 
         let mut i = 0;
@@ -1381,7 +1381,7 @@ pub(crate) fn uri_to_path(uri: &Uri) -> Option<PathBuf> {
     uri.to_file_path().map(std::borrow::Cow::into_owned)
 }
 
-fn path_to_uri(path: &Path) -> Uri {
+pub(crate) fn path_to_uri(path: &Path) -> Uri {
     Uri::from_file_path(path).unwrap_or_else(|| {
         // Percent-encode the path for URI safety (spaces, #, %, etc.)
         let path_str = path.to_string_lossy();
@@ -1409,84 +1409,12 @@ fn path_to_uri(path: &Path) -> Uri {
 
 // ── Find-references helpers ─────────────────────────────────────────
 
-fn symbol_to_ref_kind(kind: symbols::SymbolKind) -> symbols::RefKind {
-    match kind {
-        symbols::SymbolKind::Variable => symbols::RefKind::Variable,
-        symbols::SymbolKind::Function => symbols::RefKind::Function,
-        symbols::SymbolKind::Mixin => symbols::RefKind::Mixin,
-        symbols::SymbolKind::Placeholder => symbols::RefKind::Placeholder,
-    }
-}
-
 /// Extract namespace, name, kind, and selection range from a `NAMESPACE_REF` node.
 fn extract_ns_ref_info(
     node: &SyntaxNode,
 ) -> Option<(String, String, symbols::SymbolKind, TextRange)> {
-    let tokens: Vec<_> = node
-        .children_with_tokens()
-        .filter_map(rowan::NodeOrToken::into_token)
-        .collect();
-
-    let namespace = tokens
-        .iter()
-        .find(|t| t.kind() == SyntaxKind::IDENT)?
-        .text()
-        .to_string();
-
-    // ns.$var: IDENT DOT DOLLAR IDENT
-    if let Some(dollar) = tokens.iter().find(|t| t.kind() == SyntaxKind::DOLLAR) {
-        let ident = tokens
-            .iter()
-            .skip_while(|t| t.kind() != SyntaxKind::DOLLAR)
-            .find(|t| t.kind() == SyntaxKind::IDENT)?;
-        let range = TextRange::new(dollar.text_range().start(), ident.text_range().end());
-        return Some((
-            namespace,
-            ident.text().to_string(),
-            symbols::SymbolKind::Variable,
-            range,
-        ));
-    }
-
-    // ns.func(): has FUNCTION_CALL child
-    if let Some(func_call) = node
-        .children()
-        .find(|c| c.kind() == SyntaxKind::FUNCTION_CALL)
-    {
-        let ident = func_call
-            .children_with_tokens()
-            .filter_map(rowan::NodeOrToken::into_token)
-            .find(|t| t.kind() == SyntaxKind::IDENT)?;
-        return Some((
-            namespace,
-            ident.text().to_string(),
-            symbols::SymbolKind::Function,
-            ident.text_range(),
-        ));
-    }
-
-    // ns.mixin (inside @include): IDENT DOT IDENT
-    let dot_pos = tokens.iter().position(|t| t.kind() == SyntaxKind::DOT)?;
-    let ident = tokens[dot_pos + 1..]
-        .iter()
-        .find(|t| t.kind() == SyntaxKind::IDENT)?;
-
-    let is_mixin = node
-        .parent()
-        .is_some_and(|p| p.kind() == SyntaxKind::INCLUDE_RULE);
-
-    let kind = if is_mixin {
-        symbols::SymbolKind::Mixin
-    } else {
-        symbols::SymbolKind::Function
-    };
-
-    Some((
-        namespace,
-        ident.text().to_string(),
-        kind,
-        ident.text_range(),
-    ))
+    let info = crate::navigation::extract_namespace_ref_info(node)?;
+    Some((info.namespace?, info.name, info.kind, info.range))
 }
 
 // ── Helpers for external callers ────────────────────────────────────

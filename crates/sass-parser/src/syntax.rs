@@ -22,6 +22,10 @@ pub type SyntaxNode = rowan::SyntaxNode<SassLanguage>;
 pub type SyntaxToken = rowan::SyntaxToken<SassLanguage>;
 /// Either a node or a token in the SCSS concrete syntax tree.
 pub type SyntaxElement = rowan::SyntaxElement<SassLanguage>;
+/// An immutable green (data) tree node.
+pub type GreenNode = rowan::GreenNode;
+/// Either a node or token reference in the CST.
+pub type NodeOrToken<N, T> = rowan::NodeOrToken<N, T>;
 
 /// Format a CST rooted at `node` as an indented debug string.
 ///
@@ -39,8 +43,8 @@ fn debug_tree_rec(node: &SyntaxNode, buf: &mut String, indent: usize) {
     let _ = writeln!(buf, "{:indent$}{kind:?}@{range:?}", "");
     for child in node.children_with_tokens() {
         match child {
-            rowan::NodeOrToken::Node(n) => debug_tree_rec(&n, buf, indent + 2),
-            rowan::NodeOrToken::Token(t) => {
+            NodeOrToken::Node(n) => debug_tree_rec(&n, buf, indent + 2),
+            NodeOrToken::Token(t) => {
                 let kind = t.kind();
                 let range = t.text_range();
                 let text = t.text();

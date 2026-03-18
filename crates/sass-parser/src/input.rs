@@ -45,11 +45,12 @@ impl Input {
     /// Lexes directly into the `Input` fields, avoiding the intermediate
     /// `Vec<(SyntaxKind, &str)>` allocation that `tokenize()` + `from_tokens()` would create.
     pub fn from_source(source: &str) -> Self {
+        let estimated_tokens = source.len() / 5;
         let mut lexer = lexer::Lexer::new(source);
-        let mut kinds = Vec::new();
-        let mut ranges = Vec::new();
-        let mut all_trivia = Vec::new();
-        let mut trivia_starts = Vec::new();
+        let mut kinds = Vec::with_capacity(estimated_tokens);
+        let mut ranges = Vec::with_capacity(estimated_tokens);
+        let mut all_trivia = Vec::with_capacity(estimated_tokens / 2);
+        let mut trivia_starts = Vec::with_capacity(estimated_tokens + 1);
         let mut offset = 0u32;
         let mut pending_trivia_start = 0u32;
 

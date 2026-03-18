@@ -1,6 +1,6 @@
 use dashmap::DashMap;
 use sass_parser::line_index::LineIndex;
-use sass_parser::syntax::SyntaxNode;
+use sass_parser::syntax::{NodeOrToken, SyntaxNode};
 use sass_parser::syntax_kind::SyntaxKind;
 use sass_parser::text_range::TextSize;
 use tower_lsp_server::ls_types::{
@@ -97,7 +97,7 @@ fn extract_call_name(func_call: &SyntaxNode) -> (Option<String>, String) {
     {
         let ns_name = ns_ref
             .children_with_tokens()
-            .filter_map(rowan::NodeOrToken::into_token)
+            .filter_map(NodeOrToken::into_token)
             .find(|t| t.kind() == SyntaxKind::IDENT)
             .map(|t| t.text().to_string());
         let func_name = ident_text_range_of(func_call)
@@ -119,7 +119,7 @@ fn extract_include_name(include_rule: &SyntaxNode) -> (Option<String>, Option<St
     {
         let tokens: Vec<_> = ns_ref
             .children_with_tokens()
-            .filter_map(rowan::NodeOrToken::into_token)
+            .filter_map(NodeOrToken::into_token)
             .collect();
         let ns_name = tokens
             .iter()
@@ -209,7 +209,7 @@ fn is_keyword_arg(arg: &SyntaxNode) -> bool {
     let mut tokens = arg
         .children_with_tokens()
         .filter(|ct| !ct.kind().is_trivia())
-        .filter_map(rowan::NodeOrToken::into_token);
+        .filter_map(NodeOrToken::into_token);
 
     let Some(first) = tokens.next() else {
         return false;

@@ -25,7 +25,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use dashmap::DashMap;
-use sass_parser::syntax::SyntaxNode;
+use sass_parser::syntax::{GreenNode, SyntaxNode};
 use sass_parser::text_range::{TextRange, TextSize};
 use tokio::sync::mpsc;
 use tower_lsp_server::jsonrpc::Result;
@@ -64,7 +64,7 @@ pub(crate) enum Task {
     },
     ExternalChange {
         uri: Uri,
-        text: String,
+        path: PathBuf,
     },
     ExternalDelete {
         uri: Uri,
@@ -75,7 +75,7 @@ pub(crate) enum Task {
 }
 
 pub(crate) struct IncrementalEdit {
-    pub(crate) old_green: rowan::GreenNode,
+    pub(crate) old_green: GreenNode,
     pub(crate) old_errors: Vec<(String, TextRange)>,
     pub(crate) edit: sass_parser::reparse::TextEdit,
 }
@@ -112,7 +112,7 @@ struct Backend {
 pub(crate) struct DocumentState {
     pub(crate) version: i32,
     pub(crate) text: String,
-    pub(crate) green: rowan::GreenNode,
+    pub(crate) green: GreenNode,
     pub(crate) errors: Vec<(String, TextRange)>,
     pub(crate) line_index: sass_parser::line_index::LineIndex,
     pub(crate) symbols: Arc<symbols::FileSymbols>,
@@ -128,7 +128,7 @@ use worker::run_worker;
 /// an `IncrementalEdit` suitable for `incremental_reparse`.
 #[allow(clippy::cast_possible_truncation, dead_code)]
 pub(crate) fn compute_diff_edit(
-    old_green: &rowan::GreenNode,
+    old_green: &GreenNode,
     old_errors: &[(String, TextRange)],
     old_text: &str,
     new_text: &str,
@@ -200,9 +200,19 @@ impl LanguageServer for Backend {
         self.module_graph
             .set_prepend_imports(lsp_config.prepend_imports);
 
-        // Build allowed roots for path traversal protection
+        // Build allowed roots for path traversal protection.
+        // Include all workspace folders so multi-root workspaces can resolve
+        // cross-folder imports.
         if let Some(root) = &workspace_root {
             let mut roots = vec![root.clone()];
+            // Add additional workspace folders beyond the primary one.
+            if let Some(folders) = &params.workspace_folders {
+                for folder in folders.iter().skip(1) {
+                    if let Some(path) = folder.uri.to_file_path() {
+                        roots.push(path.into_owned());
+                    }
+                }
+            }
             for lp in &lsp_config.load_paths {
                 roots.push(root.join(lp));
             }
@@ -493,21 +503,16 @@ impl LanguageServer for Backend {
                     tracing::error!("worker channel closed, external delete task dropped");
                 }
             } else {
-                // Created or Changed — read from disk.
-                let Some(path) = event.uri.to_file_path() else {
-                    continue;
+                // Created or Changed — send path to worker for async I/O.
+                let path = match event.uri.to_file_path() {
+                    Some(p) => p.into_owned(),
+                    None => continue,
                 };
-                let Ok(text) = std::fs::read_to_string(&path) else {
-                    continue;
-                };
-                if text.len() > self.runtime_config.max_file_size() {
-                    continue;
-                }
                 if self
                     .task_tx
                     .send(Task::ExternalChange {
                         uri: event.uri,
-                        text,
+                        path,
                     })
                     .is_err()
                 {

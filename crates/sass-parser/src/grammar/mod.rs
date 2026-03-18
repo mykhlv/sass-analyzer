@@ -351,7 +351,7 @@ pub(crate) fn block(p: &mut Parser<'_>) {
         skip_until_block_end(p);
         return;
     };
-    assert!(g.at(LBRACE));
+    debug_assert!(g.at(LBRACE));
     let m = g.start();
     g.bump(); // {
     while !g.at(RBRACE) && !g.at_end() {

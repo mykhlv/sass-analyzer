@@ -1,4 +1,4 @@
-use sass_parser::syntax::{SyntaxNode, SyntaxToken};
+use sass_parser::syntax::{NodeOrToken, SyntaxNode, SyntaxToken};
 use sass_parser::syntax_kind::SyntaxKind;
 use sass_parser::text_range::TextRange;
 
@@ -13,7 +13,7 @@ pub(crate) fn namespace_of_ref(root: &SyntaxNode, ref_range: TextRange) -> Optio
         if node.kind() == SyntaxKind::NAMESPACE_REF {
             let ns_ident = node
                 .children_with_tokens()
-                .filter_map(rowan::NodeOrToken::into_token)
+                .filter_map(NodeOrToken::into_token)
                 .find(|t| t.kind() == SyntaxKind::IDENT)?;
             return Some(ns_ident.text().to_string());
         }
@@ -34,14 +34,14 @@ pub(crate) fn namespace_of_ref(root: &SyntaxNode, ref_range: TextRange) -> Optio
 /// Find the first IDENT token among direct children.
 pub(crate) fn first_ident_token(node: &SyntaxNode) -> Option<SyntaxToken> {
     node.children_with_tokens()
-        .filter_map(rowan::NodeOrToken::into_token)
+        .filter_map(NodeOrToken::into_token)
         .find(|t| t.kind() == SyntaxKind::IDENT)
 }
 
 /// Find the Nth IDENT token (0-indexed) among direct children.
 pub(crate) fn nth_ident_token(node: &SyntaxNode, n: usize) -> Option<SyntaxToken> {
     node.children_with_tokens()
-        .filter_map(rowan::NodeOrToken::into_token)
+        .filter_map(NodeOrToken::into_token)
         .filter(|t| t.kind() == SyntaxKind::IDENT)
         .nth(n)
 }
@@ -92,7 +92,7 @@ pub(crate) fn dollar_ident_name_range(node: &SyntaxNode) -> Option<(String, Text
 /// Extract first IDENT → (text, range).
 pub(crate) fn ident_text_range_of(node: &SyntaxNode) -> Option<(String, TextRange)> {
     node.children_with_tokens()
-        .filter_map(rowan::NodeOrToken::into_token)
+        .filter_map(NodeOrToken::into_token)
         .find(|t| t.kind() == SyntaxKind::IDENT)
         .map(|t| (t.text().to_string(), t.text_range()))
 }
@@ -100,7 +100,7 @@ pub(crate) fn ident_text_range_of(node: &SyntaxNode) -> Option<(String, TextRang
 /// Extract nth IDENT → (text, range).
 pub(crate) fn nth_ident_text_range_of(node: &SyntaxNode, n: usize) -> Option<(String, TextRange)> {
     node.children_with_tokens()
-        .filter_map(rowan::NodeOrToken::into_token)
+        .filter_map(NodeOrToken::into_token)
         .filter(|t| t.kind() == SyntaxKind::IDENT)
         .nth(n)
         .map(|t| (t.text().to_string(), t.text_range()))
