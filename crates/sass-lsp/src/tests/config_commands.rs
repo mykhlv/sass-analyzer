@@ -430,6 +430,95 @@ async fn watched_files_skips_open_files() {
     assert_eq!(result[0]["name"], "open");
 }
 
+// ── max_file_size tests ──────────────────────────────────────────
+
+#[tokio::test]
+async fn did_open_exceeding_max_file_size() {
+    let (mut reader, mut writer) = spawn_server();
+    // Set maxFileSize to 10 bytes — anything larger is skipped.
+    let _resp = do_initialize_with(
+        &mut reader,
+        &mut writer,
+        serde_json::json!({ "maxFileSize": 10 }),
+    )
+    .await;
+
+    // Open a file that exceeds the limit (> 10 bytes).
+    let large_text = "$variable: red;\n.a { color: blue; }";
+    assert!(large_text.len() > 10);
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": "file:///big.scss",
+                    "languageId": "scss",
+                    "version": 1,
+                    "text": large_text
+                }
+            }
+        }),
+    )
+    .await;
+
+    // The oversized file should be silently skipped (no diagnostics published).
+    // Open a small valid file to prove the server is still alive.
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": "file:///small.scss",
+                    "languageId": "scss",
+                    "version": 1,
+                    "text": "$a: 1;\n"
+                }
+            }
+        }),
+    )
+    .await;
+
+    let diag = recv_msg(&mut reader, &mut writer).await;
+    assert_eq!(diag["method"], "textDocument/publishDiagnostics");
+    // The diagnostics must be for the small file, not the big one.
+    assert!(
+        diag["params"]["uri"].as_str().unwrap().contains("small"),
+        "expected diagnostics for small.scss, got: {}",
+        diag["params"]["uri"]
+    );
+    let diagnostics = diag["params"]["diagnostics"].as_array().unwrap();
+    assert!(
+        diagnostics.is_empty(),
+        "valid small file should have 0 errors"
+    );
+
+    // Verify hover on the oversized file returns null (not indexed).
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 10,
+            "method": "textDocument/hover",
+            "params": {
+                "textDocument": { "uri": "file:///big.scss" },
+                "position": { "line": 0, "character": 1 }
+            }
+        }),
+    )
+    .await;
+
+    let resp = recv_response(&mut reader, &mut writer, 10).await;
+    assert!(
+        resp["result"].is_null(),
+        "hover on oversized file should return null, got: {:?}",
+        resp["result"]
+    );
+}
+
 // ── Configuration & command tests ────────────────────────────────
 
 #[tokio::test]
