@@ -47,7 +47,7 @@ pub fn include_rule(p: &mut Parser<'_>) {
     }
 
     // Optional `using ($args)` for content block arguments
-    if p.at(IDENT) && p.current_text() == "using" {
+    if p.at(IDENT) && p.current_text().eq_ignore_ascii_case("using") {
         p.bump(); // using
         if p.at(LPAREN) {
             super::param_list(p);

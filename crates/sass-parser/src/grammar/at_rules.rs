@@ -17,6 +17,7 @@ use crate::token_set::TokenSet;
 // and `crate::grammar::expressions::*` → `super::expressions::*`.
 use super::ParseContext;
 use super::block;
+use super::declarations;
 use super::expressions;
 use super::expressions::interpolation;
 use super::selectors;

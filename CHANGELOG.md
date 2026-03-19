@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Fixed
+- Parser: sass-spec compliance improved from 99.78% to 99.88% (10,950/10,963 valid inputs). Fixed 11 edge cases:
+  - `calc(min(1 2 3...))` / `calc(max(1 2 3...))` — spread operator now detected as Sass signal
+  - Consecutive interpolations as map keys (`#{re}#{d}: value`)
+  - `@extend` with interpolation no longer emits false "descendant combinator" error
+  - `@include ... using` keyword is now case-insensitive (e.g. `UsInG`)
+  - IE star-hack properties (`*width: expression(...)`)
+  - Declarations inside `@keyframes` blocks (`blah: blee;`)
+  - Extra tokens between `@keyframes` name and opening brace
+  - `!important` with trailing content in declaration values (`foo bar !important hux`)
+  - Bare `/` as expression atom (`(1, / 2)`, `$path: /images`)
+
 ## 0.3.2 — 2026-03-17
 
 ### Fixed

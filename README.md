@@ -42,8 +42,8 @@ Benchmarks use [`mimalloc`](https://github.com/microsoft/mimalloc) (a compact, h
 
 Tested against the [sass-spec](https://github.com/sass/sass-spec) conformance suite:
 
-- **10,939 / 10,963** valid inputs parse without error (**99.78%**)
-- Remaining 24 mismatches are edge cases (plain CSS `@import` conditions, exotic color syntax)
+- **10,950 / 10,963** valid inputs parse without error (**99.88%**)
+- Remaining 13 mismatches are edge cases (space-separated map keys, CSS `@function` bodies, deep nesting limits)
 
 **Real-world corpus** — 0 panics, 0 round-trip failures on 668 files:
 

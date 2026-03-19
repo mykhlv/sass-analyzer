@@ -20,6 +20,12 @@ pub(super) fn atom(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMar
         LBRACKET => Some(bracketed_list(p, ctx)),
         PERCENT => Some(standalone_percent(p)),
         BANG => Some(bang_dispatch(p)),
+        SLASH => {
+            // Bare `/` as value atom (e.g., `(1, / 2)` or `$path: /images;`)
+            let m = p.start();
+            p.bump();
+            Some(m.complete(p, VALUE))
+        }
         AMP => {
             // Parent selector in expression context: `if(&, "&", "")`
             let m = p.start();
@@ -296,7 +302,10 @@ fn bracketed_list(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
 fn interpolation_atom(p: &mut Parser<'_>) -> CompletedMarker {
     let cm = interpolation(p);
     // Consume adjacent fragments without whitespace: `-font`, `-#{...}`, `3`, etc.
-    if !p.at_end() && !p.has_whitespace_before() && (p.at(MINUS) || p.at(IDENT) || p.at(NUMBER)) {
+    if !p.at_end()
+        && !p.has_whitespace_before()
+        && (p.at(MINUS) || p.at(IDENT) || p.at(NUMBER) || p.at(HASH_LBRACE))
+    {
         let m = cm.precede(p);
         while !p.at_end() && !p.has_whitespace_before() {
             if p.at(MINUS) || p.at(IDENT) || p.at(NUMBER) {

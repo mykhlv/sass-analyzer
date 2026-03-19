@@ -9,7 +9,7 @@ use super::selectors;
 /// 2.7: Parse declaration or nested property.
 ///
 /// Dispatches to custom property, nested property, or regular declaration.
-pub fn declaration(p: &mut Parser<'_>) {
+pub(crate) fn declaration(p: &mut Parser<'_>) {
     // 2.9: Detect custom properties (--var)
     if p.at(IDENT) && p.current_text().starts_with("--") {
         custom_property_declaration(p);
@@ -79,7 +79,7 @@ fn custom_property_declaration(p: &mut Parser<'_>) {
 /// `#{$a}-#{$b}`, `#{$ns}-#{$prop}-color`.
 fn property(p: &mut Parser<'_>) {
     let m = p.start();
-    if !p.at(IDENT) && !p.at(HASH_LBRACE) && !p.at(MINUS) {
+    if !p.at(IDENT) && !p.at(HASH_LBRACE) && !p.at(MINUS) && !p.at(STAR) {
         p.error("expected property name");
         let _ = m.complete(p, PROPERTY);
         return;
@@ -87,7 +87,7 @@ fn property(p: &mut Parser<'_>) {
     // Consume interleaved IDENT/MINUS/HASH_LBRACE fragments (no whitespace between)
     loop {
         match p.current() {
-            IDENT | MINUS => p.bump(),
+            IDENT | MINUS | STAR => p.bump(),
             HASH_LBRACE => {
                 let _ = expressions::interpolation(p);
             }
@@ -111,8 +111,21 @@ fn value(p: &mut Parser<'_>) {
 
     let mut has_content = false;
     loop {
-        if p.at(SEMICOLON) || p.at(RBRACE) || p.at(LBRACE) || p.at_end() || p.at(BANG) {
+        if p.at(SEMICOLON) || p.at(RBRACE) || p.at(LBRACE) || p.at_end() {
             break;
+        }
+        // Break for `!important` only when it's at the END of the value
+        if p.at(BANG) {
+            if p.nth(1) == IDENT && p.nth_text(1) == "important" {
+                let after = p.nth(2);
+                if after == SEMICOLON || after == RBRACE || after == LBRACE || after == EOF {
+                    break;
+                }
+            }
+            // Not end-of-value !important — consume as value content
+            p.bump();
+            has_content = true;
+            continue;
         }
         // In CssValue context, `/` is a separator — just consume it
         if p.at(SLASH) {

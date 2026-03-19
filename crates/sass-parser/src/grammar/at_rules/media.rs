@@ -73,6 +73,14 @@ pub fn keyframes_rule(p: &mut Parser<'_>) {
     }
     // Empty name (anonymous keyframes) — no error, proceed to block
 
+    // Tolerate extra tokens between name and block (e.g., `@keyframes name line 429 { }`)
+    if !p.at(LBRACE) && !p.at(SEMICOLON) && !p.at(RBRACE) && !p.at_end() {
+        p.error("expected `{`");
+        while !p.at(LBRACE) && !p.at(SEMICOLON) && !p.at(RBRACE) && !p.at_end() {
+            p.bump();
+        }
+    }
+
     if !p.at(LBRACE) {
         p.error("expected `{`");
         let _ = m.complete(p, KEYFRAMES_RULE);
@@ -87,6 +95,9 @@ pub fn keyframes_rule(p: &mut Parser<'_>) {
         } else if p.at(DOLLAR) {
             // Variable declaration inside keyframes: `$b: 10%;`
             super::expressions::variable_declaration(p);
+        } else if p.at(IDENT) && p.nth(1) == COLON {
+            // Declaration inside keyframes: `blah: blee;`
+            super::declarations::declaration(p);
         } else if p.at(IDENT) || p.at(NUMBER) || p.at(HASH_LBRACE) {
             keyframe_block(p);
         } else if p.at(AT) {

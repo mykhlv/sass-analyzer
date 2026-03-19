@@ -145,6 +145,10 @@ fn looks_like_declaration(p: &Parser<'_>) -> bool {
             scan_for_declaration_end(p, offset + 1)
         });
     }
+    // IE star-hack: `*width: 100px`
+    if p.at(STAR) && p.nth(1) == IDENT && p.nth(2) == COLON {
+        return scan_for_declaration_end(p, 3);
+    }
     if !p.at(IDENT) {
         return false;
     }
