@@ -376,6 +376,68 @@ pub(crate) fn block(p: &mut Parser<'_>) {
     let _ = m.complete(&mut g, BLOCK);
 }
 
+/// Parse a `{ ... }` block for unknown/interpolated at-rules.
+///
+/// More permissive than `block()`: also accepts `NUMBER [%] { ... }` constructs
+/// (keyframe selectors) since the at-rule name may resolve to `@keyframes` at runtime.
+pub(crate) fn generic_at_rule_block(p: &mut Parser<'_>) {
+    let Ok(mut g) = p.depth_guard() else {
+        skip_until_block_end(p);
+        return;
+    };
+    debug_assert!(g.at(LBRACE));
+    let m = g.start();
+    g.bump(); // {
+    while !g.at(RBRACE) && !g.at_end() {
+        if g.at(SEMICOLON) {
+            g.bump();
+        } else if g.at(AT)
+            || g.at(DOLLAR)
+            || g.at(MINUS)
+            || g.at_ts(selectors::SELECTOR_START)
+            || g.at_ts(selectors::COMBINATOR_TOKEN)
+        {
+            block_item(&mut g);
+        } else if g.at(NUMBER) {
+            // Keyframe selector: `10% { ... }`, `from { ... }`
+            generic_keyframe_block(&mut g);
+        } else {
+            g.err_and_bump("expected declaration or nested rule");
+        }
+    }
+    g.expect(RBRACE);
+    let _ = m.complete(&mut g, BLOCK);
+}
+
+/// Parse a keyframe-like block inside a generic at-rule: `10% { ... }`, `50%, 75% { ... }`.
+fn generic_keyframe_block(p: &mut Parser<'_>) {
+    let m = p.start();
+    // Consume keyframe selectors: NUMBER [%] [, NUMBER [%]]*
+    loop {
+        if p.at(NUMBER) {
+            p.bump();
+            if p.at(PERCENT) && !p.has_whitespace_before() {
+                p.bump();
+            }
+        } else if p.at(IDENT) {
+            p.bump();
+        } else if p.at(HASH_LBRACE) {
+            let _ = expressions::interpolation(p);
+        } else {
+            break;
+        }
+        if !p.eat(COMMA) {
+            break;
+        }
+    }
+    if p.at(LBRACE) {
+        block(p);
+    } else {
+        p.error("expected `{`");
+    }
+    let _ = m.complete(p, KEYFRAME_SELECTOR);
+}
+
 /// Parse a `{ ... }` block for CSS `@function --name()` bodies.
 ///
 /// Declarations inside CSS function bodies use raw CSS values (like custom properties),

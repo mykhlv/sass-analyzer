@@ -121,7 +121,7 @@ fn generic_at_rule(p: &mut Parser<'_>) {
         }
     }
     if p.at(LBRACE) {
-        super::block(p);
+        super::generic_at_rule_block(p);
     } else if !p.at(RBRACE) && !p.at_end() {
         p.expect(SEMICOLON);
     }

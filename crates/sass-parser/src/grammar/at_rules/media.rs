@@ -74,11 +74,8 @@ pub fn keyframes_rule(p: &mut Parser<'_>) {
     // Empty name (anonymous keyframes) — no error, proceed to block
 
     // Tolerate extra tokens between name and block (e.g., `@keyframes name line 429 { }`)
-    if !p.at(LBRACE) && !p.at(SEMICOLON) && !p.at(RBRACE) && !p.at_end() {
-        p.error("expected `{`");
-        while !p.at(LBRACE) && !p.at(SEMICOLON) && !p.at(RBRACE) && !p.at_end() {
-            p.bump();
-        }
+    while !p.at(LBRACE) && !p.at(SEMICOLON) && !p.at(RBRACE) && !p.at_end() {
+        p.bump();
     }
 
     if !p.at(LBRACE) {

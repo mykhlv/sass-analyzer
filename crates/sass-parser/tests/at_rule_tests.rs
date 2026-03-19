@@ -2619,6 +2619,117 @@ fn generic_at_rule_interpolated_name() {
 }
 
 #[test]
+fn generic_at_rule_interpolated_keyframes_block() {
+    check(
+        "@#{\"keyframes\"} name { 10% { x: y } }",
+        expect![[r##"
+            SOURCE_FILE@0..37
+              GENERIC_AT_RULE@0..37
+                AT@0..1 "@"
+                INTERPOLATION@1..15
+                  HASH_LBRACE@1..3 "#{"
+                  STRING_LITERAL@3..14
+                    QUOTED_STRING@3..14 "\"keyframes\""
+                  RBRACE@14..15 "}"
+                WHITESPACE@15..16 " "
+                IDENT@16..20 "name"
+                BLOCK@20..37
+                  WHITESPACE@20..21 " "
+                  LBRACE@21..22 "{"
+                  KEYFRAME_SELECTOR@22..35
+                    WHITESPACE@22..23 " "
+                    NUMBER@23..25 "10"
+                    PERCENT@25..26 "%"
+                    BLOCK@26..35
+                      WHITESPACE@26..27 " "
+                      LBRACE@27..28 "{"
+                      DECLARATION@28..33
+                        PROPERTY@28..30
+                          WHITESPACE@28..29 " "
+                          IDENT@29..30 "x"
+                        COLON@30..31 ":"
+                        VALUE@31..33
+                          VALUE@31..33
+                            WHITESPACE@31..32 " "
+                            IDENT@32..33 "y"
+                      WHITESPACE@33..34 " "
+                      RBRACE@34..35 "}"
+                  WHITESPACE@35..36 " "
+                  RBRACE@36..37 "}"
+        "##]],
+    );
+}
+
+#[test]
+fn generic_at_rule_interpolated_name_semicolon() {
+    check(
+        "@#{\"error\"} not really an error;",
+        expect![[r##"
+            SOURCE_FILE@0..32
+              GENERIC_AT_RULE@0..32
+                AT@0..1 "@"
+                INTERPOLATION@1..11
+                  HASH_LBRACE@1..3 "#{"
+                  STRING_LITERAL@3..10
+                    QUOTED_STRING@3..10 "\"error\""
+                  RBRACE@10..11 "}"
+                WHITESPACE@11..12 " "
+                IDENT@12..15 "not"
+                WHITESPACE@15..16 " "
+                IDENT@16..22 "really"
+                WHITESPACE@22..23 " "
+                IDENT@23..25 "an"
+                WHITESPACE@25..26 " "
+                IDENT@26..31 "error"
+                SEMICOLON@31..32 ";"
+        "##]],
+    );
+}
+
+#[test]
+fn keyframes_vendor_prefix_extra_tokens() {
+    check(
+        "@-moz-keyframes anim /* Firefox */ line 429 { from { width: 0% } }",
+        expect![[r#"
+            SOURCE_FILE@0..66
+              KEYFRAMES_RULE@0..66
+                AT@0..1 "@"
+                IDENT@1..15 "-moz-keyframes"
+                WHITESPACE@15..16 " "
+                IDENT@16..20 "anim"
+                WHITESPACE@20..21 " "
+                MULTI_LINE_COMMENT@21..34 "/* Firefox */"
+                WHITESPACE@34..35 " "
+                IDENT@35..39 "line"
+                WHITESPACE@39..40 " "
+                NUMBER@40..43 "429"
+                WHITESPACE@43..44 " "
+                LBRACE@44..45 "{"
+                KEYFRAME_SELECTOR@45..64
+                  WHITESPACE@45..46 " "
+                  IDENT@46..50 "from"
+                  BLOCK@50..64
+                    WHITESPACE@50..51 " "
+                    LBRACE@51..52 "{"
+                    DECLARATION@52..62
+                      PROPERTY@52..58
+                        WHITESPACE@52..53 " "
+                        IDENT@53..58 "width"
+                      COLON@58..59 ":"
+                      VALUE@59..62
+                        DIMENSION@59..62
+                          WHITESPACE@59..60 " "
+                          NUMBER@60..61 "0"
+                          PERCENT@61..62 "%"
+                    WHITESPACE@62..63 " "
+                    RBRACE@63..64 "}"
+                WHITESPACE@64..65 " "
+                RBRACE@65..66 "}"
+        "#]],
+    );
+}
+
+#[test]
 fn generic_at_rule_interpolated_value() {
     check(
         "@foo bar#{$baz} qux { a: b }",

@@ -4,7 +4,7 @@ use crate::syntax_kind::SyntaxKind;
 enum LexContext {
     Interpolation { brace_depth: u32 },
     String { quote: u8 },
-    Url,
+    Url { paren_depth: u32 },
 }
 
 pub struct Lexer<'src> {
@@ -33,7 +33,7 @@ impl<'src> Lexer<'src> {
             return self.lex_string_content(quote);
         }
 
-        if matches!(self.context_stack.last(), Some(LexContext::Url)) {
+        if matches!(self.context_stack.last(), Some(LexContext::Url { .. })) {
             return self.lex_url_content();
         }
 
@@ -41,7 +41,7 @@ impl<'src> Lexer<'src> {
             self.pending_url_context = false;
             let start = self.pos;
             self.pos += 1; // consume (
-            self.context_stack.push(LexContext::Url);
+            self.context_stack.push(LexContext::Url { paren_depth: 0 });
             return (SyntaxKind::LPAREN, &self.input[start..self.pos]);
         }
 
@@ -306,33 +306,48 @@ impl<'src> Lexer<'src> {
             return (SyntaxKind::HASH_LBRACE, &self.input[start..self.pos]);
         }
 
-        // Whitespace inside url()
-        if matches!(self.peek(), Some(b' ' | b'\t' | b'\n' | b'\r' | b'\x0C')) {
+        // Whitespace inside url() — only break on whitespace at depth 0
+        let paren_depth = match self.context_stack.last() {
+            Some(LexContext::Url { paren_depth }) => *paren_depth,
+            _ => 0,
+        };
+        if paren_depth == 0 && matches!(self.peek(), Some(b' ' | b'\t' | b'\n' | b'\r' | b'\x0C')) {
             let start = self.pos;
             self.eat_while(|b| matches!(b, b' ' | b'\t' | b'\n' | b'\r' | b'\x0C'));
             return (SyntaxKind::WHITESPACE, &self.input[start..self.pos]);
         }
 
-        // Closing paren
-        if self.peek() == Some(b')') {
+        // Closing paren at depth 0
+        if self.peek() == Some(b')') && paren_depth == 0 {
             let start = self.pos;
             self.pos += 1;
             self.context_stack.pop();
             return (SyntaxKind::RPAREN, &self.input[start..self.pos]);
         }
 
-        // Scan URL content until ), whitespace, #{, or EOF
+        // Scan URL content until unmatched ), whitespace at depth 0, #{, or EOF
         let start = self.pos;
+        let mut depth = paren_depth;
         loop {
             match self.peek() {
                 None => {
-                    self.context_stack.pop();
+                    self.update_url_depth(depth);
                     return (SyntaxKind::URL_CONTENTS, &self.input[start..self.pos]);
                 }
-                Some(b')' | b' ' | b'\t' | b'\n' | b'\r' | b'\x0C') => {
+                Some(b'(') => {
+                    depth += 1;
+                    self.pos += 1;
+                }
+                Some(b')') if depth > 0 => {
+                    depth -= 1;
+                    self.pos += 1;
+                }
+                Some(b')' | b' ' | b'\t' | b'\n' | b'\r' | b'\x0C') if depth == 0 => {
+                    self.update_url_depth(depth);
                     return (SyntaxKind::URL_CONTENTS, &self.input[start..self.pos]);
                 }
                 Some(b'#') if self.peek_at(1) == Some(b'{') => {
+                    self.update_url_depth(depth);
                     return (SyntaxKind::URL_CONTENTS, &self.input[start..self.pos]);
                 }
                 Some(b'\\') => {
@@ -346,6 +361,12 @@ impl<'src> Lexer<'src> {
                     self.pos += 1;
                 }
             }
+        }
+    }
+
+    fn update_url_depth(&mut self, depth: u32) {
+        if let Some(LexContext::Url { paren_depth }) = self.context_stack.last_mut() {
+            *paren_depth = depth;
         }
     }
 
@@ -514,12 +535,13 @@ fn is_ascii_ident_continue(b: u8) -> bool {
 
 #[inline]
 fn is_ident_start_char(ch: char) -> bool {
-    ch.is_alphabetic() || ch == '_'
+    // CSS Syntax Level 3: any codepoint >= U+0080 is a valid name-start code point
+    ch >= '\u{80}' || ch.is_alphabetic() || ch == '_'
 }
 
 #[inline]
 fn is_ident_continue_char(ch: char) -> bool {
-    ch.is_alphanumeric() || ch == '_' || ch == '-'
+    ch >= '\u{80}' || ch.is_alphanumeric() || ch == '_' || ch == '-'
 }
 
 /// Collect all tokens from `input`, excluding the final `EOF`.

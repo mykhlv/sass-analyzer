@@ -3848,3 +3848,84 @@ fn interpolated_function_call_space_not_call() {
         "##]],
     );
 }
+
+#[test]
+fn url_with_nested_function_call() {
+    check(
+        "a { b: url(file_join($path, $file)); }",
+        expect![[r#"
+            SOURCE_FILE@0..38
+              RULE_SET@0..38
+                SELECTOR_LIST@0..1
+                  SELECTOR@0..1
+                    SIMPLE_SELECTOR@0..1
+                      IDENT@0..1 "a"
+                BLOCK@1..38
+                  WHITESPACE@1..2 " "
+                  LBRACE@2..3 "{"
+                  DECLARATION@3..36
+                    PROPERTY@3..5
+                      WHITESPACE@3..4 " "
+                      IDENT@4..5 "b"
+                    COLON@5..6 ":"
+                    VALUE@6..35
+                      SPECIAL_FUNCTION_CALL@6..35
+                        WHITESPACE@6..7 " "
+                        IDENT@7..10 "url"
+                        LPAREN@10..11 "("
+                        URL_CONTENTS@11..34 "file_join($path, $file)"
+                        RPAREN@34..35 ")"
+                    SEMICOLON@35..36 ";"
+                  WHITESPACE@36..37 " "
+                  RBRACE@37..38 "}"
+        "#]],
+    );
+}
+
+#[test]
+fn nonascii_identifier_in_value() {
+    check(
+        "$open-quote: \u{00AB};",
+        expect![[r#"
+            SOURCE_FILE@0..16
+              VARIABLE_DECL@0..16
+                DOLLAR@0..1 "$"
+                IDENT@1..11 "open-quote"
+                COLON@11..12 ":"
+                VALUE@12..15
+                  WHITESPACE@12..13 " "
+                  IDENT@13..15 "«"
+                SEMICOLON@15..16 ";"
+        "#]],
+    );
+}
+
+#[test]
+fn nonascii_snowman_identifier() {
+    check(
+        "a { name: \u{2603}x; }",
+        expect![[r#"
+            SOURCE_FILE@0..17
+              RULE_SET@0..17
+                SELECTOR_LIST@0..1
+                  SELECTOR@0..1
+                    SIMPLE_SELECTOR@0..1
+                      IDENT@0..1 "a"
+                BLOCK@1..17
+                  WHITESPACE@1..2 " "
+                  LBRACE@2..3 "{"
+                  DECLARATION@3..15
+                    PROPERTY@3..8
+                      WHITESPACE@3..4 " "
+                      IDENT@4..8 "name"
+                    COLON@8..9 ":"
+                    VALUE@9..14
+                      VALUE@9..14
+                        WHITESPACE@9..10 " "
+                        IDENT@10..14 "☃x"
+                    SEMICOLON@14..15 ";"
+                  WHITESPACE@15..16 " "
+                  RBRACE@16..17 "}"
+        "#]],
+    );
+}
