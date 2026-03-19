@@ -13,7 +13,7 @@ pub(super) fn atom(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMar
         QUOTED_STRING => Some(quoted_string(p)),
         STRING_START => Some(interpolated_string(p, ctx)),
         HASH => Some(color_literal(p)),
-        HASH_LBRACE => Some(interpolation_atom(p)),
+        HASH_LBRACE => Some(interpolation_atom(p, ctx)),
         DOLLAR => Some(variable_ref(p)),
         IDENT => ident_or_call(p, ctx),
         LPAREN => Some(paren_or_map(p, ctx)),
@@ -174,6 +174,11 @@ fn ident_or_call(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarke
                 break;
             }
         }
+        // Interpolated function call: `foo#{bar}(args)`
+        if !p.at_end() && !p.has_whitespace_before() && p.at(LPAREN) {
+            super::functions::arg_list(p, ctx);
+            return Some(m.complete(p, FUNCTION_CALL));
+        }
     }
     Some(m.complete(p, VALUE))
 }
@@ -311,14 +316,19 @@ fn bracketed_list(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
 
 /// Parse interpolation as an expression atom, consuming adjacent hyphenated fragments.
 /// `#{$key}-font` → single VALUE node (not `#{$key} - font` subtraction).
-fn interpolation_atom(p: &mut Parser<'_>) -> CompletedMarker {
+fn interpolation_atom(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
     let cm = interpolation(p);
     // Consume adjacent fragments without whitespace: `-font`, `-#{...}`, `3`, etc.
     if !p.at_end()
         && !p.has_whitespace_before()
-        && (p.at(MINUS) || p.at(IDENT) || p.at(NUMBER) || p.at(HASH_LBRACE))
+        && (p.at(MINUS) || p.at(IDENT) || p.at(NUMBER) || p.at(HASH_LBRACE) || p.at(LPAREN))
     {
         let m = cm.precede(p);
+        // Interpolated function call with no name fragments: `#{name}(arg)`
+        if p.at(LPAREN) {
+            super::functions::arg_list(p, ctx);
+            return m.complete(p, FUNCTION_CALL);
+        }
         while !p.at_end() && !p.has_whitespace_before() {
             if p.at(MINUS) || p.at(IDENT) || p.at(NUMBER) {
                 p.bump();
@@ -327,6 +337,11 @@ fn interpolation_atom(p: &mut Parser<'_>) -> CompletedMarker {
             } else {
                 break;
             }
+        }
+        // Interpolated function call: `#{prefix}bar(args)`
+        if !p.at_end() && !p.has_whitespace_before() && p.at(LPAREN) {
+            super::functions::arg_list(p, ctx);
+            return m.complete(p, FUNCTION_CALL);
         }
         m.complete(p, VALUE)
     } else {

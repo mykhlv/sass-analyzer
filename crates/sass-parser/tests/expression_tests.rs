@@ -3724,3 +3724,127 @@ fn alpha_eq_function() {
         "#]],
     );
 }
+
+// ── Interpolated function calls ────────────────────────────────────
+
+#[test]
+fn interpolated_function_call_ident_prefix() {
+    check(
+        "a { b: foo#{bar}(arg); }",
+        expect![[r##"
+            SOURCE_FILE@0..24
+              RULE_SET@0..24
+                SELECTOR_LIST@0..1
+                  SELECTOR@0..1
+                    SIMPLE_SELECTOR@0..1
+                      IDENT@0..1 "a"
+                BLOCK@1..24
+                  WHITESPACE@1..2 " "
+                  LBRACE@2..3 "{"
+                  DECLARATION@3..22
+                    PROPERTY@3..5
+                      WHITESPACE@3..4 " "
+                      IDENT@4..5 "b"
+                    COLON@5..6 ":"
+                    VALUE@6..21
+                      FUNCTION_CALL@6..21
+                        WHITESPACE@6..7 " "
+                        IDENT@7..10 "foo"
+                        INTERPOLATION@10..16
+                          HASH_LBRACE@10..12 "#{"
+                          VALUE@12..15
+                            IDENT@12..15 "bar"
+                          RBRACE@15..16 "}"
+                        ARG_LIST@16..21
+                          LPAREN@16..17 "("
+                          ARG@17..20
+                            VALUE@17..20
+                              IDENT@17..20 "arg"
+                          RPAREN@20..21 ")"
+                    SEMICOLON@21..22 ";"
+                  WHITESPACE@22..23 " "
+                  RBRACE@23..24 "}"
+        "##]],
+    );
+}
+
+#[test]
+fn interpolated_function_call_hash_only() {
+    check(
+        "a { b: #{name}(arg); }",
+        expect![[r##"
+            SOURCE_FILE@0..22
+              RULE_SET@0..22
+                SELECTOR_LIST@0..1
+                  SELECTOR@0..1
+                    SIMPLE_SELECTOR@0..1
+                      IDENT@0..1 "a"
+                BLOCK@1..22
+                  WHITESPACE@1..2 " "
+                  LBRACE@2..3 "{"
+                  DECLARATION@3..20
+                    PROPERTY@3..5
+                      WHITESPACE@3..4 " "
+                      IDENT@4..5 "b"
+                    COLON@5..6 ":"
+                    VALUE@6..19
+                      FUNCTION_CALL@6..19
+                        INTERPOLATION@6..14
+                          WHITESPACE@6..7 " "
+                          HASH_LBRACE@7..9 "#{"
+                          VALUE@9..13
+                            IDENT@9..13 "name"
+                          RBRACE@13..14 "}"
+                        ARG_LIST@14..19
+                          LPAREN@14..15 "("
+                          ARG@15..18
+                            VALUE@15..18
+                              IDENT@15..18 "arg"
+                          RPAREN@18..19 ")"
+                    SEMICOLON@19..20 ";"
+                  WHITESPACE@20..21 " "
+                  RBRACE@21..22 "}"
+        "##]],
+    );
+}
+
+#[test]
+fn interpolated_function_call_space_not_call() {
+    check(
+        "a { b: foo#{bar} (arg); }",
+        expect![[r##"
+            SOURCE_FILE@0..25
+              RULE_SET@0..25
+                SELECTOR_LIST@0..1
+                  SELECTOR@0..1
+                    SIMPLE_SELECTOR@0..1
+                      IDENT@0..1 "a"
+                BLOCK@1..25
+                  WHITESPACE@1..2 " "
+                  LBRACE@2..3 "{"
+                  DECLARATION@3..23
+                    PROPERTY@3..5
+                      WHITESPACE@3..4 " "
+                      IDENT@4..5 "b"
+                    COLON@5..6 ":"
+                    VALUE@6..22
+                      VALUE@6..16
+                        WHITESPACE@6..7 " "
+                        IDENT@7..10 "foo"
+                        INTERPOLATION@10..16
+                          HASH_LBRACE@10..12 "#{"
+                          VALUE@12..15
+                            IDENT@12..15 "bar"
+                          RBRACE@15..16 "}"
+                      PAREN_EXPR@16..22
+                        WHITESPACE@16..17 " "
+                        LPAREN@17..18 "("
+                        VALUE@18..21
+                          IDENT@18..21 "arg"
+                        RPAREN@21..22 ")"
+                    SEMICOLON@22..23 ";"
+                  WHITESPACE@23..24 " "
+                  RBRACE@24..25 "}"
+        "##]],
+    );
+}
