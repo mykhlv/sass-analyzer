@@ -22,6 +22,13 @@ use super::expressions;
 use super::expressions::interpolation;
 use super::selectors;
 
+/// Check whether `@function` names a CSS function (custom property or interpolated name).
+fn is_css_function_rule(p: &Parser<'_>) -> bool {
+    (p.nth(2) == IDENT && p.nth_text(2).starts_with("--"))
+        || p.nth(2) == HASH_LBRACE
+        || (p.nth(2) == MINUS && p.nth(3) == MINUS)
+}
+
 /// Dispatch `@keyword` — called when parser is at `AT`.
 pub fn at_rule(p: &mut Parser<'_>) {
     assert!(p.at(AT));
@@ -39,12 +46,8 @@ pub fn at_rule(p: &mut Parser<'_>) {
         "include" => mixin::include_rule(p),
         "content" => mixin::content_rule(p),
         "function" => {
-            // CSS Functions: `@function --name(...)`, `@function --#{...}()`, `@function #{...}()`
-            let is_css_function = (p.nth(2) == IDENT && p.nth_text(2).starts_with("--"))
-                || p.nth(2) == HASH_LBRACE
-                || (p.nth(2) == MINUS && p.nth(3) == MINUS);
-            if is_css_function {
-                generic_at_rule(p);
+            if is_css_function_rule(p) {
+                function::css_function_rule(p);
             } else {
                 function::function_rule(p);
             }
@@ -80,7 +83,14 @@ pub fn at_rule(p: &mut Parser<'_>) {
             p.error("`@else` without preceding `@if`");
             generic_at_rule(p);
         }
-        _ => generic_at_rule(p),
+        _ => {
+            // Case-insensitive CSS @function: `@FUNCTION --name() { ... }`
+            if name.eq_ignore_ascii_case("function") && is_css_function_rule(p) {
+                function::css_function_rule(p);
+                return;
+            }
+            generic_at_rule(p);
+        }
     }
 }
 

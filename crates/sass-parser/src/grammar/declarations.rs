@@ -158,6 +158,22 @@ fn value(p: &mut Parser<'_>) {
     let _ = m.complete(p, VALUE);
 }
 
+/// Parse a declaration inside a CSS `@function --name()` body.
+///
+/// Like a regular declaration, but values are raw CSS tokens (like custom properties).
+pub(super) fn css_function_body_declaration(p: &mut Parser<'_>) {
+    let m = p.start();
+    property(p);
+    p.expect(COLON);
+    if !p.at(SEMICOLON) && !p.at(RBRACE) && !p.at_end() {
+        custom_property_value(p);
+    }
+    if !p.at(RBRACE) && !p.at_end() {
+        p.expect(SEMICOLON);
+    }
+    let _ = m.complete(p, DECLARATION);
+}
+
 /// 2.9: Parse custom property value — fully depth-aware raw token scan.
 ///
 /// Tracks `()`, `[]`, `{}` nesting. Only terminates at `;` or `}` at depth 0.

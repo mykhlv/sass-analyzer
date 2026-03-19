@@ -375,3 +375,30 @@ pub(crate) fn block(p: &mut Parser<'_>) {
     g.expect(RBRACE);
     let _ = m.complete(&mut g, BLOCK);
 }
+
+/// Parse a `{ ... }` block for CSS `@function --name()` bodies.
+///
+/// Declarations inside CSS function bodies use raw CSS values (like custom properties),
+/// not Sass expression parsing. This avoids errors on raw CSS tokens like `{}#&%^*`.
+pub(crate) fn css_function_block(p: &mut Parser<'_>) {
+    let Ok(mut g) = p.depth_guard() else {
+        skip_until_block_end(p);
+        return;
+    };
+    debug_assert!(g.at(LBRACE));
+    let m = g.start();
+    g.bump(); // {
+    while !g.at(RBRACE) && !g.at_end() {
+        if g.at(SEMICOLON) {
+            g.bump();
+        } else if g.at(AT) {
+            at_rules::at_rule(&mut g);
+        } else if g.at(IDENT) || g.at(HASH_LBRACE) || g.at(MINUS) || g.at(STAR) {
+            declarations::css_function_body_declaration(&mut g);
+        } else {
+            g.err_and_bump("expected declaration");
+        }
+    }
+    g.expect(RBRACE);
+    let _ = m.complete(&mut g, BLOCK);
+}
