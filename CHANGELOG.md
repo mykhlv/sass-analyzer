@@ -8,7 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Fixed
-- Parser: sass-spec compliance improved from 99.78% to 99.88% (10,950/10,963 valid inputs). Fixed 11 edge cases:
+- Parser: sass-spec compliance improved from 99.78% to 99.98% (10,961/10,963 valid inputs). Remaining 2 are pathological nesting tests (also TODO in Dart Sass). Fixed 22 edge cases:
+  - Space-separated map keys (`(bold 20px: value)`) — reworked `paren_or_map()` fallback
+  - CSS `@function` bodies parsed with raw CSS values (not Sass expressions)
+  - Interpolated function names (`foo#{$bar}(arg)`, `#{$name}(arg)`) parsed as calls
+  - Non-ASCII identifiers per CSS Syntax Level 3 (`U+00B7`, `U+00C0–U+FFFF`)
+  - `url()` with nested parentheses (`url(u())`)
+  - Interpolated at-rule names with keyframe blocks (`@#{anim} { from { } }`)
+  - Extra tokens after keyframes selector (`from foo { }`)
+  - Escape normalization edge cases
   - `calc(min(1 2 3...))` / `calc(max(1 2 3...))` — spread operator now detected as Sass signal
   - Consecutive interpolations as map keys (`#{re}#{d}: value`)
   - `@extend` with interpolation no longer emits false "descendant combinator" error
