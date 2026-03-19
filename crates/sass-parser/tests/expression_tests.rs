@@ -1457,6 +1457,166 @@ fn map_trailing_comma() {
     );
 }
 
+#[test]
+fn map_space_separated_keys() {
+    check(
+        "$m: (1 2: 3, 4 5: 6);",
+        expect![[r#"
+            SOURCE_FILE@0..21
+              VARIABLE_DECL@0..21
+                DOLLAR@0..1 "$"
+                IDENT@1..2 "m"
+                COLON@2..3 ":"
+                MAP_EXPR@3..20
+                  WHITESPACE@3..4 " "
+                  LPAREN@4..5 "("
+                  MAP_ENTRY@5..11
+                    NUMBER_LITERAL@5..6
+                      NUMBER@5..6 "1"
+                    NUMBER_LITERAL@6..8
+                      WHITESPACE@6..7 " "
+                      NUMBER@7..8 "2"
+                    COLON@8..9 ":"
+                    NUMBER_LITERAL@9..11
+                      WHITESPACE@9..10 " "
+                      NUMBER@10..11 "3"
+                  COMMA@11..12 ","
+                  MAP_ENTRY@12..19
+                    NUMBER_LITERAL@12..14
+                      WHITESPACE@12..13 " "
+                      NUMBER@13..14 "4"
+                    NUMBER_LITERAL@14..16
+                      WHITESPACE@14..15 " "
+                      NUMBER@15..16 "5"
+                    COLON@16..17 ":"
+                    NUMBER_LITERAL@17..19
+                      WHITESPACE@17..18 " "
+                      NUMBER@18..19 "6"
+                  RPAREN@19..20 ")"
+                SEMICOLON@20..21 ";"
+        "#]],
+    );
+}
+
+#[test]
+fn map_single_space_separated_key() {
+    check(
+        "$m: (1 2: 3);",
+        expect![[r#"
+            SOURCE_FILE@0..13
+              VARIABLE_DECL@0..13
+                DOLLAR@0..1 "$"
+                IDENT@1..2 "m"
+                COLON@2..3 ":"
+                MAP_EXPR@3..12
+                  WHITESPACE@3..4 " "
+                  LPAREN@4..5 "("
+                  MAP_ENTRY@5..11
+                    NUMBER_LITERAL@5..6
+                      NUMBER@5..6 "1"
+                    NUMBER_LITERAL@6..8
+                      WHITESPACE@6..7 " "
+                      NUMBER@7..8 "2"
+                    COLON@8..9 ":"
+                    NUMBER_LITERAL@9..11
+                      WHITESPACE@9..10 " "
+                      NUMBER@10..11 "3"
+                  RPAREN@11..12 ")"
+                SEMICOLON@12..13 ";"
+        "#]],
+    );
+}
+
+#[test]
+fn map_ident_space_separated_key() {
+    check(
+        "$m: (a b c: 1);",
+        expect![[r#"
+            SOURCE_FILE@0..15
+              VARIABLE_DECL@0..15
+                DOLLAR@0..1 "$"
+                IDENT@1..2 "m"
+                COLON@2..3 ":"
+                MAP_EXPR@3..14
+                  WHITESPACE@3..4 " "
+                  LPAREN@4..5 "("
+                  MAP_ENTRY@5..13
+                    VALUE@5..6
+                      IDENT@5..6 "a"
+                    VALUE@6..8
+                      WHITESPACE@6..7 " "
+                      IDENT@7..8 "b"
+                    VALUE@8..10
+                      WHITESPACE@8..9 " "
+                      IDENT@9..10 "c"
+                    COLON@10..11 ":"
+                    NUMBER_LITERAL@11..13
+                      WHITESPACE@11..12 " "
+                      NUMBER@12..13 "1"
+                  RPAREN@13..14 ")"
+                SEMICOLON@14..15 ";"
+        "#]],
+    );
+}
+
+#[test]
+fn paren_space_separated_no_colon() {
+    check(
+        "$l: (1 2 3);",
+        expect![[r#"
+            SOURCE_FILE@0..12
+              VARIABLE_DECL@0..12
+                DOLLAR@0..1 "$"
+                IDENT@1..2 "l"
+                COLON@2..3 ":"
+                PAREN_EXPR@3..11
+                  WHITESPACE@3..4 " "
+                  LPAREN@4..5 "("
+                  NUMBER_LITERAL@5..6
+                    NUMBER@5..6 "1"
+                  NUMBER_LITERAL@6..8
+                    WHITESPACE@6..7 " "
+                    NUMBER@7..8 "2"
+                  NUMBER_LITERAL@8..10
+                    WHITESPACE@8..9 " "
+                    NUMBER@9..10 "3"
+                  RPAREN@10..11 ")"
+                SEMICOLON@11..12 ";"
+        "#]],
+    );
+}
+
+#[test]
+fn paren_comma_space_separated_no_colon() {
+    check(
+        "$l: (1 2, 3 4);",
+        expect![[r#"
+            SOURCE_FILE@0..15
+              VARIABLE_DECL@0..15
+                DOLLAR@0..1 "$"
+                IDENT@1..2 "l"
+                COLON@2..3 ":"
+                LIST_EXPR@3..14
+                  WHITESPACE@3..4 " "
+                  LPAREN@4..5 "("
+                  NUMBER_LITERAL@5..6
+                    NUMBER@5..6 "1"
+                  NUMBER_LITERAL@6..8
+                    WHITESPACE@6..7 " "
+                    NUMBER@7..8 "2"
+                  COMMA@8..9 ","
+                  NUMBER_LITERAL@9..11
+                    WHITESPACE@9..10 " "
+                    NUMBER@10..11 "3"
+                  NUMBER_LITERAL@11..13
+                    WHITESPACE@11..12 " "
+                    NUMBER@12..13 "4"
+                  RPAREN@13..14 ")"
+                SEMICOLON@14..15 ";"
+        "#]],
+    );
+}
+
 // ── Lists ──────────────────────────────────────────────────────────
 
 #[test]

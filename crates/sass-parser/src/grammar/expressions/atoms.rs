@@ -224,12 +224,18 @@ fn paren_or_map(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
     }
 
     // Space-separated values inside parens: `(28px 28px 0 0)`, `(small medium large)`
-    if !p.at(COMMA) && !p.at(RPAREN) && !p.at_end() {
-        while !p.at(COMMA) && !p.at(RPAREN) && !p.at_end() {
+    // Also handles space-separated map keys: `(1 2: 3)` — stop at `:` so we can detect map.
+    if !p.at(COMMA) && !p.at(RPAREN) && !p.at(COLON) && !p.at_end() {
+        while !p.at(COMMA) && !p.at(RPAREN) && !p.at(COLON) && !p.at_end() {
             if expr(p, ParseContext::SassScript).is_none() {
                 break;
             }
         }
+    }
+
+    // Space-separated key followed by `:` → map: `(1 2: 3, 4 5: 6)`
+    if p.at(COLON) {
+        return finish_map(p, m, first, ctx);
     }
 
     if p.at(COMMA) {
@@ -269,7 +275,13 @@ fn finish_map(
             break; // trailing comma
         }
         let em = p.start();
+        // Key may be space-separated: `4 5: 6`
         expr(p, ParseContext::SassScript);
+        while !p.at(COLON) && !p.at(COMMA) && !p.at(RPAREN) && !p.at_end() {
+            if expr(p, ParseContext::SassScript).is_none() {
+                break;
+            }
+        }
         p.expect(COLON);
         sass_value(p, ParseContext::SassScript);
         let _ = em.complete(p, MAP_ENTRY);
