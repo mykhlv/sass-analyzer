@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Fixed
+- Parser: indented Sass (.sass) compliance improved from 97.11% to 100% (346/346 valid inputs):
+  - Unterminated block comments (`/* ...` without `*/`) now valid in indented Sass
+  - Unquoted `@import` paths (`@import other.css`) for legacy Sass syntax
+  - Standalone `//` comments extend to subsequent indented continuation lines
+  - Silent comment continuation breaks on blank lines
+  - Functional selectors with escaped colon (`\:nth-child(2n+1)`)
+  - Sole combinator tokens (`*`, `~`, `+`, `>`) on their own line treated as selectors, not operators
 - Parser: sass-spec compliance improved from 99.78% to 99.98% (10,961/10,963 valid inputs). Remaining 2 are pathological nesting tests (also TODO in Dart Sass). Fixed 22 edge cases:
   - Space-separated map keys (`(bold 20px: value)`) — reworked `paren_or_map()` fallback
   - CSS `@function` bodies parsed with raw CSS values (not Sass expressions)
