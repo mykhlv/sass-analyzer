@@ -37,6 +37,8 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
     // True when the last significant token is the directive keyword name (first IDENT after AT).
     // Used for end-of-line continuation: `@mixin\n name` but NOT `@extend .error\n body`.
     let mut at_name_is_last = false;
+    // Indentation of the current line (updated on each newline-containing WHITESPACE).
+    let mut current_line_indent: u32 = 0;
 
     let mut i = 0;
     while i < raw.len() {
@@ -100,6 +102,7 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
                 at_name_is_last = false;
             }
             SyntaxKind::WHITESPACE if nesting == 0 && contains_newline(text) => {
+                current_line_indent = measure_indent_after_last_newline(text);
                 process_newline(
                     text,
                     &mut result,
@@ -153,6 +156,35 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
                 last_sig_kind = kind;
                 last_sig_text = text;
                 after_dollar = true;
+            }
+            // In indented Sass, standalone // comments extend to subsequent indented lines.
+            // Only applies when the comment is the sole content on its line (!saw_content).
+            SyntaxKind::SINGLE_LINE_COMMENT if nesting == 0 && !saw_content => {
+                result.push((kind, text));
+                let base = current_line_indent;
+                while i + 1 < raw.len() {
+                    let (nk, nt) = raw[i + 1];
+                    if nk == SyntaxKind::WHITESPACE && contains_newline(nt) {
+                        let next_indent = measure_indent_after_last_newline(nt);
+                        if next_indent > base {
+                            // Continuation line — emit whitespace, then retag line tokens.
+                            i += 1;
+                            result.push((SyntaxKind::WHITESPACE, nt));
+                            while i + 1 < raw.len() {
+                                let (tk, tt) = raw[i + 1];
+                                if tk == SyntaxKind::WHITESPACE && contains_newline(tt) {
+                                    break;
+                                }
+                                i += 1;
+                                result.push((SyntaxKind::SINGLE_LINE_COMMENT, tt));
+                            }
+                        } else {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
             }
             _ if kind.is_trivia() => {
                 result.push((kind, text));

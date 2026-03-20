@@ -1,5 +1,3 @@
-expressions/comments/silent/sass/indented/interpolation	1
-  13..14: expected rule
 non_conformant/sass/pseudo	2
   236..237: expected rule
   240..241: expected rule
