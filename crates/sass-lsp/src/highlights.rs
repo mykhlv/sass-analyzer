@@ -11,7 +11,7 @@ use sass_parser::syntax::SyntaxNode;
 use crate::DocumentState;
 use crate::convert::{lsp_position_to_offset, text_range_to_lsp};
 use crate::navigation::{find_definition_at_offset, find_reference_at_offset};
-use crate::symbols::{FileSymbols, RefKind, SymbolKind};
+use crate::symbols::{FileSymbols, SymbolKind};
 
 pub(crate) fn handle_document_highlight(
     documents: &DashMap<Uri, DocumentState>,
@@ -66,9 +66,8 @@ fn collect_highlights(
         }
     }
 
-    let ref_kind = symbol_kind_to_ref_kind(kind);
     for reference in &symbols.references {
-        if reference.name == name && reference.kind == ref_kind {
+        if reference.name == name && reference.kind == kind {
             highlights.push(DocumentHighlight {
                 range: text_range_to_lsp(reference.selection_range, line_index, text),
                 kind: Some(DocumentHighlightKind::READ),
@@ -81,14 +80,5 @@ fn collect_highlights(
     } else {
         highlights.sort_by_key(|h| (h.range.start.line, h.range.start.character));
         Some(highlights)
-    }
-}
-
-fn symbol_kind_to_ref_kind(kind: SymbolKind) -> RefKind {
-    match kind {
-        SymbolKind::Variable => RefKind::Variable,
-        SymbolKind::Function => RefKind::Function,
-        SymbolKind::Mixin => RefKind::Mixin,
-        SymbolKind::Placeholder => RefKind::Placeholder,
     }
 }

@@ -1,5 +1,9 @@
 # sass-analyzer
 
+[![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/mykhlv.sass-analyzer?label=VS%20Code%20Marketplace)](https://marketplace.visualstudio.com/items?itemName=mykhlv.sass-analyzer)
+[![Open VSX](https://img.shields.io/open-vsx/v/mykhlv/sass-analyzer?label=Open%20VSX)](https://open-vsx.org/extension/mykhlv/sass-analyzer)
+[![CI](https://github.com/mykhlv/sass-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/mykhlv/sass-analyzer/actions/workflows/ci.yml)
+
 A hand-written recursive descent SCSS/Sass parser and language server in Rust, built for IDE tooling. Supports both SCSS (`.scss`) and indented Sass (`.sass`) syntax.
 
 ## Why
@@ -38,8 +42,8 @@ Benchmarks use [`mimalloc`](https://github.com/microsoft/mimalloc) (a compact, h
 
 Tested against the [sass-spec](https://github.com/sass/sass-spec) conformance suite:
 
-- **10,939 / 10,963** valid inputs parse without error (**99.78%**)
-- Remaining 24 mismatches are edge cases (plain CSS `@import` conditions, exotic color syntax)
+- **10,961 / 10,963** valid inputs parse without error (**99.98%**)
+- Remaining 2 are pathological nesting stress tests (also marked TODO in Dart Sass)
 
 **Real-world corpus** — 0 panics, 0 round-trip failures on 668 files:
 

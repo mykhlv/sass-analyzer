@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use dashmap::DashMap;
-use sass_parser::syntax::SyntaxNode;
+use sass_parser::syntax::{NodeOrToken, SyntaxNode};
 use sass_parser::syntax_kind::SyntaxKind;
 use sass_parser::text_range::TextRange;
 use tower_lsp_server::ls_types::{
@@ -100,7 +100,7 @@ pub(crate) fn find_reference_at_offset(
 pub(crate) fn extract_namespace_ref_info(node: &SyntaxNode) -> Option<ReferenceInfo> {
     let tokens: Vec<_> = node
         .children_with_tokens()
-        .filter_map(rowan::NodeOrToken::into_token)
+        .filter_map(NodeOrToken::into_token)
         .collect();
 
     let namespace = tokens
@@ -267,7 +267,7 @@ pub(crate) fn handle_document_link(
 
         let Some(string_token) = node
             .children_with_tokens()
-            .filter_map(rowan::NodeOrToken::into_token)
+            .filter_map(NodeOrToken::into_token)
             .find(|t| t.kind() == SyntaxKind::QUOTED_STRING)
         else {
             continue;

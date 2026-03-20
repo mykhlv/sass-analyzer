@@ -1,0 +1,2 @@
+non_conformant/sass/selectors	1
+  89..98: expected COLON

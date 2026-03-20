@@ -22,7 +22,7 @@ pub struct Parser<'src> {
 
 impl<'src> Parser<'src> {
     pub fn new(input: Input, source: &'src str) -> Self {
-        let estimated_events = input.len().saturating_mul(3);
+        let estimated_events = input.len().saturating_mul(2);
         Self {
             input,
             source,

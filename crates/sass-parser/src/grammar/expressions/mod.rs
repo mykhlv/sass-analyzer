@@ -16,7 +16,7 @@ use super::ParseContext;
 #[rustfmt::skip]
 pub const EXPR_START: TokenSet = TokenSet::new(&[
     NUMBER, QUOTED_STRING, STRING_START, HASH, HASH_LBRACE, IDENT, DOLLAR, LPAREN, LBRACKET,
-    MINUS, PLUS, PERCENT, BANG, AMP,
+    MINUS, PLUS, PERCENT, BANG, AMP, SLASH,
 ]);
 
 // ── Pratt binding power table ──────────────────────────────────────

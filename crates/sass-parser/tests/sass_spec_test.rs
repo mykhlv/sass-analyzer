@@ -1,8 +1,8 @@
 //! sass-spec compatibility harness (Task 5.15).
 //!
-//! Parses every `input.scss` from the sass/sass-spec test suite and compares
-//! parse success/failure against dart-sass expectations (inferred from the
-//! presence of `output.css` vs `error` sibling entries).
+//! Parses every `input.scss` and `input.sass` from the sass/sass-spec test
+//! suite and compares parse success/failure against dart-sass expectations
+//! (inferred from the presence of `output.css` vs `error` sibling entries).
 //!
 //! Download the spec first:
 //!   cd test-corpus && bash download.sh
@@ -18,11 +18,18 @@ use sass_parser::syntax::SyntaxNode;
 
 // ── HRX parser ──────────────────────────────────────────────────────
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Syntax {
+    Scss,
+    Sass,
+}
+
 /// A single test case extracted from an HRX file or a directory.
 struct TestCase {
     /// Display path: `hrx_file_relative` / `entry_prefix`
     display_path: String,
-    input_scss: String,
+    input: String,
+    syntax: Syntax,
     /// dart-sass expects success (has output.css)
     expects_success: bool,
     /// dart-sass expects error (has `error` entry)
@@ -69,20 +76,30 @@ fn parse_hrx(content: &str, hrx_rel_path: &str) -> Vec<TestCase> {
     }
 
     // Group entries by prefix directory to find distinct test cases.
-    // A test case has `{prefix/}input.scss`.
-    let input_keys: Vec<String> = entries
+    // A test case has `{prefix/}input.scss` or `{prefix/}input.sass`.
+    let input_keys: Vec<(String, Syntax)> = entries
         .keys()
-        .filter(|k| k.ends_with("input.scss"))
-        .cloned()
+        .filter_map(|k| {
+            if k.ends_with("input.scss") {
+                Some((k.clone(), Syntax::Scss))
+            } else if k.ends_with("input.sass") {
+                Some((k.clone(), Syntax::Sass))
+            } else {
+                None
+            }
+        })
         .collect();
 
     let mut cases = Vec::new();
-    for input_key in &input_keys {
-        let prefix = if input_key == "input.scss" {
+    for (input_key, syntax) in &input_keys {
+        let filename = match syntax {
+            Syntax::Scss => "input.scss",
+            Syntax::Sass => "input.sass",
+        };
+        let prefix = if input_key == filename {
             ""
         } else {
-            // "foo/bar/input.scss" → "foo/bar/"
-            &input_key[..input_key.len() - "input.scss".len()]
+            &input_key[..input_key.len() - filename.len()]
         };
 
         let output_key = format!("{prefix}output.css");
@@ -99,7 +116,8 @@ fn parse_hrx(content: &str, hrx_rel_path: &str) -> Vec<TestCase> {
 
         cases.push(TestCase {
             display_path: display,
-            input_scss: entries[input_key].clone(),
+            input: entries[input_key].clone(),
+            syntax: *syntax,
             expects_success,
             expects_error,
         });
@@ -156,7 +174,15 @@ fn collect_standalone_recursive(dir: &Path, spec_dir: &Path, out: &mut Vec<TestC
 
         if path.is_dir() {
             collect_standalone_recursive(&path, spec_dir, out);
-        } else if path.file_name().is_some_and(|n| n == "input.scss") {
+        } else {
+            let syntax = if path.file_name().is_some_and(|n| n == "input.scss") {
+                Syntax::Scss
+            } else if path.file_name().is_some_and(|n| n == "input.sass") {
+                Syntax::Sass
+            } else {
+                continue;
+            };
+
             let parent = path.parent().unwrap();
             let Ok(source) = std::fs::read_to_string(&path) else {
                 continue;
@@ -173,7 +199,8 @@ fn collect_standalone_recursive(dir: &Path, spec_dir: &Path, out: &mut Vec<TestC
 
             out.push(TestCase {
                 display_path: rel,
-                input_scss: source,
+                input: source,
+                syntax,
                 expects_success: has_output,
                 expects_error: has_error,
             });
@@ -219,7 +246,7 @@ fn classify(case: &TestCase, our_errors: usize) -> Outcome {
 
 // ── Report ──────────────────────────────────────────────────────────
 
-fn print_compatibility_report(results: &[CaseResult]) {
+fn print_compatibility_report(label: &str, results: &[CaseResult], dump_filename: &str) {
     let total = results.len();
     let categorized: Vec<_> = results
         .iter()
@@ -265,7 +292,7 @@ fn print_compatibility_report(results: &[CaseResult]) {
 
     let mut report = String::new();
     writeln!(report, "\n{}", "=".repeat(60)).unwrap();
-    writeln!(report, "  sass-spec compatibility report").unwrap();
+    writeln!(report, "  sass-spec compatibility report ({label})").unwrap();
     writeln!(report, "{}\n", "=".repeat(60)).unwrap();
     writeln!(report, "  total test cases:    {total}").unwrap();
     writeln!(report, "  categorized:         {cat_total}").unwrap();
@@ -295,9 +322,8 @@ fn print_compatibility_report(results: &[CaseResult]) {
     .unwrap();
 
     if !false_neg.is_empty() {
-        // Write ALL false negatives to a file for analysis.
         let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let dump_path = manifest_dir.join("../../test-corpus/sass-spec-gaps.txt");
+        let dump_path = manifest_dir.join(format!("../../test-corpus/{dump_filename}"));
         let mut dump = String::new();
         for r in &false_neg {
             writeln!(dump, "{}\t{}", r.display_path, r.our_error_count).unwrap();
@@ -375,66 +401,86 @@ fn sass_spec_compatibility() {
     let standalone = collect_standalone_tests(&spec_dir, &spec_dir);
     all_cases.extend(standalone);
 
-    eprintln!("\nparsing {} sass-spec test cases...", all_cases.len());
+    // Split into SCSS and Sass test cases.
+    let (scss_cases, sass_cases): (Vec<_>, Vec<_>) = all_cases
+        .into_iter()
+        .partition(|c| c.syntax == Syntax::Scss);
 
-    // Parse and classify each test case.
-    let results: Vec<CaseResult> = all_cases
-        .iter()
-        .map(|case| {
-            let (green, errors) = sass_parser::parse_scss(&case.input_scss);
+    eprintln!(
+        "\nparsing {} SCSS + {} Sass = {} sass-spec test cases...",
+        scss_cases.len(),
+        sass_cases.len(),
+        scss_cases.len() + sass_cases.len()
+    );
 
-            // Verify round-trip.
-            let tree = SyntaxNode::new_root(green);
-            let round_trip = tree.text().to_string();
-            if round_trip != case.input_scss {
-                eprintln!(
-                    "ROUND-TRIP FAILURE: {} (len {} vs {})",
-                    case.display_path,
-                    case.input_scss.len(),
-                    round_trip.len()
-                );
-            }
+    let parse_and_classify = |cases: &[TestCase]| -> Vec<CaseResult> {
+        cases
+            .iter()
+            .map(|case| {
+                let (green, errors) = match case.syntax {
+                    Syntax::Scss => sass_parser::parse_scss(&case.input),
+                    Syntax::Sass => sass_parser::parse_sass(&case.input),
+                };
 
-            let first_errors: Vec<String> = errors
-                .iter()
-                .take(3)
-                .map(|(msg, range)| format!("{range:?}: {msg}"))
-                .collect();
+                // Verify round-trip.
+                let tree = SyntaxNode::new_root(green);
+                let round_trip = tree.text().to_string();
+                if round_trip != case.input {
+                    eprintln!(
+                        "ROUND-TRIP FAILURE: {} (len {} vs {})",
+                        case.display_path,
+                        case.input.len(),
+                        round_trip.len()
+                    );
+                }
 
-            CaseResult {
-                display_path: case.display_path.clone(),
-                outcome: classify(case, errors.len()),
-                our_error_count: errors.len(),
-                first_errors,
-            }
-        })
-        .collect();
+                let first_errors: Vec<String> = errors
+                    .iter()
+                    .take(3)
+                    .map(|(msg, range)| format!("{range:?}: {msg}"))
+                    .collect();
 
-    print_compatibility_report(&results);
-
-    // Hard assertion: round-trip must hold (our core invariant).
-    // Match rate is reported, not asserted — we track it over time.
-    let valid_total = results
-        .iter()
-        .filter(|r| r.outcome == Outcome::BothOk || r.outcome == Outcome::FalseNegative)
-        .count();
-    let both_ok = results
-        .iter()
-        .filter(|r| r.outcome == Outcome::BothOk)
-        .count();
-    let valid_rate = if valid_total > 0 {
-        both_ok as f64 / valid_total as f64 * 100.0
-    } else {
-        0.0
+                CaseResult {
+                    display_path: case.display_path.clone(),
+                    outcome: classify(case, errors.len()),
+                    our_error_count: errors.len(),
+                    first_errors,
+                }
+            })
+            .collect()
     };
 
-    eprintln!("\nvalid-input match rate: {valid_rate:.2}%");
+    let scss_results = parse_and_classify(&scss_cases);
+    let sass_results = parse_and_classify(&sass_cases);
 
-    // Soft assertion: warn if below target but don't fail the build.
-    if valid_rate < 99.0 {
-        eprintln!(
-            "\nWARNING: valid-input match rate {valid_rate:.2}% is below 99% target. \
-             See false negatives above for gaps to fix."
-        );
+    print_compatibility_report("SCSS", &scss_results, "sass-spec-gaps.txt");
+    if !sass_results.is_empty() {
+        print_compatibility_report("Sass indented", &sass_results, "sass-spec-sass-gaps.txt");
+    }
+
+    // Summary: valid-input match rates for both syntaxes.
+    for (label, results) in [("SCSS", &scss_results), ("Sass", &sass_results)] {
+        let valid_total = results
+            .iter()
+            .filter(|r| r.outcome == Outcome::BothOk || r.outcome == Outcome::FalseNegative)
+            .count();
+        let both_ok = results
+            .iter()
+            .filter(|r| r.outcome == Outcome::BothOk)
+            .count();
+        let valid_rate = if valid_total > 0 {
+            both_ok as f64 / valid_total as f64 * 100.0
+        } else {
+            0.0
+        };
+
+        eprintln!("\n{label} valid-input match rate: {valid_rate:.2}%");
+
+        if label == "SCSS" && valid_rate < 99.0 {
+            eprintln!(
+                "\nWARNING: SCSS valid-input match rate {valid_rate:.2}% is below 99% target. \
+                 See false negatives above for gaps to fix."
+            );
+        }
     }
 }

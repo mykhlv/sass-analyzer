@@ -68,6 +68,8 @@ fn has_sass_signals(p: &Parser<'_>) -> bool {
             }
             // `%` with whitespace before = modulo operator, not dimension unit
             PERCENT if p.nth_has_whitespace_before(offset) => return true,
+            // Spread operator — never valid in CSS calc
+            DOT_DOT_DOT => return true,
             // `and`/`or`/`not` keywords as operators
             IDENT => {
                 let text = p.nth_text(offset);

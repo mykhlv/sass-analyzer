@@ -1,5 +1,5 @@
 use dashmap::DashMap;
-use sass_parser::syntax::SyntaxNode;
+use sass_parser::syntax::{NodeOrToken, SyntaxNode};
 use sass_parser::syntax_kind::SyntaxKind;
 use tower_lsp_server::ls_types::{
     MarkupContent, MarkupKind, ParameterInformation, ParameterLabel, SignatureHelp,
@@ -85,7 +85,7 @@ pub(crate) fn find_call_at_offset(
                 {
                     let ns_name = ns_ref
                         .children_with_tokens()
-                        .filter_map(rowan::NodeOrToken::into_token)
+                        .filter_map(NodeOrToken::into_token)
                         .find(|t| t.kind() == SyntaxKind::IDENT)?
                         .text()
                         .to_string();
@@ -119,7 +119,7 @@ pub(crate) fn find_call_at_offset(
                 {
                     let tokens: Vec<_> = ns_ref
                         .children_with_tokens()
-                        .filter_map(rowan::NodeOrToken::into_token)
+                        .filter_map(NodeOrToken::into_token)
                         .collect();
                     let ns_name = tokens
                         .iter()

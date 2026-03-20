@@ -4,7 +4,7 @@ Thank you for your interest in contributing!
 
 ## Development Setup
 
-1. Install [Rust 1.85+](https://rustup.rs/) and [Node.js 20+](https://nodejs.org/)
+1. Install [Rust 1.94+](https://rustup.rs/) and [Node.js 20+](https://nodejs.org/)
 2. Clone the repository and build:
 
 ```sh

@@ -1,11 +1,10 @@
-use rowan::GreenNode;
-use sass_parser::syntax::SyntaxNode;
+use sass_parser::syntax::{GreenNode, NodeOrToken, SyntaxNode};
 use sass_parser::syntax_kind::SyntaxKind;
 use sass_parser::text_range::TextRange;
 use tower_lsp_server::ls_types::{DiagnosticSeverity, Uri};
 
 use crate::ast_helpers;
-use crate::symbols::{FileSymbols, RefKind, SymbolKind};
+use crate::symbols::{FileSymbols, SymbolKind};
 use crate::workspace;
 
 pub(crate) struct SemanticDiagnostic {
@@ -47,8 +46,8 @@ fn check_arg_count(
 ) {
     for sym_ref in &symbols.references {
         let kind = match sym_ref.kind {
-            RefKind::Function => SymbolKind::Function,
-            RefKind::Mixin => SymbolKind::Mixin,
+            SymbolKind::Function => SymbolKind::Function,
+            SymbolKind::Mixin => SymbolKind::Mixin,
             _ => continue,
         };
 
@@ -181,12 +180,12 @@ fn classify_param(segment: &str, required: &mut u32, total: &mut u32, has_rest: 
 }
 
 #[allow(clippy::cast_possible_truncation)]
-fn count_call_args(root: &SyntaxNode, ref_range: TextRange, kind: RefKind) -> Option<u32> {
+fn count_call_args(root: &SyntaxNode, ref_range: TextRange, kind: SymbolKind) -> Option<u32> {
     let token = root.token_at_offset(ref_range.start()).right_biased()?;
 
     let expected_parent = match kind {
-        RefKind::Function => SyntaxKind::FUNCTION_CALL,
-        RefKind::Mixin => SyntaxKind::INCLUDE_RULE,
+        SymbolKind::Function => SyntaxKind::FUNCTION_CALL,
+        SymbolKind::Mixin => SyntaxKind::INCLUDE_RULE,
         _ => return None,
     };
 
@@ -267,24 +266,19 @@ fn check_undefined(
 ) {
     for sym_ref in &symbols.references {
         // Skip placeholders — @extend %name can reference dynamically generated selectors
-        if sym_ref.kind == RefKind::Placeholder {
+        if sym_ref.kind == SymbolKind::Placeholder {
             continue;
         }
 
         // Skip known CSS/global functions
-        if sym_ref.kind == RefKind::Function && is_css_global_function(&sym_ref.name) {
+        if sym_ref.kind == SymbolKind::Function && is_css_global_function(&sym_ref.name) {
             continue;
         }
 
-        let kind = match sym_ref.kind {
-            RefKind::Variable => SymbolKind::Variable,
-            RefKind::Function => SymbolKind::Function,
-            RefKind::Mixin => SymbolKind::Mixin,
-            RefKind::Placeholder => continue,
-        };
+        let kind = sym_ref.kind;
 
         // Skip variables that are parameters, loop variables, or locally declared
-        if sym_ref.kind == RefKind::Variable
+        if sym_ref.kind == SymbolKind::Variable
             && is_locally_defined(root, sym_ref.range, &sym_ref.name)
         {
             continue;
@@ -299,10 +293,10 @@ fn check_undefined(
         }
 
         let diagnostic_code = match sym_ref.kind {
-            RefKind::Variable => "undefined-variable",
-            RefKind::Function => "undefined-function",
-            RefKind::Mixin => "undefined-mixin",
-            RefKind::Placeholder => unreachable!(),
+            SymbolKind::Variable => "undefined-variable",
+            SymbolKind::Function => "undefined-function",
+            SymbolKind::Mixin => "undefined-mixin",
+            SymbolKind::Placeholder => unreachable!(),
         };
 
         out.push(SemanticDiagnostic {
@@ -318,12 +312,12 @@ fn check_undefined(
     }
 }
 
-fn kind_label(kind: RefKind) -> &'static str {
+fn kind_label(kind: SymbolKind) -> &'static str {
     match kind {
-        RefKind::Variable => "variable",
-        RefKind::Function => "function",
-        RefKind::Mixin => "mixin",
-        RefKind::Placeholder => "placeholder",
+        SymbolKind::Variable => "variable",
+        SymbolKind::Function => "function",
+        SymbolKind::Mixin => "mixin",
+        SymbolKind::Placeholder => "placeholder",
     }
 }
 
@@ -370,7 +364,7 @@ fn has_local_var_before(
             let mut saw_dollar = false;
             for tok in child
                 .children_with_tokens()
-                .filter_map(rowan::NodeOrToken::into_token)
+                .filter_map(NodeOrToken::into_token)
             {
                 if tok.kind() == SyntaxKind::DOLLAR {
                     saw_dollar = true;
@@ -396,7 +390,7 @@ fn has_param_named(rule_node: &SyntaxNode, name: &str) -> bool {
                     // PARAM = DOLLAR IDENT [COLON default] [DOT_DOT_DOT]
                     for tok in param
                         .children_with_tokens()
-                        .filter_map(rowan::NodeOrToken::into_token)
+                        .filter_map(NodeOrToken::into_token)
                     {
                         if tok.kind() == SyntaxKind::IDENT && tok.text() == name {
                             return true;

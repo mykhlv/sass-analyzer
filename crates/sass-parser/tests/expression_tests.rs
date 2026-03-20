@@ -1457,6 +1457,166 @@ fn map_trailing_comma() {
     );
 }
 
+#[test]
+fn map_space_separated_keys() {
+    check(
+        "$m: (1 2: 3, 4 5: 6);",
+        expect![[r#"
+            SOURCE_FILE@0..21
+              VARIABLE_DECL@0..21
+                DOLLAR@0..1 "$"
+                IDENT@1..2 "m"
+                COLON@2..3 ":"
+                MAP_EXPR@3..20
+                  WHITESPACE@3..4 " "
+                  LPAREN@4..5 "("
+                  MAP_ENTRY@5..11
+                    NUMBER_LITERAL@5..6
+                      NUMBER@5..6 "1"
+                    NUMBER_LITERAL@6..8
+                      WHITESPACE@6..7 " "
+                      NUMBER@7..8 "2"
+                    COLON@8..9 ":"
+                    NUMBER_LITERAL@9..11
+                      WHITESPACE@9..10 " "
+                      NUMBER@10..11 "3"
+                  COMMA@11..12 ","
+                  MAP_ENTRY@12..19
+                    NUMBER_LITERAL@12..14
+                      WHITESPACE@12..13 " "
+                      NUMBER@13..14 "4"
+                    NUMBER_LITERAL@14..16
+                      WHITESPACE@14..15 " "
+                      NUMBER@15..16 "5"
+                    COLON@16..17 ":"
+                    NUMBER_LITERAL@17..19
+                      WHITESPACE@17..18 " "
+                      NUMBER@18..19 "6"
+                  RPAREN@19..20 ")"
+                SEMICOLON@20..21 ";"
+        "#]],
+    );
+}
+
+#[test]
+fn map_single_space_separated_key() {
+    check(
+        "$m: (1 2: 3);",
+        expect![[r#"
+            SOURCE_FILE@0..13
+              VARIABLE_DECL@0..13
+                DOLLAR@0..1 "$"
+                IDENT@1..2 "m"
+                COLON@2..3 ":"
+                MAP_EXPR@3..12
+                  WHITESPACE@3..4 " "
+                  LPAREN@4..5 "("
+                  MAP_ENTRY@5..11
+                    NUMBER_LITERAL@5..6
+                      NUMBER@5..6 "1"
+                    NUMBER_LITERAL@6..8
+                      WHITESPACE@6..7 " "
+                      NUMBER@7..8 "2"
+                    COLON@8..9 ":"
+                    NUMBER_LITERAL@9..11
+                      WHITESPACE@9..10 " "
+                      NUMBER@10..11 "3"
+                  RPAREN@11..12 ")"
+                SEMICOLON@12..13 ";"
+        "#]],
+    );
+}
+
+#[test]
+fn map_ident_space_separated_key() {
+    check(
+        "$m: (a b c: 1);",
+        expect![[r#"
+            SOURCE_FILE@0..15
+              VARIABLE_DECL@0..15
+                DOLLAR@0..1 "$"
+                IDENT@1..2 "m"
+                COLON@2..3 ":"
+                MAP_EXPR@3..14
+                  WHITESPACE@3..4 " "
+                  LPAREN@4..5 "("
+                  MAP_ENTRY@5..13
+                    VALUE@5..6
+                      IDENT@5..6 "a"
+                    VALUE@6..8
+                      WHITESPACE@6..7 " "
+                      IDENT@7..8 "b"
+                    VALUE@8..10
+                      WHITESPACE@8..9 " "
+                      IDENT@9..10 "c"
+                    COLON@10..11 ":"
+                    NUMBER_LITERAL@11..13
+                      WHITESPACE@11..12 " "
+                      NUMBER@12..13 "1"
+                  RPAREN@13..14 ")"
+                SEMICOLON@14..15 ";"
+        "#]],
+    );
+}
+
+#[test]
+fn paren_space_separated_no_colon() {
+    check(
+        "$l: (1 2 3);",
+        expect![[r#"
+            SOURCE_FILE@0..12
+              VARIABLE_DECL@0..12
+                DOLLAR@0..1 "$"
+                IDENT@1..2 "l"
+                COLON@2..3 ":"
+                PAREN_EXPR@3..11
+                  WHITESPACE@3..4 " "
+                  LPAREN@4..5 "("
+                  NUMBER_LITERAL@5..6
+                    NUMBER@5..6 "1"
+                  NUMBER_LITERAL@6..8
+                    WHITESPACE@6..7 " "
+                    NUMBER@7..8 "2"
+                  NUMBER_LITERAL@8..10
+                    WHITESPACE@8..9 " "
+                    NUMBER@9..10 "3"
+                  RPAREN@10..11 ")"
+                SEMICOLON@11..12 ";"
+        "#]],
+    );
+}
+
+#[test]
+fn paren_comma_space_separated_no_colon() {
+    check(
+        "$l: (1 2, 3 4);",
+        expect![[r#"
+            SOURCE_FILE@0..15
+              VARIABLE_DECL@0..15
+                DOLLAR@0..1 "$"
+                IDENT@1..2 "l"
+                COLON@2..3 ":"
+                LIST_EXPR@3..14
+                  WHITESPACE@3..4 " "
+                  LPAREN@4..5 "("
+                  NUMBER_LITERAL@5..6
+                    NUMBER@5..6 "1"
+                  NUMBER_LITERAL@6..8
+                    WHITESPACE@6..7 " "
+                    NUMBER@7..8 "2"
+                  COMMA@8..9 ","
+                  NUMBER_LITERAL@9..11
+                    WHITESPACE@9..10 " "
+                    NUMBER@10..11 "3"
+                  NUMBER_LITERAL@11..13
+                    WHITESPACE@11..12 " "
+                    NUMBER@12..13 "4"
+                  RPAREN@13..14 ")"
+                SEMICOLON@14..15 ";"
+        "#]],
+    );
+}
+
 // ── Lists ──────────────────────────────────────────────────────────
 
 #[test]
@@ -3561,6 +3721,211 @@ fn alpha_eq_function() {
                     SEMICOLON@29..30 ";"
                   WHITESPACE@30..31 " "
                   RBRACE@31..32 "}"
+        "#]],
+    );
+}
+
+// ── Interpolated function calls ────────────────────────────────────
+
+#[test]
+fn interpolated_function_call_ident_prefix() {
+    check(
+        "a { b: foo#{bar}(arg); }",
+        expect![[r##"
+            SOURCE_FILE@0..24
+              RULE_SET@0..24
+                SELECTOR_LIST@0..1
+                  SELECTOR@0..1
+                    SIMPLE_SELECTOR@0..1
+                      IDENT@0..1 "a"
+                BLOCK@1..24
+                  WHITESPACE@1..2 " "
+                  LBRACE@2..3 "{"
+                  DECLARATION@3..22
+                    PROPERTY@3..5
+                      WHITESPACE@3..4 " "
+                      IDENT@4..5 "b"
+                    COLON@5..6 ":"
+                    VALUE@6..21
+                      FUNCTION_CALL@6..21
+                        WHITESPACE@6..7 " "
+                        IDENT@7..10 "foo"
+                        INTERPOLATION@10..16
+                          HASH_LBRACE@10..12 "#{"
+                          VALUE@12..15
+                            IDENT@12..15 "bar"
+                          RBRACE@15..16 "}"
+                        ARG_LIST@16..21
+                          LPAREN@16..17 "("
+                          ARG@17..20
+                            VALUE@17..20
+                              IDENT@17..20 "arg"
+                          RPAREN@20..21 ")"
+                    SEMICOLON@21..22 ";"
+                  WHITESPACE@22..23 " "
+                  RBRACE@23..24 "}"
+        "##]],
+    );
+}
+
+#[test]
+fn interpolated_function_call_hash_only() {
+    check(
+        "a { b: #{name}(arg); }",
+        expect![[r##"
+            SOURCE_FILE@0..22
+              RULE_SET@0..22
+                SELECTOR_LIST@0..1
+                  SELECTOR@0..1
+                    SIMPLE_SELECTOR@0..1
+                      IDENT@0..1 "a"
+                BLOCK@1..22
+                  WHITESPACE@1..2 " "
+                  LBRACE@2..3 "{"
+                  DECLARATION@3..20
+                    PROPERTY@3..5
+                      WHITESPACE@3..4 " "
+                      IDENT@4..5 "b"
+                    COLON@5..6 ":"
+                    VALUE@6..19
+                      FUNCTION_CALL@6..19
+                        INTERPOLATION@6..14
+                          WHITESPACE@6..7 " "
+                          HASH_LBRACE@7..9 "#{"
+                          VALUE@9..13
+                            IDENT@9..13 "name"
+                          RBRACE@13..14 "}"
+                        ARG_LIST@14..19
+                          LPAREN@14..15 "("
+                          ARG@15..18
+                            VALUE@15..18
+                              IDENT@15..18 "arg"
+                          RPAREN@18..19 ")"
+                    SEMICOLON@19..20 ";"
+                  WHITESPACE@20..21 " "
+                  RBRACE@21..22 "}"
+        "##]],
+    );
+}
+
+#[test]
+fn interpolated_function_call_space_not_call() {
+    check(
+        "a { b: foo#{bar} (arg); }",
+        expect![[r##"
+            SOURCE_FILE@0..25
+              RULE_SET@0..25
+                SELECTOR_LIST@0..1
+                  SELECTOR@0..1
+                    SIMPLE_SELECTOR@0..1
+                      IDENT@0..1 "a"
+                BLOCK@1..25
+                  WHITESPACE@1..2 " "
+                  LBRACE@2..3 "{"
+                  DECLARATION@3..23
+                    PROPERTY@3..5
+                      WHITESPACE@3..4 " "
+                      IDENT@4..5 "b"
+                    COLON@5..6 ":"
+                    VALUE@6..22
+                      VALUE@6..16
+                        WHITESPACE@6..7 " "
+                        IDENT@7..10 "foo"
+                        INTERPOLATION@10..16
+                          HASH_LBRACE@10..12 "#{"
+                          VALUE@12..15
+                            IDENT@12..15 "bar"
+                          RBRACE@15..16 "}"
+                      PAREN_EXPR@16..22
+                        WHITESPACE@16..17 " "
+                        LPAREN@17..18 "("
+                        VALUE@18..21
+                          IDENT@18..21 "arg"
+                        RPAREN@21..22 ")"
+                    SEMICOLON@22..23 ";"
+                  WHITESPACE@23..24 " "
+                  RBRACE@24..25 "}"
+        "##]],
+    );
+}
+
+#[test]
+fn url_with_nested_function_call() {
+    check(
+        "a { b: url(file_join($path, $file)); }",
+        expect![[r#"
+            SOURCE_FILE@0..38
+              RULE_SET@0..38
+                SELECTOR_LIST@0..1
+                  SELECTOR@0..1
+                    SIMPLE_SELECTOR@0..1
+                      IDENT@0..1 "a"
+                BLOCK@1..38
+                  WHITESPACE@1..2 " "
+                  LBRACE@2..3 "{"
+                  DECLARATION@3..36
+                    PROPERTY@3..5
+                      WHITESPACE@3..4 " "
+                      IDENT@4..5 "b"
+                    COLON@5..6 ":"
+                    VALUE@6..35
+                      SPECIAL_FUNCTION_CALL@6..35
+                        WHITESPACE@6..7 " "
+                        IDENT@7..10 "url"
+                        LPAREN@10..11 "("
+                        URL_CONTENTS@11..34 "file_join($path, $file)"
+                        RPAREN@34..35 ")"
+                    SEMICOLON@35..36 ";"
+                  WHITESPACE@36..37 " "
+                  RBRACE@37..38 "}"
+        "#]],
+    );
+}
+
+#[test]
+fn nonascii_identifier_in_value() {
+    check(
+        "$open-quote: \u{00AB};",
+        expect![[r#"
+            SOURCE_FILE@0..16
+              VARIABLE_DECL@0..16
+                DOLLAR@0..1 "$"
+                IDENT@1..11 "open-quote"
+                COLON@11..12 ":"
+                VALUE@12..15
+                  WHITESPACE@12..13 " "
+                  IDENT@13..15 "«"
+                SEMICOLON@15..16 ";"
+        "#]],
+    );
+}
+
+#[test]
+fn nonascii_snowman_identifier() {
+    check(
+        "a { name: \u{2603}x; }",
+        expect![[r#"
+            SOURCE_FILE@0..17
+              RULE_SET@0..17
+                SELECTOR_LIST@0..1
+                  SELECTOR@0..1
+                    SIMPLE_SELECTOR@0..1
+                      IDENT@0..1 "a"
+                BLOCK@1..17
+                  WHITESPACE@1..2 " "
+                  LBRACE@2..3 "{"
+                  DECLARATION@3..15
+                    PROPERTY@3..8
+                      WHITESPACE@3..4 " "
+                      IDENT@4..8 "name"
+                    COLON@8..9 ":"
+                    VALUE@9..14
+                      VALUE@9..14
+                        WHITESPACE@9..10 " "
+                        IDENT@10..14 "☃x"
+                    SEMICOLON@14..15 ";"
+                  WHITESPACE@15..16 " "
+                  RBRACE@16..17 "}"
         "#]],
     );
 }

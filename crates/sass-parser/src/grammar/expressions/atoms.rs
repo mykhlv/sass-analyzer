@@ -13,13 +13,19 @@ pub(super) fn atom(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMar
         QUOTED_STRING => Some(quoted_string(p)),
         STRING_START => Some(interpolated_string(p, ctx)),
         HASH => Some(color_literal(p)),
-        HASH_LBRACE => Some(interpolation_atom(p)),
+        HASH_LBRACE => Some(interpolation_atom(p, ctx)),
         DOLLAR => Some(variable_ref(p)),
         IDENT => ident_or_call(p, ctx),
         LPAREN => Some(paren_or_map(p, ctx)),
         LBRACKET => Some(bracketed_list(p, ctx)),
         PERCENT => Some(standalone_percent(p)),
         BANG => Some(bang_dispatch(p)),
+        SLASH => {
+            // Bare `/` as value atom (e.g., `(1, / 2)` or `$path: /images;`)
+            let m = p.start();
+            p.bump();
+            Some(m.complete(p, VALUE))
+        }
         AMP => {
             // Parent selector in expression context: `if(&, "&", "")`
             let m = p.start();
@@ -168,6 +174,11 @@ fn ident_or_call(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarke
                 break;
             }
         }
+        // Interpolated function call: `foo#{bar}(args)`
+        if !p.at_end() && !p.has_whitespace_before() && p.at(LPAREN) {
+            super::functions::arg_list(p, ctx);
+            return Some(m.complete(p, FUNCTION_CALL));
+        }
     }
     Some(m.complete(p, VALUE))
 }
@@ -218,12 +229,18 @@ fn paren_or_map(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
     }
 
     // Space-separated values inside parens: `(28px 28px 0 0)`, `(small medium large)`
-    if !p.at(COMMA) && !p.at(RPAREN) && !p.at_end() {
-        while !p.at(COMMA) && !p.at(RPAREN) && !p.at_end() {
+    // Also handles space-separated map keys: `(1 2: 3)` — stop at `:` so we can detect map.
+    if !p.at(COMMA) && !p.at(RPAREN) && !p.at(COLON) && !p.at_end() {
+        while !p.at(COMMA) && !p.at(RPAREN) && !p.at(COLON) && !p.at_end() {
             if expr(p, ParseContext::SassScript).is_none() {
                 break;
             }
         }
+    }
+
+    // Space-separated key followed by `:` → map: `(1 2: 3, 4 5: 6)`
+    if p.at(COLON) {
+        return finish_map(p, m, first, ctx);
     }
 
     if p.at(COMMA) {
@@ -263,7 +280,13 @@ fn finish_map(
             break; // trailing comma
         }
         let em = p.start();
+        // Key may be space-separated: `4 5: 6`
         expr(p, ParseContext::SassScript);
+        while !p.at(COLON) && !p.at(COMMA) && !p.at(RPAREN) && !p.at_end() {
+            if expr(p, ParseContext::SassScript).is_none() {
+                break;
+            }
+        }
         p.expect(COLON);
         sass_value(p, ParseContext::SassScript);
         let _ = em.complete(p, MAP_ENTRY);
@@ -293,11 +316,19 @@ fn bracketed_list(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
 
 /// Parse interpolation as an expression atom, consuming adjacent hyphenated fragments.
 /// `#{$key}-font` → single VALUE node (not `#{$key} - font` subtraction).
-fn interpolation_atom(p: &mut Parser<'_>) -> CompletedMarker {
+fn interpolation_atom(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
     let cm = interpolation(p);
     // Consume adjacent fragments without whitespace: `-font`, `-#{...}`, `3`, etc.
-    if !p.at_end() && !p.has_whitespace_before() && (p.at(MINUS) || p.at(IDENT) || p.at(NUMBER)) {
+    if !p.at_end()
+        && !p.has_whitespace_before()
+        && (p.at(MINUS) || p.at(IDENT) || p.at(NUMBER) || p.at(HASH_LBRACE) || p.at(LPAREN))
+    {
         let m = cm.precede(p);
+        // Interpolated function call with no name fragments: `#{name}(arg)`
+        if p.at(LPAREN) {
+            super::functions::arg_list(p, ctx);
+            return m.complete(p, FUNCTION_CALL);
+        }
         while !p.at_end() && !p.has_whitespace_before() {
             if p.at(MINUS) || p.at(IDENT) || p.at(NUMBER) {
                 p.bump();
@@ -306,6 +337,11 @@ fn interpolation_atom(p: &mut Parser<'_>) -> CompletedMarker {
             } else {
                 break;
             }
+        }
+        // Interpolated function call: `#{prefix}bar(args)`
+        if !p.at_end() && !p.has_whitespace_before() && p.at(LPAREN) {
+            super::functions::arg_list(p, ctx);
+            return m.complete(p, FUNCTION_CALL);
         }
         m.complete(p, VALUE)
     } else {

@@ -40,7 +40,7 @@ enum Cardinality {
 
 // ── Public entry point ──────────────────────────────────────────────
 
-pub fn generate() -> Result<(), Box<dyn std::error::Error>> {
+pub fn generate(check: bool) -> Result<(), Box<dyn std::error::Error>> {
     let project_root = project_root()?;
     let ungram_path = project_root.join("sass.ungram");
     let output_path = project_root.join("crates/sass-parser/src/ast/generated.rs");
@@ -53,6 +53,15 @@ pub fn generate() -> Result<(), Box<dyn std::error::Error>> {
 
     let code = generate_code(&ast);
     let formatted = reformat(&code)?;
+
+    if check {
+        let existing = fs::read_to_string(&output_path)?;
+        if existing == formatted {
+            eprintln!("generated code is up-to-date");
+            return Ok(());
+        }
+        return Err("generated code is out of date, run `cargo xtask codegen`".into());
+    }
 
     // Ensure output directory exists
     if let Some(parent) = output_path.parent() {

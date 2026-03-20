@@ -15,6 +15,7 @@ pub fn extend_rule(p: &mut Parser<'_>) {
     }
     let mut has_selector_token = false;
     let mut has_combinator = false;
+    let mut has_interpolation = false;
     while !p.at(SEMICOLON) && !p.at(BANG) && !p.at(RBRACE) && !p.at_end() {
         if p.at(COMMA) {
             // Comma separates multiple selectors: `@extend .a, .b;`
@@ -24,6 +25,7 @@ pub fn extend_rule(p: &mut Parser<'_>) {
         }
         if p.at(HASH_LBRACE) {
             has_selector_token = true;
+            has_interpolation = true;
             let _ = super::interpolation(p);
         } else {
             // Whitespace between selector-start tokens = descendant combinator
@@ -45,7 +47,11 @@ pub fn extend_rule(p: &mut Parser<'_>) {
         }
     }
 
-    if has_combinator {
+    // Suppress combinator error when any interpolation is present — interpolation may produce
+    // content that changes the selector structure (e.g., `@extend .foo #{","} .bar`).
+    // This is intentionally broad (matches Dart Sass behavior): we can't statically know
+    // what the interpolation will produce, so we allow it.
+    if has_combinator && !has_interpolation {
         p.error("`@extend` does not support descendant combinators");
     }
 

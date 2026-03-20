@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use dashmap::DashMap;
 use sass_parser::line_index::LineIndex;
-use sass_parser::syntax::SyntaxNode;
+use sass_parser::syntax::{NodeOrToken, SyntaxNode};
 use sass_parser::syntax_kind::SyntaxKind;
 use sass_parser::text_range::TextSize;
 use serde_json::json;
@@ -216,7 +216,7 @@ pub(crate) fn handle_outgoing(
                 }
                 let Some(ident) = node
                     .children_with_tokens()
-                    .filter_map(rowan::NodeOrToken::into_token)
+                    .filter_map(NodeOrToken::into_token)
                     .find(|t| t.kind() == SyntaxKind::IDENT)
                 else {
                     continue;
@@ -236,7 +236,7 @@ pub(crate) fn handle_outgoing(
                 }
                 let Some(ident) = node
                     .children_with_tokens()
-                    .filter_map(rowan::NodeOrToken::into_token)
+                    .filter_map(NodeOrToken::into_token)
                     .filter(|t| t.kind() == SyntaxKind::IDENT)
                     .nth(1)
                 else {

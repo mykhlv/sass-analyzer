@@ -145,6 +145,10 @@ fn looks_like_declaration(p: &Parser<'_>) -> bool {
             scan_for_declaration_end(p, offset + 1)
         });
     }
+    // IE star-hack: `*width: 100px`
+    if p.at(STAR) && p.nth(1) == IDENT && p.nth(2) == COLON {
+        return scan_for_declaration_end(p, 3);
+    }
     if !p.at(IDENT) {
         return false;
     }
@@ -305,8 +309,6 @@ fn rule_set(p: &mut Parser<'_>) {
     selectors::selector_list(&mut g);
     if g.at(LBRACE) {
         block(&mut g);
-    } else {
-        g.error("expected `{`");
     }
     let _ = m.complete(&mut g, RULE_SET);
 }
@@ -351,7 +353,7 @@ pub(crate) fn block(p: &mut Parser<'_>) {
         skip_until_block_end(p);
         return;
     };
-    assert!(g.at(LBRACE));
+    debug_assert!(g.at(LBRACE));
     let m = g.start();
     g.bump(); // {
     while !g.at(RBRACE) && !g.at_end() {
@@ -366,6 +368,93 @@ pub(crate) fn block(p: &mut Parser<'_>) {
             block_item(&mut g);
         } else {
             g.err_and_bump("expected declaration or nested rule");
+        }
+    }
+    g.expect(RBRACE);
+    let _ = m.complete(&mut g, BLOCK);
+}
+
+/// Parse a `{ ... }` block for unknown/interpolated at-rules.
+///
+/// More permissive than `block()`: also accepts `NUMBER [%] { ... }` constructs
+/// (keyframe selectors) since the at-rule name may resolve to `@keyframes` at runtime.
+pub(crate) fn generic_at_rule_block(p: &mut Parser<'_>) {
+    let Ok(mut g) = p.depth_guard() else {
+        skip_until_block_end(p);
+        return;
+    };
+    debug_assert!(g.at(LBRACE));
+    let m = g.start();
+    g.bump(); // {
+    while !g.at(RBRACE) && !g.at_end() {
+        if g.at(SEMICOLON) {
+            g.bump();
+        } else if g.at(AT)
+            || g.at(DOLLAR)
+            || g.at(MINUS)
+            || g.at_ts(selectors::SELECTOR_START)
+            || g.at_ts(selectors::COMBINATOR_TOKEN)
+        {
+            block_item(&mut g);
+        } else if g.at(NUMBER) {
+            // Keyframe selector: `10% { ... }`, `from { ... }`
+            generic_keyframe_block(&mut g);
+        } else {
+            g.err_and_bump("expected declaration or nested rule");
+        }
+    }
+    g.expect(RBRACE);
+    let _ = m.complete(&mut g, BLOCK);
+}
+
+/// Parse a keyframe-like block inside a generic at-rule: `10% { ... }`, `50%, 75% { ... }`.
+fn generic_keyframe_block(p: &mut Parser<'_>) {
+    let m = p.start();
+    // Consume keyframe selectors: NUMBER [%] [, NUMBER [%]]*
+    loop {
+        if p.at(NUMBER) {
+            p.bump();
+            if p.at(PERCENT) && !p.has_whitespace_before() {
+                p.bump();
+            }
+        } else if p.at(IDENT) {
+            p.bump();
+        } else if p.at(HASH_LBRACE) {
+            let _ = expressions::interpolation(p);
+        } else {
+            break;
+        }
+        if !p.eat(COMMA) {
+            break;
+        }
+    }
+    if p.at(LBRACE) {
+        block(p);
+    }
+    let _ = m.complete(p, KEYFRAME_SELECTOR);
+}
+
+/// Parse a `{ ... }` block for CSS `@function --name()` bodies.
+///
+/// Declarations inside CSS function bodies use raw CSS values (like custom properties),
+/// not Sass expression parsing. This avoids errors on raw CSS tokens like `{}#&%^*`.
+pub(crate) fn css_function_block(p: &mut Parser<'_>) {
+    let Ok(mut g) = p.depth_guard() else {
+        skip_until_block_end(p);
+        return;
+    };
+    debug_assert!(g.at(LBRACE));
+    let m = g.start();
+    g.bump(); // {
+    while !g.at(RBRACE) && !g.at_end() {
+        if g.at(SEMICOLON) {
+            g.bump();
+        } else if g.at(AT) {
+            at_rules::at_rule(&mut g);
+        } else if g.at(IDENT) || g.at(HASH_LBRACE) || g.at(MINUS) || g.at(STAR) {
+            declarations::css_function_body_declaration(&mut g);
+        } else {
+            g.err_and_bump("expected declaration");
         }
     }
     g.expect(RBRACE);

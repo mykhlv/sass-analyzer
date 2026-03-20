@@ -1,6 +1,5 @@
 use dashmap::DashMap;
-use rowan::NodeOrToken;
-use sass_parser::syntax::{SyntaxNode, SyntaxToken};
+use sass_parser::syntax::{NodeOrToken, SyntaxNode, SyntaxToken};
 use sass_parser::syntax_kind::SyntaxKind;
 use tower_lsp_server::ls_types::{FoldingRange, FoldingRangeKind, FoldingRangeParams, Uri};
 

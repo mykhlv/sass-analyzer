@@ -329,8 +329,16 @@ fn unknown_char_is_error() {
 }
 
 #[test]
-fn multibyte_unknown_char() {
-    assert_eq!(lex("🦀"), vec![(ERROR, "🦀")]);
+fn multibyte_nonascii_is_ident() {
+    // CSS Syntax Level 3: any non-ASCII code point (>= U+0080) is a valid ident character
+    assert_eq!(lex("🦀"), vec![(IDENT, "🦀")]);
+}
+
+#[test]
+fn nonascii_symbols_are_idents() {
+    // CSS Syntax Level 3: any codepoint >= U+0080 is a valid name code point
+    assert_eq!(lex("«»"), vec![(IDENT, "«»")]);
+    assert_eq!(lex("☃x"), vec![(IDENT, "☃x")]);
 }
 
 #[test]
@@ -941,6 +949,20 @@ fn url_with_escaped_paren() {
 }
 
 #[test]
+fn url_nested_parens() {
+    // url() with nested parentheses (e.g., url(func(a, b)))
+    assert_eq!(
+        lex("url(file_join($path, $file))"),
+        vec![
+            (IDENT, "url"),
+            (LPAREN, "("),
+            (URL_CONTENTS, "file_join($path, $file)"),
+            (RPAREN, ")"),
+        ]
+    );
+}
+
+#[test]
 fn url_unterminated() {
     assert_eq!(
         lex("url(hello"),
@@ -1332,17 +1354,12 @@ fn multiple_error_chars_isolated() {
 }
 
 #[test]
-fn bom_mid_file_is_error() {
-    // BOM is only valid at start; mid-file BOM should be an error
+fn bom_mid_file_is_ident_part() {
+    // CSS Syntax Level 3: U+FEFF (BOM) is >= U+0080, so it's a valid non-ASCII
+    // ident continuation character. Mid-file BOM is part of the identifier.
     let tokens = lex("a\u{FEFF}b");
-    // The lexer treats BOM as whitespace regardless of position
-    assert_eq!(
-        tokens.len(),
-        3,
-        "should produce 3 tokens (ident, bom-token, ident)"
-    );
-    assert_eq!(tokens[0], (IDENT, "a"));
-    assert_eq!(tokens[2], (IDENT, "b"));
+    assert_eq!(tokens.len(), 1, "BOM is a valid ident character");
+    assert_eq!(tokens[0].0, IDENT);
 }
 
 // ── Round-trip ────────────────────────────────────────────────────────

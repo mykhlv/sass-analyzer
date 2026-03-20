@@ -50,8 +50,9 @@ export async function activate(context: ExtensionContext): Promise<void> {
   };
 
   const config = workspace.getConfiguration("sass-analyzer");
-  const workspaceRoot =
-    workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
+  const workspaceRoots =
+    workspace.workspaceFolders?.map((f) => f.uri.fsPath) ?? [];
+  const primaryRoot = workspaceRoots[0] ?? "";
 
   const rawLoadPaths = config.get<string[]>("loadPaths", []);
   const rawAliases = config.get<Record<string, string | string[]>>(
@@ -61,20 +62,20 @@ export async function activate(context: ExtensionContext): Promise<void> {
   const rawPrependImports = config.get<string[]>("prependImports", []);
 
   const loadPaths = rawLoadPaths.map((p) =>
-    resolveVariables(p, workspaceRoot),
+    resolveVariables(p, primaryRoot),
   );
   const importAliases: Record<string, string | string[]> = {};
   for (const [prefix, targets] of Object.entries(rawAliases)) {
     if (Array.isArray(targets)) {
       importAliases[prefix] = targets.map((t) =>
-        resolveVariables(t, workspaceRoot),
+        resolveVariables(t, primaryRoot),
       );
     } else {
-      importAliases[prefix] = resolveVariables(targets, workspaceRoot);
+      importAliases[prefix] = resolveVariables(targets, primaryRoot);
     }
   }
   const prependImports = rawPrependImports.map((p) =>
-    resolveVariables(p, workspaceRoot),
+    resolveVariables(p, primaryRoot),
   );
 
   const outputChannel = window.createOutputChannel("sass-analyzer", "log");

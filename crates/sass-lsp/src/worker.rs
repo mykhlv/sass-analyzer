@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use dashmap::DashMap;
 use sass_parser::line_index::LineIndex;
-use sass_parser::syntax::SyntaxNode;
+use sass_parser::syntax::{GreenNode, SyntaxNode};
 use sass_parser::text_range::TextRange;
 use tokio::sync::mpsc;
 use tower_lsp_server::Client;
@@ -32,7 +32,7 @@ pub(crate) fn is_sass_file(uri: &Uri) -> bool {
 pub(crate) fn parse_document(
     text: &str,
     sass: bool,
-) -> Option<(rowan::GreenNode, Vec<(String, TextRange)>)> {
+) -> Option<(GreenNode, Vec<(String, TextRange)>)> {
     let parse_fn = if sass {
         sass_parser::parse_sass
     } else {
@@ -45,7 +45,7 @@ pub(crate) fn try_incremental_or_full(
     incremental: Option<IncrementalEdit>,
     text: &str,
     uri: &Uri,
-) -> Option<(rowan::GreenNode, Vec<(String, TextRange)>)> {
+) -> Option<(GreenNode, Vec<(String, TextRange)>)> {
     let sass = is_sass_file(uri);
     // Incremental reparse uses the SCSS lexer internally, so it's not
     // compatible with indented Sass files — always do a full reparse.
@@ -146,7 +146,20 @@ pub(crate) async fn run_worker(
                         // go-to-definition, which would destroy indexed dependencies.
                         client.publish_diagnostics(uri, vec![], None).await;
                     }
-                    Task::ExternalChange { uri, text } => {
+                    Task::ExternalChange { uri, path } => {
+                        let text = match std::fs::read_to_string(&path) {
+                            Ok(t) => t,
+                            Err(e) => {
+                                tracing::warn!(
+                                    "failed to read {}: {e}",
+                                    path.display(),
+                                );
+                                continue;
+                            }
+                        };
+                        if text.len() > runtime_config.max_file_size() {
+                            continue;
+                        }
                         let Some((green, _errors)) = parse_document(&text, is_sass_file(&uri)) else {
                             continue;
                         };
@@ -285,7 +298,7 @@ async fn refresh_dependents(
 
 struct ParsedFile {
     uri: Uri,
-    green: rowan::GreenNode,
+    green: GreenNode,
     errors: Vec<(String, TextRange)>,
     line_index: LineIndex,
     text: String,
@@ -439,12 +452,7 @@ async fn check_workspace(
 }
 
 fn path_to_uri(path: &Path) -> Uri {
-    let url_string = format!("file://{}", path.display());
-    url_string.parse().unwrap_or_else(|_| {
-        format!("file:///{}", path.display())
-            .parse()
-            .expect("valid URI")
-    })
+    workspace::path_to_uri(path)
 }
 
 fn collect_sass_files(root: &Path) -> Vec<PathBuf> {
@@ -475,5 +483,145 @@ fn collect_sass_recursive(dir: &Path, out: &mut Vec<PathBuf>) {
         {
             out.push(path);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── is_sass_file ────────────────────────────────────────────────
+
+    #[test]
+    fn is_sass_file_scss_extension() {
+        let uri: Uri = "file:///project/styles.scss".parse().unwrap();
+        assert!(!is_sass_file(&uri));
+    }
+
+    #[test]
+    fn is_sass_file_sass_extension() {
+        let uri: Uri = "file:///project/styles.sass".parse().unwrap();
+        assert!(is_sass_file(&uri));
+    }
+
+    #[test]
+    fn is_sass_file_css_extension() {
+        let uri: Uri = "file:///project/styles.css".parse().unwrap();
+        assert!(!is_sass_file(&uri));
+    }
+
+    #[test]
+    fn is_sass_file_no_extension() {
+        let uri: Uri = "file:///project/styles".parse().unwrap();
+        assert!(!is_sass_file(&uri));
+    }
+
+    #[test]
+    fn is_sass_file_with_query_params() {
+        let uri: Uri = "file:///project/styles.sass?version=1".parse().unwrap();
+        assert!(is_sass_file(&uri));
+    }
+
+    #[test]
+    fn is_sass_file_partial_underscore() {
+        let uri: Uri = "file:///project/_mixins.sass".parse().unwrap();
+        assert!(is_sass_file(&uri));
+    }
+
+    // ── parse_document ──────────────────────────────────────────────
+
+    #[test]
+    fn parse_document_scss_valid() {
+        let result = parse_document(".btn { color: red; }", false);
+        assert!(result.is_some());
+        let (green, errors) = result.unwrap();
+        assert!(errors.is_empty());
+        let root = SyntaxNode::new_root(green);
+        assert_eq!(root.text().to_string(), ".btn { color: red; }");
+    }
+
+    #[test]
+    fn parse_document_scss_with_errors() {
+        let result = parse_document("{{ invalid", false);
+        assert!(result.is_some());
+        let (green, errors) = result.unwrap();
+        assert!(
+            !errors.is_empty(),
+            "malformed SCSS should produce parse errors"
+        );
+        let root = SyntaxNode::new_root(green);
+        assert_eq!(root.text().to_string(), "{{ invalid");
+    }
+
+    #[test]
+    fn parse_document_sass_syntax() {
+        let result = parse_document(".btn\n  color: red\n", true);
+        assert!(result.is_some());
+        let (green, errors) = result.unwrap();
+        assert!(errors.is_empty(), "errors: {errors:?}");
+        let root = SyntaxNode::new_root(green);
+        assert_eq!(root.text().to_string(), ".btn\n  color: red\n");
+    }
+
+    #[test]
+    fn parse_document_empty_input() {
+        let result = parse_document("", false);
+        assert!(result.is_some());
+        let (_green, errors) = result.unwrap();
+        assert!(errors.is_empty());
+    }
+
+    // ── errors_to_diagnostics ───────────────────────────────────────
+
+    #[test]
+    fn errors_to_diagnostics_empty() {
+        let li = sass_parser::line_index::LineIndex::new("");
+        let diags = errors_to_diagnostics(&[], &li, "");
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn errors_to_diagnostics_single_error() {
+        let src = ".btn { color: ; }";
+        let li = sass_parser::line_index::LineIndex::new(src);
+        let errors = vec![(
+            "expected value".to_owned(),
+            TextRange::new(14.into(), 14.into()),
+        )];
+        let diags = errors_to_diagnostics(&errors, &li, src);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].message, "expected value");
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
+        assert_eq!(diags[0].source.as_deref(), Some("sass-analyzer"));
+    }
+
+    #[test]
+    fn errors_to_diagnostics_multiple_errors() {
+        let src = ".btn { }";
+        let li = sass_parser::line_index::LineIndex::new(src);
+        let errors = vec![
+            ("error one".to_owned(), TextRange::new(0.into(), 1.into())),
+            ("error two".to_owned(), TextRange::new(5.into(), 6.into())),
+        ];
+        let diags = errors_to_diagnostics(&errors, &li, src);
+        assert_eq!(diags.len(), 2);
+        assert_eq!(diags[0].message, "error one");
+        assert_eq!(diags[1].message, "error two");
+    }
+
+    // ── try_incremental_or_full ─────────────────────────────────────
+
+    #[test]
+    fn try_incremental_or_full_no_incremental() {
+        let uri: Uri = "file:///test.scss".parse().unwrap();
+        let result = try_incremental_or_full(None, ".btn { color: red; }", &uri);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn try_incremental_or_full_sass_file_always_full() {
+        let uri: Uri = "file:///test.sass".parse().unwrap();
+        let result = try_incremental_or_full(None, ".btn\n  color: red\n", &uri);
+        assert!(result.is_some());
     }
 }

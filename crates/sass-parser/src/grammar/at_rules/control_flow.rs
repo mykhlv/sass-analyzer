@@ -10,13 +10,22 @@ pub fn if_rule(p: &mut Parser<'_>) {
     super::expressions::expr(p, super::ParseContext::SassScript);
     if p.at(LBRACE) {
         super::block(p);
-    } else {
-        p.error("expected `{`");
     }
 
-    // Consume @else / @else if / @elseif clauses
-    while p.at(AT) && (p.nth_text(1) == "else" || p.nth_text(1) == "elseif") {
-        else_clause(p);
+    // Consume @else / @else if / @elseif clauses.
+    // In indented Sass, a virtual SEMICOLON may separate the @if body from @else.
+    loop {
+        if p.at(AT) && (p.nth_text(1) == "else" || p.nth_text(1) == "elseif") {
+            else_clause(p);
+        } else if p.at(SEMICOLON)
+            && p.nth(1) == AT
+            && (p.nth_text(2) == "else" || p.nth_text(2) == "elseif")
+        {
+            p.bump(); // skip virtual SEMICOLON
+            else_clause(p);
+        } else {
+            break;
+        }
     }
 
     let _ = m.complete(p, IF_RULE);
@@ -43,8 +52,6 @@ fn else_clause(p: &mut Parser<'_>) {
 
     if p.at(LBRACE) {
         super::block(p);
-    } else {
-        p.error("expected `{`");
     }
     let _ = m.complete(p, ELSE_CLAUSE);
 }
@@ -77,8 +84,6 @@ pub fn for_rule(p: &mut Parser<'_>) {
 
     if p.at(LBRACE) {
         super::block(p);
-    } else {
-        p.error("expected `{`");
     }
     let _ = m.complete(p, FOR_RULE);
 }
@@ -110,8 +115,6 @@ pub fn each_rule(p: &mut Parser<'_>) {
 
     if p.at(LBRACE) {
         super::block(p);
-    } else {
-        p.error("expected `{`");
     }
     let _ = m.complete(p, EACH_RULE);
 }
@@ -119,19 +122,19 @@ pub fn each_rule(p: &mut Parser<'_>) {
 /// Parse the expression list after `@each ... in`: space-separated or comma-separated.
 /// Consumes until `{`, `}`, or EOF.
 fn each_list(p: &mut Parser<'_>) {
-    if p.at(LBRACE) || p.at(RBRACE) || p.at_end() {
+    if p.at(LBRACE) || p.at(RBRACE) || p.at_end() || p.at(SEMICOLON) {
         p.error("expected expression");
         return;
     }
     super::expressions::expr(p, super::ParseContext::SassScript);
     loop {
-        if p.at(LBRACE) || p.at(RBRACE) || p.at_end() {
+        if p.at(LBRACE) || p.at(RBRACE) || p.at_end() || p.at(SEMICOLON) {
             break;
         }
         if p.at(COMMA) {
             p.bump();
         }
-        if p.at(LBRACE) || p.at(RBRACE) || p.at_end() {
+        if p.at(LBRACE) || p.at(RBRACE) || p.at_end() || p.at(SEMICOLON) {
             break;
         }
         if super::expressions::expr(p, super::ParseContext::SassScript).is_none() {
@@ -148,8 +151,6 @@ pub fn while_rule(p: &mut Parser<'_>) {
     super::expressions::expr(p, super::ParseContext::SassScript);
     if p.at(LBRACE) {
         super::block(p);
-    } else {
-        p.error("expected `{`");
     }
     let _ = m.complete(p, WHILE_RULE);
 }

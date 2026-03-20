@@ -2,7 +2,7 @@
   "name": "sass-analyzer",
   "displayName": "sass-analyzer",
   "description": "Fast SCSS and Sass language support: diagnostics, completions, go to definition, hover, rename, and more — powered by a hand-written Rust parser.",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "publisher": "mykhlv",
   "license": "MIT",
   "icon": "icon.png",
@@ -20,7 +20,22 @@
     "sass",
     "css",
     "language-server",
-    "lsp"
+    "lsp",
+    "intellisense",
+    "autocomplete",
+    "go-to-definition",
+    "find-references",
+    "hover",
+    "rename",
+    "diagnostics",
+    "linter",
+    "monorepo",
+    "sass-language-server",
+    "scss-intellisense",
+    "code-completion",
+    "semantic-highlighting",
+    "workspace-symbols",
+    "signature-help"
   ],
   "galleryBanner": {
     "color": "#bf4080",
@@ -40,6 +55,13 @@
   "extensionKind": ["workspace"],
   "main": "./out/extension.js",
   "contributes": {
+    "languages": [
+      {
+        "id": "sass",
+        "aliases": ["Sass"],
+        "extensions": [".sass"]
+      }
+    ],
     "commands": [
       {
         "command": "sass-analyzer.checkWorkspace",

@@ -631,6 +631,50 @@ fn comma_as_last_token_in_file() {
     assert_eq!(kinds, vec![DOLLAR, IDENT, COLON, NUMBER, COMMA, SEMICOLON]);
 }
 
+// ── Blank line breaks continuation ───────────────────────────────────
+
+#[test]
+fn colon_continuation_broken_by_blank_line() {
+    // COLON at EOL does NOT continue across blank lines.
+    let src = "$var:\n\n  value\n";
+    check_significant(
+        src,
+        expect![[r#"
+            DOLLAR "$"
+            IDENT "var"
+            COLON ":"
+            LBRACE(virtual)
+            IDENT "value"
+            SEMICOLON(virtual)
+            RBRACE(virtual)
+        "#]],
+    );
+}
+
+#[test]
+fn percent_as_unit_not_continuation() {
+    // `50%` at EOL is a unit suffix, not modulo operator — no continuation.
+    let src = ".foo\n  width: 50%\n  color: red\n";
+    check_significant(
+        src,
+        expect![[r#"
+        DOT "."
+        IDENT "foo"
+        LBRACE(virtual)
+        IDENT "width"
+        COLON ":"
+        NUMBER "50"
+        PERCENT "%"
+        SEMICOLON(virtual)
+        IDENT "color"
+        COLON ":"
+        IDENT "red"
+        SEMICOLON(virtual)
+        RBRACE(virtual)
+    "#]],
+    );
+}
+
 // ── Bracket nesting ──────────────────────────────────────────────────
 
 #[test]

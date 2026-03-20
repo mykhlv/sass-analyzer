@@ -436,7 +436,10 @@ pub(crate) async fn handle(
             let mut items =
                 tokio::task::spawn_blocking(move || graph.complete_use_paths(&uri_clone, &partial))
                     .await
-                    .unwrap_or_default();
+                    .unwrap_or_else(|e| {
+                        tracing::warn!("path completion task failed: {e}");
+                        Vec::new()
+                    });
             for item in &mut items {
                 item.text_edit = Some(CompletionTextEdit::Edit(TextEdit {
                     range: edit_range,
