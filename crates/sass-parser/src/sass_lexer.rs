@@ -170,8 +170,13 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
                 while i + 1 < raw.len() {
                     let (nk, nt) = raw[i + 1];
                     if nk == SyntaxKind::WHITESPACE && contains_newline(nt) {
+                        // A blank line (2+ newlines) breaks comment continuation.
+                        let newlines = nt
+                            .bytes()
+                            .filter(|&b| b == b'\n' || b == b'\r' || b == b'\x0c')
+                            .count();
                         let next_indent = measure_indent_after_last_newline(nt);
-                        if next_indent > base {
+                        if newlines == 1 && next_indent > base {
                             // Continuation line — emit whitespace, then retag line tokens.
                             i += 1;
                             result.push((SyntaxKind::WHITESPACE, nt));
