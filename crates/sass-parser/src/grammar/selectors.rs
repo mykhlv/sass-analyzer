@@ -95,6 +95,10 @@ fn simple_selector(p: &mut Parser<'_>) {
                     p.bump();
                 }
             }
+            // Functional selector with escaped colon: `\:nth-child(...)`
+            if p.at(LPAREN) && !p.has_whitespace_before() {
+                eat_balanced_parens(p);
+            }
             let _ = m.complete(p, SIMPLE_SELECTOR);
         }
         PIPE => {

@@ -1,5 +1,2 @@
-non_conformant/sass/pseudo	2
-  236..237: expected rule
-  240..241: expected rule
 non_conformant/sass/selectors	1
   89..98: expected COLON
