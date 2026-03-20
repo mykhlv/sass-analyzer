@@ -39,10 +39,14 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
     let mut at_name_is_last = false;
     // Indentation of the current line (updated on each newline-containing WHITESPACE).
     let mut current_line_indent: u32 = 0;
+    // True when there was content on this line before the last significant token.
+    // Used to distinguish `*` as sole selector vs `2 *` as operator continuation.
+    let mut had_prior_content = false;
 
     let mut i = 0;
     while i < raw.len() {
         let (kind, text) = raw[i];
+        let prior_content = saw_content;
 
         // Unterminated block comments are valid in indented Sass (close at dedent/EOF).
         let kind = if kind == SyntaxKind::ERROR && text.starts_with("/*") {
@@ -114,6 +118,7 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
                     &mut after_at,
                     &mut after_dollar,
                     at_name_is_last,
+                    had_prior_content,
                 );
             }
             // Sass shorthand: `=` at statement start → @mixin
@@ -197,6 +202,10 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
                 last_sig_kind = kind;
                 last_sig_text = text;
             }
+        }
+        // Track whether the last significant token had prior content on its line.
+        if !kind.is_trivia() {
+            had_prior_content = prior_content;
         }
         i += 1;
     }
@@ -316,13 +325,22 @@ fn process_newline<'src>(
     after_at: &mut bool,
     after_dollar: &mut bool,
     at_name_is_last: bool,
+    had_prior_content: bool,
 ) {
     let new_indent = measure_indent_after_last_newline(ws_text);
     let current_indent = *indent_stack.last().unwrap_or(&0);
 
     // Continuation token at end of line → statement continues on the next line.
-    // Don't emit any virtual tokens; don't change indent stack.
-    if is_end_of_line_continuation(last_sig_kind, last_sig_text, at_name_is_last) {
+    // Exception: combinator tokens (*, ~, +, >) as the sole content on a line
+    // are selectors, not operators — don't treat them as continuation.
+    let is_continuation =
+        is_end_of_line_continuation(last_sig_kind, last_sig_text, at_name_is_last);
+    let is_sole_combinator = !had_prior_content
+        && matches!(
+            last_sig_kind,
+            SyntaxKind::STAR | SyntaxKind::TILDE | SyntaxKind::PLUS | SyntaxKind::GT
+        );
+    if is_continuation && !is_sole_combinator {
         result.push((SyntaxKind::WHITESPACE, ws_text));
         return;
     }
