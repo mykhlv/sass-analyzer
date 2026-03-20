@@ -42,6 +42,13 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
     while i < raw.len() {
         let (kind, text) = raw[i];
 
+        // Unterminated block comments are valid in indented Sass (close at dedent/EOF).
+        let kind = if kind == SyntaxKind::ERROR && text.starts_with("/*") {
+            SyntaxKind::MULTI_LINE_COMMENT
+        } else {
+            kind
+        };
+
         // Resolve any pending LBRACE before processing a non-trivia token.
         if let Some(pending_indent) = pending_lbrace
             && !kind.is_trivia()

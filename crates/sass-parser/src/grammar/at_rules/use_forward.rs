@@ -187,6 +187,14 @@ fn import_argument(p: &mut Parser<'_>) {
         if p.at(LPAREN) {
             super::eat_balanced(p, LPAREN, RPAREN);
         }
+    } else if p.at(IDENT) {
+        // Unquoted import path (legacy Sass syntax: @import other.css)
+        while !p.at_end() {
+            match p.current() {
+                COMMA | SEMICOLON | RBRACE | LBRACE => break,
+                _ => p.bump(),
+            }
+        }
     } else {
         p.error("expected import path");
         return;
