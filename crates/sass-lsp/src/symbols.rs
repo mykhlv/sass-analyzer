@@ -253,7 +253,20 @@ fn extract_param_text(node: &SyntaxNode) -> Option<String> {
 
 /// Extract the value portion of a `VARIABLE_DECL` (text after `:`, before `;`).
 fn extract_variable_value(node: &SyntaxNode) -> Option<String> {
-    let text = node.text().to_string();
+    // Build text from descendant tokens, skipping comments.
+    // node.text() includes all descendants including trivia, which causes
+    // comment text to leak into hover tooltips (especially in .sass files).
+    let text: String = node
+        .descendants_with_tokens()
+        .filter_map(NodeOrToken::into_token)
+        .filter(|t| {
+            !matches!(
+                t.kind(),
+                SyntaxKind::SINGLE_LINE_COMMENT | SyntaxKind::MULTI_LINE_COMMENT
+            )
+        })
+        .map(|t| t.text().to_string())
+        .collect();
     let colon_pos = text.find(':')?;
     let value = text[colon_pos + 1..].trim();
     let value = value.strip_suffix(';').unwrap_or(value).trim();
@@ -461,6 +474,12 @@ $primary: blue;
             s.definitions[0].value.as_deref(),
             Some("darken($base, 10%) !default")
         );
+    }
+
+    #[test]
+    fn variable_value_excludes_trailing_comment() {
+        let s = parse_symbols("$size: 16px; // Base font size");
+        assert_eq!(s.definitions[0].value.as_deref(), Some("16px"));
     }
 
     #[test]

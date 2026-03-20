@@ -26,6 +26,7 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
     let mut saw_content = false;
     let mut last_sig_kind = SyntaxKind::EOF;
     let mut last_sig_text: &str = "";
+    let mut prev_sig_kind = SyntaxKind::EOF;
     // Combined nesting depth for (), [], and #{}
     let mut nesting: u32 = 0;
     // Pending virtual LBRACE: Some(indent) when we've deferred a block-open decision.
@@ -72,6 +73,11 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
             }
         }
 
+        // Save previous significant kind before the match overwrites last_sig_kind.
+        if !kind.is_trivia() {
+            prev_sig_kind = last_sig_kind;
+        }
+
         match kind {
             SyntaxKind::LPAREN | SyntaxKind::LBRACKET | SyntaxKind::HASH_LBRACE => {
                 nesting += 1;
@@ -114,6 +120,7 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
                     &mut saw_content,
                     last_sig_kind,
                     last_sig_text,
+                    prev_sig_kind,
                     &mut pending_lbrace,
                     &mut after_at,
                     &mut after_dollar,
@@ -326,6 +333,7 @@ fn process_newline<'src>(
     saw_content: &mut bool,
     last_sig_kind: SyntaxKind,
     last_sig_text: &str,
+    prev_sig_kind: SyntaxKind,
     pending_lbrace: &mut Option<u32>,
     after_at: &mut bool,
     after_dollar: &mut bool,
@@ -338,14 +346,23 @@ fn process_newline<'src>(
     // Continuation token at end of line → statement continues on the next line.
     // Exception: combinator tokens (*, ~, +, >) as the sole content on a line
     // are selectors, not operators — don't treat them as continuation.
-    let is_continuation =
+    let mut is_continuation =
         is_end_of_line_continuation(last_sig_kind, last_sig_text, at_name_is_last);
+    // `50%` is a unit, not modulo — don't treat PERCENT after NUMBER as continuation.
+    if last_sig_kind == SyntaxKind::PERCENT && prev_sig_kind == SyntaxKind::NUMBER {
+        is_continuation = false;
+    }
     let is_sole_combinator = !had_prior_content
         && matches!(
             last_sig_kind,
             SyntaxKind::STAR | SyntaxKind::TILDE | SyntaxKind::PLUS | SyntaxKind::GT
         );
-    if is_continuation && !is_sole_combinator {
+    // Count only `\n` to avoid double-counting `\r\n` as two newlines.
+    let newlines = ws_text.bytes().filter(|&b| b == b'\n').count();
+    // Blank lines break continuation for most tokens, but COMMA continues
+    // across blank lines (matches Dart Sass behavior for selector lists).
+    let blank_line_breaks = newlines > 1 && last_sig_kind != SyntaxKind::COMMA;
+    if is_continuation && !is_sole_combinator && !blank_line_breaks {
         result.push((SyntaxKind::WHITESPACE, ws_text));
         return;
     }
