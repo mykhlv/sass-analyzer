@@ -55,6 +55,13 @@
   "extensionKind": ["workspace"],
   "main": "./out/extension.js",
   "contributes": {
+    "languages": [
+      {
+        "id": "sass",
+        "aliases": ["Sass"],
+        "extensions": [".sass"]
+      }
+    ],
     "commands": [
       {
         "command": "sass-analyzer.checkWorkspace",

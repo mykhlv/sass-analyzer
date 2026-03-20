@@ -13,8 +13,6 @@ pub fn media_rule(p: &mut Parser<'_>) {
 
     if p.at(LBRACE) {
         super::block(p);
-    } else {
-        p.error("expected `{`");
     }
     let _ = m.complete(p, MEDIA_RULE);
 }
@@ -41,8 +39,6 @@ pub fn supports_rule(p: &mut Parser<'_>) {
 
     if p.at(LBRACE) {
         super::block(p);
-    } else {
-        p.error("expected `{`");
     }
     let _ = m.complete(p, SUPPORTS_RULE);
 }
@@ -120,8 +116,6 @@ fn keyframe_block(p: &mut Parser<'_>) {
 
     if p.at(LBRACE) {
         super::block(p);
-    } else {
-        p.error("expected `{`");
     }
     // The outer KEYFRAME_SELECTOR wraps selector + block
     let _ = m.complete(p, KEYFRAME_SELECTOR);

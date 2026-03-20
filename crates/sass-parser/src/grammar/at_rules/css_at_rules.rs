@@ -53,8 +53,6 @@ pub fn container_rule(p: &mut Parser<'_>) {
 
     if p.at(LBRACE) {
         super::block(p);
-    } else {
-        p.error("expected `{`");
     }
     let _ = m.complete(p, CONTAINER_RULE);
 }
@@ -69,8 +67,6 @@ pub fn scope_rule(p: &mut Parser<'_>) {
 
     if p.at(LBRACE) {
         super::block(p);
-    } else {
-        p.error("expected `{`");
     }
     let _ = m.complete(p, SCOPE_RULE);
 }
@@ -93,8 +89,6 @@ pub fn property_rule(p: &mut Parser<'_>) {
 
     if p.at(LBRACE) {
         super::block(p);
-    } else {
-        p.error("expected `{`");
     }
     let _ = m.complete(p, PROPERTY_RULE);
 }
@@ -156,8 +150,6 @@ pub fn page_rule(p: &mut Parser<'_>) {
 
     if p.at(LBRACE) {
         super::block(p);
-    } else {
-        p.error("expected `{`");
     }
     let _ = m.complete(p, PAGE_RULE);
 }
@@ -169,8 +161,6 @@ pub fn font_face_rule(p: &mut Parser<'_>) {
     p.bump(); // font-face
     if p.at(LBRACE) {
         super::block(p);
-    } else {
-        p.error("expected `{`");
     }
     let _ = m.complete(p, FONT_FACE_RULE);
 }

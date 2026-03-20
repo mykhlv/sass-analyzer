@@ -42,8 +42,8 @@ pub fn at_rule(p: &mut Parser<'_>) {
     let name = p.nth_text(1);
 
     match name {
-        "mixin" => mixin::mixin_rule(p),
-        "include" => mixin::include_rule(p),
+        "mixin" | "=" => mixin::mixin_rule(p),
+        "include" | "+" => mixin::include_rule(p),
         "content" => mixin::content_rule(p),
         "function" => {
             if is_css_function_rule(p) {

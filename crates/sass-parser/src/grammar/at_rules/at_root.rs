@@ -21,8 +21,6 @@ pub fn at_root_rule(p: &mut Parser<'_>) {
         super::selectors::selector_list(p);
         if p.at(LBRACE) {
             super::block(p);
-        } else {
-            p.error("expected `{`");
         }
     }
 

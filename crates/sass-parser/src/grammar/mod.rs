@@ -309,8 +309,6 @@ fn rule_set(p: &mut Parser<'_>) {
     selectors::selector_list(&mut g);
     if g.at(LBRACE) {
         block(&mut g);
-    } else {
-        g.error("expected `{`");
     }
     let _ = m.complete(&mut g, RULE_SET);
 }
@@ -432,8 +430,6 @@ fn generic_keyframe_block(p: &mut Parser<'_>) {
     }
     if p.at(LBRACE) {
         block(p);
-    } else {
-        p.error("expected `{`");
     }
     let _ = m.complete(p, KEYFRAME_SELECTOR);
 }

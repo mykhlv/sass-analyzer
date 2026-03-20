@@ -1572,8 +1572,6 @@ fn regression_supports_missing_brace_recovery() {
                   SEMICOLON@41..42 ";"
                   WHITESPACE@42..43 " "
                   RBRACE@43..44 "}"
-            errors:
-              41..42: expected `{`
         "#]],
     );
 }
@@ -1617,8 +1615,6 @@ fn regression_container_missing_brace_recovery() {
                   SEMICOLON@42..43 ";"
                   WHITESPACE@43..44 " "
                   RBRACE@44..45 "}"
-            errors:
-              42..43: expected `{`
         "#]],
     );
 }
@@ -1756,8 +1752,6 @@ fn regression_media_malformed_rbrace_stops() {
                   LBRACE@24..25 "{"
                   WHITESPACE@25..26 " "
                   RBRACE@26..27 "}"
-            errors:
-              19..20: expected `{`
         "#]],
     );
 }

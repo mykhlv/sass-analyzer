@@ -1,0 +1,24 @@
+css/comment/converts_newlines/sass/cr	1
+  0..15: expected rule
+css/comment/converts_newlines/sass/ff	1
+  0..15: expected rule
+directives/import/css/unquoted	2
+  8..13: expected import path
+  8..13: expected SEMICOLON
+expressions/comments/loud/sass/indented/open	1
+  0..8: expected rule
+expressions/comments/loud/sass/inline/open	1
+  0..5: expected rule
+expressions/comments/silent/sass/indented/interpolation	1
+  13..14: expected rule
+non_conformant/sass/comment/loud	1
+  144..309: expected rule
+non_conformant/sass/import/unquoted	3
+  8..16: expected import path
+  8..16: expected SEMICOLON
+  21..22: expected rule
+non_conformant/sass/pseudo	2
+  236..237: expected rule
+  240..241: expected rule
+non_conformant/sass/selectors	1
+  89..98: expected COLON

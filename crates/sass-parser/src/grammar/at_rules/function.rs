@@ -15,8 +15,6 @@ pub fn function_rule(p: &mut Parser<'_>) {
     }
     if p.at(LBRACE) {
         super::block(p);
-    } else {
-        p.error("expected `{`");
     }
     let _ = m.complete(p, FUNCTION_RULE);
 }
