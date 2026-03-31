@@ -336,6 +336,149 @@ fn if_else() {
     );
 }
 
+// Nested @if/@else inside @function — body starts with `$variable` declaration
+#[test]
+fn nested_if_else_in_function_tree() {
+    let src = "@function foo($bg)\n  $x: 100\n  @if $x > 128\n    @return $dark\n  @else\n    @return $light\n";
+    check_tree(
+        src,
+        expect![[r#"
+            SOURCE_FILE@0..89
+              FUNCTION_RULE@0..88
+                AT@0..1 "@"
+                IDENT@1..9 "function"
+                WHITESPACE@9..10 " "
+                IDENT@10..13 "foo"
+                PARAM_LIST@13..18
+                  LPAREN@13..14 "("
+                  PARAM@14..17
+                    DOLLAR@14..15 "$"
+                    IDENT@15..17 "bg"
+                  RPAREN@17..18 ")"
+                BLOCK@18..88
+                  WHITESPACE@18..21 "\n  "
+                  LBRACE@21..21 ""
+                  VARIABLE_DECL@21..28
+                    DOLLAR@21..22 "$"
+                    IDENT@22..23 "x"
+                    COLON@23..24 ":"
+                    NUMBER_LITERAL@24..28
+                      WHITESPACE@24..25 " "
+                      NUMBER@25..28 "100"
+                    SEMICOLON@28..28 ""
+                  IF_RULE@28..88
+                    WHITESPACE@28..31 "\n  "
+                    AT@31..32 "@"
+                    IDENT@32..34 "if"
+                    BINARY_EXPR@34..43
+                      VARIABLE_REF@34..37
+                        WHITESPACE@34..35 " "
+                        DOLLAR@35..36 "$"
+                        IDENT@36..37 "x"
+                      WHITESPACE@37..38 " "
+                      GT@38..39 ">"
+                      NUMBER_LITERAL@39..43
+                        WHITESPACE@39..40 " "
+                        NUMBER@40..43 "128"
+                    BLOCK@43..61
+                      WHITESPACE@43..48 "\n    "
+                      LBRACE@48..48 ""
+                      RETURN_RULE@48..61
+                        AT@48..49 "@"
+                        IDENT@49..55 "return"
+                        VARIABLE_REF@55..61
+                          WHITESPACE@55..56 " "
+                          DOLLAR@56..57 "$"
+                          IDENT@57..61 "dark"
+                        SEMICOLON@61..61 ""
+                      RBRACE@61..61 ""
+                    ELSE_CLAUSE@61..88
+                      WHITESPACE@61..64 "\n  "
+                      AT@64..65 "@"
+                      IDENT@65..69 "else"
+                      BLOCK@69..88
+                        WHITESPACE@69..74 "\n    "
+                        LBRACE@74..74 ""
+                        RETURN_RULE@74..88
+                          AT@74..75 "@"
+                          IDENT@75..81 "return"
+                          VARIABLE_REF@81..88
+                            WHITESPACE@81..82 " "
+                            DOLLAR@82..83 "$"
+                            IDENT@83..88 "light"
+                          SEMICOLON@88..88 ""
+                        RBRACE@88..88 ""
+                  RBRACE@88..88 ""
+              WHITESPACE@88..89 "\n"
+        "#]],
+    );
+}
+
+// Nested @if (no @else) inside @function — body starts with `$variable` declaration
+#[test]
+fn nested_if_no_else_in_function_tree() {
+    let src = "@function foo($s)\n  $i: 1\n  @if $i\n    @return $s\n  @return $s\n";
+    check_tree(
+        src,
+        expect![[r#"
+            SOURCE_FILE@0..63
+              FUNCTION_RULE@0..62
+                AT@0..1 "@"
+                IDENT@1..9 "function"
+                WHITESPACE@9..10 " "
+                IDENT@10..13 "foo"
+                PARAM_LIST@13..17
+                  LPAREN@13..14 "("
+                  PARAM@14..16
+                    DOLLAR@14..15 "$"
+                    IDENT@15..16 "s"
+                  RPAREN@16..17 ")"
+                BLOCK@17..62
+                  WHITESPACE@17..20 "\n  "
+                  LBRACE@20..20 ""
+                  VARIABLE_DECL@20..25
+                    DOLLAR@20..21 "$"
+                    IDENT@21..22 "i"
+                    COLON@22..23 ":"
+                    NUMBER_LITERAL@23..25
+                      WHITESPACE@23..24 " "
+                      NUMBER@24..25 "1"
+                    SEMICOLON@25..25 ""
+                  IF_RULE@25..49
+                    WHITESPACE@25..28 "\n  "
+                    AT@28..29 "@"
+                    IDENT@29..31 "if"
+                    VARIABLE_REF@31..34
+                      WHITESPACE@31..32 " "
+                      DOLLAR@32..33 "$"
+                      IDENT@33..34 "i"
+                    BLOCK@34..49
+                      WHITESPACE@34..39 "\n    "
+                      LBRACE@39..39 ""
+                      RETURN_RULE@39..49
+                        AT@39..40 "@"
+                        IDENT@40..46 "return"
+                        VARIABLE_REF@46..49
+                          WHITESPACE@46..47 " "
+                          DOLLAR@47..48 "$"
+                          IDENT@48..49 "s"
+                        SEMICOLON@49..49 ""
+                      RBRACE@49..49 ""
+                  RETURN_RULE@49..62
+                    WHITESPACE@49..52 "\n  "
+                    AT@52..53 "@"
+                    IDENT@53..59 "return"
+                    VARIABLE_REF@59..62
+                      WHITESPACE@59..60 " "
+                      DOLLAR@60..61 "$"
+                      IDENT@61..62 "s"
+                    SEMICOLON@62..62 ""
+                  RBRACE@62..62 ""
+              WHITESPACE@62..63 "\n"
+        "#]],
+    );
+}
+
 // ── Comments ─────────────────────────────────────────────────────────
 
 #[test]
