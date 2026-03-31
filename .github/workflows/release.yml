@@ -142,7 +142,7 @@ jobs:
       - name: Publish to VS Code Marketplace
         run: |
           for vsix in *.vsix; do
-            npx @vscode/vsce publish --packagePath "$vsix"
+            npx @vscode/vsce publish --packagePath "$vsix" || echo "Skipped $vsix (already published or error)"
           done
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
@@ -166,7 +166,7 @@ jobs:
       - name: Publish to Open VSX Registry
         run: |
           for vsix in *.vsix; do
-            npx ovsx publish "$vsix" -p "$OVSX_PAT"
+            npx ovsx publish "$vsix" -p "$OVSX_PAT" || echo "Skipped $vsix (already published or error)"
           done
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
