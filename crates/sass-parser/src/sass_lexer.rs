@@ -60,8 +60,14 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
         if let Some(pending_indent) = pending_lbrace
             && !kind.is_trivia()
         {
-            if (after_at || after_dollar) && is_start_of_line_continuation(kind, text) {
+            if ((after_at && at_name_is_last) || after_dollar)
+                && is_start_of_line_continuation(kind, text)
+            {
                 // Cancel the pending LBRACE — this line continues the header.
+                // For at-rules, only continue when the directive name was the last
+                // significant token (e.g. `@for\n  $i`).  When the header already
+                // has arguments/params (at_name_is_last == false), the indented
+                // line starts the body (`@function foo($bg)\n  $x: 1`).
                 pending_lbrace = None;
             } else {
                 // Emit the deferred LBRACE.
