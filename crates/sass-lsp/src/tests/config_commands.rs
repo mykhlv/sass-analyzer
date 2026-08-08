@@ -435,17 +435,17 @@ async fn watched_files_skips_open_files() {
 #[tokio::test]
 async fn did_open_exceeding_max_file_size() {
     let (mut reader, mut writer) = spawn_server();
-    // Set maxFileSize to 10 bytes — anything larger is skipped.
+    // Set maxFileSize to the 1024-byte floor — anything larger is skipped.
     let _resp = do_initialize_with(
         &mut reader,
         &mut writer,
-        serde_json::json!({ "maxFileSize": 10 }),
+        serde_json::json!({ "maxFileSize": 1024 }),
     )
     .await;
 
-    // Open a file that exceeds the limit (> 10 bytes).
-    let large_text = "$variable: red;\n.a { color: blue; }";
-    assert!(large_text.len() > 10);
+    // Open a file that exceeds the limit (> 1024 bytes).
+    let large_text = "$variable: red;\n.a { color: blue; }\n".repeat(40);
+    assert!(large_text.len() > 1024);
     send_msg(
         &mut writer,
         &serde_json::json!({
@@ -456,7 +456,7 @@ async fn did_open_exceeding_max_file_size() {
                     "uri": "file:///big.scss",
                     "languageId": "scss",
                     "version": 1,
-                    "text": large_text
+                    "text": &large_text
                 }
             }
         }),

@@ -221,6 +221,7 @@ impl ModuleGraph {
     }
 
     /// Get the green tree for a URI, re-parsing from stored source if evicted.
+    /// The parser (SCSS or indented Sass) is chosen by the URI's file extension.
     fn get_or_reparse_green(&self, uri: &Uri) -> Option<GreenNode> {
         let info = self.files.get(uri)?;
         if let Some(green) = &info.green {
@@ -229,10 +230,13 @@ impl ModuleGraph {
         // Re-parse from stored text (invariant: source_text is Some when green is None).
         let source = info.source_text.clone()?;
         drop(info);
-        let (green, _) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            sass_parser::parse_scss(&source)
-        }))
-        .ok()?;
+        let parse_fn = if crate::worker::is_sass_file(uri) {
+            sass_parser::parse_sass
+        } else {
+            sass_parser::parse_scss
+        };
+        let (green, _) =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| parse_fn(&source))).ok()?;
         if let Some(mut info) = self.files.get_mut(uri) {
             info.green = Some(green.clone());
         }
@@ -293,11 +297,16 @@ impl ModuleGraph {
             }
 
             let Some(base) = &base_path else { continue };
-            let resolver = self
-                .resolver
-                .read()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let resolved = resolver.resolve(&import_ref.path, base);
+            // Scope the guard to the resolve call: index_dependency below recurses
+            // into index_file, and a recursive read lock can deadlock against
+            // set_resolver waiting to write.
+            let resolved = {
+                let resolver = self
+                    .resolver
+                    .read()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                resolver.resolve(&import_ref.path, base)
+            };
 
             if let Ok(ResolvedModule::File(target_path)) = resolved {
                 let target_uri = path_to_uri(&target_path);
@@ -342,14 +351,15 @@ impl ModuleGraph {
             .clone();
         for spec in &prepend {
             if let Some(base) = &base_path {
-                let resolver = self
-                    .resolver
-                    .read()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                let resolved = resolver.resolve(spec, base);
+                let resolved = {
+                    let resolver = self
+                        .resolver
+                        .read()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    resolver.resolve(spec, base)
+                };
                 if let Ok(ResolvedModule::File(target_path)) = resolved {
                     let target_uri = path_to_uri(&target_path);
-                    drop(resolver);
                     self.index_dependency(&target_uri, &target_path);
                     resolved_edges.push(ImportEdge {
                         target: target_uri,
@@ -434,8 +444,11 @@ impl ModuleGraph {
         name: &str,
         kind: symbols::SymbolKind,
     ) -> Option<(Uri, symbols::Symbol)> {
-        let edges = self.edges.get(from)?;
-        for edge in edges.value() {
+        // Clone the edges out: find_in_module below re-enters `self.files` and
+        // `self.edges`, and holding a shard guard across it can deadlock against
+        // the worker inserting into the same shard.
+        let edges: Vec<ImportEdge> = self.edges.get(from).map(|e| e.value().clone())?;
+        for edge in &edges {
             let ns_match = match &edge.namespace {
                 Namespace::Named(n) => n == namespace,
                 Namespace::Star => false, // star imports don't use namespace prefix
@@ -471,9 +484,12 @@ impl ModuleGraph {
             return Some((from.clone(), sym.clone()));
         }
 
-        // 2. Star imports and @import (merged scope)
-        let edges = self.edges.get(from)?;
-        for edge in edges.value() {
+        // 2. Star imports and @import (merged scope). Clone the edges out: the
+        // recursive find_in_module call below re-enters `self.files` and
+        // `self.edges`, and holding a shard guard across it can deadlock against
+        // the worker inserting into the same shard.
+        let edges: Vec<ImportEdge> = self.edges.get(from).map(|e| e.value().clone())?;
+        for edge in &edges {
             let is_merged =
                 matches!(edge.namespace, Namespace::Star) || edge.kind == ImportKind::Import;
             if !is_merged {
@@ -501,27 +517,27 @@ impl ModuleGraph {
             }
         }
 
-        // Imported symbols
-        if let Some(edges) = self.edges.get(from) {
-            let mut visited = HashSet::new();
-            for edge in edges.value() {
-                let prefix = match &edge.namespace {
-                    Namespace::Named(n) => Some(n.clone()),
-                    Namespace::Star => None,
-                };
-                // @import merges into scope (no prefix)
-                let prefix = if edge.kind == ImportKind::Import {
-                    None
-                } else {
-                    prefix
-                };
-                self.collect_module_symbols(
-                    &edge.target,
-                    prefix.as_deref(),
-                    &mut result,
-                    &mut visited,
-                );
-            }
+        // Imported symbols. Clone the edges out: collect_module_symbols below
+        // recurses into `self.edges`, and holding a shard guard across it can
+        // deadlock against the worker inserting into the same shard.
+        let edges: Vec<ImportEdge> = self
+            .edges
+            .get(from)
+            .map(|e| e.value().clone())
+            .unwrap_or_default();
+        let mut visited = HashSet::new();
+        for edge in &edges {
+            let prefix = match &edge.namespace {
+                Namespace::Named(n) => Some(n.clone()),
+                Namespace::Star => None,
+            };
+            // @import merges into scope (no prefix)
+            let prefix = if edge.kind == ImportKind::Import {
+                None
+            } else {
+                prefix
+            };
+            self.collect_module_symbols(&edge.target, prefix.as_deref(), &mut result, &mut visited);
         }
 
         result
@@ -563,29 +579,33 @@ impl ModuleGraph {
             }
         }
 
-        // Follow @forward edges with visibility filtering
-        if let Some(edges) = self.edges.get(uri) {
-            for edge in edges.value() {
-                if edge.kind == ImportKind::Forward {
-                    // Strip prefix if present
-                    let search_name = if let Some(pfx) = &edge.visibility.prefix {
-                        let Some(stripped) = name.strip_prefix(pfx.as_str()) else {
-                            continue;
-                        };
-                        stripped
-                    } else {
-                        name
-                    };
-
-                    if !is_visible(&edge.visibility, search_name) {
+        // Follow @forward edges with visibility filtering. The edges are cloned out
+        // of the map first: holding a shard guard across the recursion below can
+        // deadlock against the worker inserting into `edges`.
+        let edges: Vec<ImportEdge> = self
+            .edges
+            .get(uri)
+            .map(|e| e.value().clone())
+            .unwrap_or_default();
+        for edge in &edges {
+            if edge.kind == ImportKind::Forward {
+                // Strip prefix if present
+                let search_name = if let Some(pfx) = &edge.visibility.prefix {
+                    let Some(stripped) = name.strip_prefix(pfx.as_str()) else {
                         continue;
-                    }
+                    };
+                    stripped
+                } else {
+                    name
+                };
 
-                    if let Some(result) =
-                        self.find_in_module(&edge.target, search_name, kind, visited)
-                    {
-                        return Some(result);
-                    }
+                if !is_visible(&edge.visibility, search_name) {
+                    continue;
+                }
+
+                if let Some(result) = self.find_in_module(&edge.target, search_name, kind, visited)
+                {
+                    return Some(result);
                 }
             }
         }
@@ -651,17 +671,23 @@ impl ModuleGraph {
             }
         }
 
-        if let Some(edges) = self.edges.get(uri) {
-            for edge in edges.value() {
-                if edge.kind == ImportKind::Forward {
-                    self.collect_module_symbols_filtered(
-                        &edge.target,
-                        ns_prefix,
-                        &edge.visibility,
-                        result,
-                        visited,
-                    );
-                }
+        // Clone the edges out: collect_module_symbols_filtered recurses back into
+        // `self.edges`, and holding a shard guard across that can deadlock against
+        // the worker inserting into the same shard.
+        let edges: Vec<ImportEdge> = self
+            .edges
+            .get(uri)
+            .map(|e| e.value().clone())
+            .unwrap_or_default();
+        for edge in &edges {
+            if edge.kind == ImportKind::Forward {
+                self.collect_module_symbols_filtered(
+                    &edge.target,
+                    ns_prefix,
+                    &edge.visibility,
+                    result,
+                    visited,
+                );
             }
         }
     }
@@ -935,12 +961,18 @@ impl ModuleGraph {
         let file_uris: Vec<Uri> = self.files.iter().map(|e| e.key().clone()).collect();
 
         for file_uri in &file_uris {
-            if let Some(info) = self.files.get(file_uri) {
+            // Clone the Arc out of the map: resolve_unqualified and resolve_qualified
+            // below both re-enter `self.files`, and holding a shard guard across them
+            // can deadlock against the worker inserting into the same shard.
+            let file_symbols = self
+                .files
+                .get(file_uri)
+                .map(|info| Arc::clone(&info.symbols));
+            if let Some(info) = &file_symbols {
                 // Include declaration if requested
                 if include_declaration
                     && file_uri == target_uri
                     && let Some(sym) = info
-                        .symbols
                         .definitions
                         .iter()
                         .find(|s| s.name == target_name && s.kind == target_kind)
@@ -949,7 +981,7 @@ impl ModuleGraph {
                 }
 
                 // Check unqualified references from SymbolRef
-                for sym_ref in &info.symbols.references {
+                for sym_ref in &info.references {
                     if sym_ref.name != target_name || sym_ref.kind != ref_kind {
                         continue;
                     }
@@ -962,22 +994,16 @@ impl ModuleGraph {
                 }
             }
 
-            // Check namespace-qualified references via CST walk
-            if let Some(green) = self.get_or_reparse_green(file_uri) {
-                let root = SyntaxNode::new_root(green);
-                for node in root.descendants() {
-                    if node.kind() != SyntaxKind::NAMESPACE_REF {
-                        continue;
-                    }
-                    if let Some((ns, name, kind, range)) = extract_ns_ref_info(&node)
-                        && name == target_name
-                        && kind == target_kind
-                        && let Some((resolved_uri, _)) =
-                            self.resolve_qualified(file_uri, &ns, &name, target_kind)
-                        && &resolved_uri == target_uri
-                    {
-                        results.push((file_uri.clone(), range));
-                    }
+            // Check namespace-qualified references from the pre-built index.
+            for ns_ref in file_symbols.iter().flat_map(|s| s.namespace_refs.iter()) {
+                if ns_ref.name != target_name || ns_ref.kind != target_kind {
+                    continue;
+                }
+                if let Some((resolved_uri, _)) =
+                    self.resolve_qualified(file_uri, &ns_ref.namespace, &ns_ref.name, target_kind)
+                    && &resolved_uri == target_uri
+                {
+                    results.push((file_uri.clone(), ns_ref.range));
                 }
             }
         }
@@ -1014,10 +1040,18 @@ impl ModuleGraph {
     ) -> Vec<(Uri, TextRange)> {
         let mut results = Vec::new();
 
-        for entry in &self.edges {
-            let file_uri = entry.key();
-            let edges = entry.value();
+        // Snapshot the edges before iterating: `for entry in &self.edges` holds a
+        // read guard on the current shard for as long as it takes to process every
+        // entry in that shard, and forward_reaches below re-enters `self.edges` —
+        // if it lands on the same shard, that can deadlock against the worker
+        // inserting into it.
+        let all_edges: Vec<(Uri, Vec<ImportEdge>)> = self
+            .edges
+            .iter()
+            .map(|e| (e.key().clone(), e.value().clone()))
+            .collect();
 
+        for (file_uri, edges) in &all_edges {
             for edge in edges {
                 if edge.kind != ImportKind::Forward {
                     continue;
@@ -1075,14 +1109,19 @@ impl ModuleGraph {
             return false;
         }
         // Check if this module directly defines the symbol (it IS the target)
-        // Also follow further @forward chains
-        if let Some(edges) = self.edges.get(current) {
-            for edge in edges.value() {
-                if edge.kind == ImportKind::Forward
-                    && self.forward_reaches_inner(&edge.target, target, visited)
-                {
-                    return true;
-                }
+        // Also follow further @forward chains. Clone the edges out first: the
+        // recursive call re-enters `self.edges`, and holding a shard guard across
+        // it can deadlock against the worker inserting into the same shard.
+        let edges: Vec<ImportEdge> = self
+            .edges
+            .get(current)
+            .map(|e| e.value().clone())
+            .unwrap_or_default();
+        for edge in &edges {
+            if edge.kind == ImportKind::Forward
+                && self.forward_reaches_inner(&edge.target, target, visited)
+            {
+                return true;
             }
         }
         false
@@ -1405,16 +1444,6 @@ pub(crate) fn path_to_uri(path: &Path) -> Uri {
             }
         }
     })
-}
-
-// ── Find-references helpers ─────────────────────────────────────────
-
-/// Extract namespace, name, kind, and selection range from a `NAMESPACE_REF` node.
-fn extract_ns_ref_info(
-    node: &SyntaxNode,
-) -> Option<(String, String, symbols::SymbolKind, TextRange)> {
-    let info = crate::navigation::extract_namespace_ref_info(node)?;
-    Some((info.namespace?, info.name, info.kind, info.range))
 }
 
 // ── Helpers for external callers ────────────────────────────────────
@@ -2302,5 +2331,116 @@ mod tests {
 
         let r = graph.resolve_unqualified(&a, "x", symbols::SymbolKind::Variable);
         assert!(r.is_some());
+    }
+
+    #[test]
+    fn evicted_sass_file_reparses_with_the_sass_parser() {
+        let config = std::sync::Arc::new(crate::config::RuntimeConfig::default());
+        config.apply(&crate::config::SassAnalyzerConfig {
+            max_cached_trees: Some(1),
+            ..Default::default()
+        });
+        let graph = ModuleGraph::new(std::sync::Arc::clone(&config));
+
+        let source = ".btn\n  color: red\n";
+        let (green, _) = sass_parser::parse_sass(source);
+        let line_index = sass_parser::line_index::LineIndex::new(source);
+        let symbols = {
+            let root = SyntaxNode::new_root(green.clone());
+            std::sync::Arc::new(symbols::collect_symbols(&root))
+        };
+        let uri: Uri = "file:///a.sass".parse().unwrap();
+        graph.index_file(&uri, green, symbols, line_index, source.to_owned());
+
+        // Index a second file so the first one's green tree is evicted.
+        let other = "$x: 1;\n";
+        let (other_green, _) = sass_parser::parse_scss(other);
+        let other_index = sass_parser::line_index::LineIndex::new(other);
+        let other_symbols = {
+            let root = SyntaxNode::new_root(other_green.clone());
+            std::sync::Arc::new(symbols::collect_symbols(&root))
+        };
+        let other_uri: Uri = "file:///b.scss".parse().unwrap();
+        graph.index_file(
+            &other_uri,
+            other_green,
+            other_symbols,
+            other_index,
+            other.to_owned(),
+        );
+
+        let green = graph.get_green(&uri).expect("green tree");
+        let root = SyntaxNode::new_root(green);
+        assert_eq!(root.text().to_string(), source, "lossless round-trip");
+        assert!(
+            root.descendants()
+                .any(|n| n.kind() == SyntaxKind::DECLARATION),
+            "indented Sass re-parsed as SCSS produces no DECLARATION; tree was:\n{root:#?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "stress test for lock recursion; run manually with --ignored"]
+    fn concurrent_set_resolver_and_index_does_not_deadlock() {
+        use std::sync::Arc;
+
+        const INDEXED: usize = 500;
+
+        // `_other.scss` must exist on disk and actually resolve: `ModuleResolver::resolve`
+        // stats the filesystem, so a `@use` of a file that isn't there returns `NotFound`
+        // and `index_file` never reaches `index_dependency`, never recurses into itself,
+        // and never re-takes `self.resolver.read()` on the same thread — the exact path
+        // Steps 1-2 fix. `_other.scss` importing itself makes the *recursive* `index_file`
+        // call resolve an import too, so it takes the resolver guard a second time before
+        // `index_dependency`'s `self.files.contains_key` check (see `self_import_does_not_loop`)
+        // stops the recursion.
+        let dir =
+            std::env::temp_dir().join(format!("sass-analyzer-lock-stress-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create stress test dir");
+        std::fs::write(dir.join("_other.scss"), "@use \"other\";\n$other: 1;\n")
+            .expect("write _other.scss");
+
+        let config = Arc::new(crate::config::RuntimeConfig::default());
+        let graph = Arc::new(ModuleGraph::new(config));
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+        let writer = {
+            let graph = Arc::clone(&graph);
+            let stop = Arc::clone(&stop);
+            std::thread::spawn(move || {
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    graph.set_resolver(ModuleResolver::new());
+                }
+            })
+        };
+
+        for i in 0..INDEXED {
+            let src = "@use \"other\";\n$a: 1;\n";
+            let (green, _) = sass_parser::parse_scss(src);
+            let line_index = sass_parser::line_index::LineIndex::new(src);
+            let syms = {
+                let root = SyntaxNode::new_root(green.clone());
+                Arc::new(symbols::collect_symbols(&root))
+            };
+            let uri = path_to_uri(&dir.join(format!("f{i}.scss")));
+            graph.index_file(&uri, green, syms, line_index, src.to_owned());
+        }
+
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        writer.join().unwrap();
+
+        // If the @use above never resolved, `_other.scss` would never have been pulled
+        // in via `index_dependency`, and everything above would be exercising ordinary
+        // reader/writer contention rather than the recursive-lock hazard. Guard against
+        // that regressing back to a vacuous test.
+        let indexed_count = graph.file_count();
+        assert!(
+            indexed_count > INDEXED,
+            "expected _other.scss to be indexed as a dependency via index_dependency \
+             (file_count = {indexed_count}, {INDEXED} files were indexed directly); \
+             the @use \"other\" import must not have resolved"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

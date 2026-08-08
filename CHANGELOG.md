@@ -16,6 +16,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `@for $i` followed by an indented `from 1 through 10`, `@each $a` followed by `in b, c`,
   and `@function a` followed by `()` regressed in 0.3.4 (indented Sass compliance
   96.82% → 99.71%)
+- LSP: indented `.sass` files are no longer re-parsed with the SCSS parser after the tree
+  cache evicts them, which silently produced a file with no declarations
+- LSP: find-references and rename no longer re-parse every file in the workspace, which
+  also thrashed the tree cache on large projects
+- LSP: releasing the resolver and module-graph locks before recursing removes a potential
+  deadlock between indexing and a concurrent configuration change
+- LSP: `${workspaceFolder}` in `loadPaths`, `importAliases` and `prependImports` is now
+  resolved when settings change, not only at startup
+- LSP: secondary folders of a multi-root workspace stay readable after a settings change
+- LSP: changing `loadPaths` re-resolves imports in open files without requiring an edit
+- LSP: a stale parse can no longer overwrite a newer document state
+- LSP: degenerate configuration values (`maxFileSize: 0`, `maxCachedTrees: 0`) are clamped
 
 ### Known issues
 - A nested property whose only value evidence sits inside brackets — for example
