@@ -233,19 +233,18 @@ pub(crate) async fn run_worker(
                         semantic, &line_index, &text,
                     ));
 
-                    documents.insert(
-                        uri.clone(),
-                        DocumentState {
-                            version,
-                            text,
-                            green,
-                            errors,
-                            line_index,
-                            symbols: file_symbols,
-                        },
-                    );
-
                     if is_current {
+                        documents.insert(
+                            uri.clone(),
+                            DocumentState {
+                                version,
+                                text,
+                                green,
+                                errors,
+                                line_index,
+                                symbols: file_symbols,
+                            },
+                        );
                         client
                             .publish_diagnostics(uri, all_diagnostics, Some(version))
                             .await;
