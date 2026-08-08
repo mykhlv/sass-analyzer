@@ -17,13 +17,15 @@ fn significant(source: &str) -> Vec<(SyntaxKind, &str)> {
 }
 
 fn format_tokens(toks: &[(SyntaxKind, &str)]) -> String {
+    use std::fmt::Write;
+
     let mut buf = String::new();
     for (kind, text) in toks {
         if text.is_empty() {
-            buf.push_str(&format!("{kind:?}(virtual)\n"));
+            let _ = writeln!(buf, "{kind:?}(virtual)");
         } else {
             let escaped = text.replace('\n', "\\n").replace('\t', "\\t");
-            buf.push_str(&format!("{kind:?} \"{escaped}\"\n"));
+            let _ = writeln!(buf, "{kind:?} \"{escaped}\"");
         }
     }
     buf

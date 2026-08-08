@@ -1211,7 +1211,7 @@ mod tests {
 
     // ── round-trip / integration tests ──────────────────────────────
 
-    /// Apply sorted, non-overlapping LSP TextEdits to source text (last-to-first).
+    /// Apply sorted, non-overlapping LSP `TextEdits` to source text (last-to-first).
     fn apply_edits(src: &str, edits: &[TextEdit]) -> String {
         let mut result = src.to_owned();
         // Apply in reverse order to preserve offsets
@@ -1314,7 +1314,7 @@ mod tests {
         assert_eq!(edits.len(), 2);
         // Mixin body should use tab indent, not 2 spaces
         assert!(
-            edits[0].new_text.contains("\t"),
+            edits[0].new_text.contains('\t'),
             "Expected tab indent in mixin body"
         );
     }

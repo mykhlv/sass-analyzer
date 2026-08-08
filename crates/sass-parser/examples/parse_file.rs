@@ -3,13 +3,13 @@ use std::process;
 
 use sass_parser::syntax::{SyntaxNode, debug_tree};
 
+// Case-sensitive intentionally — matches filesystem behavior on Linux and is
+// consistent with sass-lsp's worker::is_sass_file.
+#[allow(clippy::case_sensitive_file_extension_comparisons)]
 fn main() {
-    let path = match env::args().nth(1) {
-        Some(p) => p,
-        None => {
-            eprintln!("Usage: parse_file <path.scss|path.sass>");
-            process::exit(1);
-        }
+    let Some(path) = env::args().nth(1) else {
+        eprintln!("Usage: parse_file <path.scss|path.sass>");
+        process::exit(1);
     };
 
     let source = match std::fs::read_to_string(&path) {

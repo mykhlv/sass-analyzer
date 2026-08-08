@@ -632,11 +632,11 @@ async fn call_hierarchy_cross_file_incoming() {
 
         let resp = recv_response(&mut reader, &mut writer, id).await;
         id += 1;
-        if let Some(items) = resp["result"].as_array() {
-            if !items.is_empty() {
-                assert_eq!(items[0]["name"], "double");
-                break items[0].clone();
-            }
+        if let Some(items) = resp["result"].as_array()
+            && !items.is_empty()
+        {
+            assert_eq!(items[0]["name"], "double");
+            break items[0].clone();
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     };
@@ -660,10 +660,10 @@ async fn call_hierarchy_cross_file_incoming() {
 
         let resp = recv_response(&mut reader, &mut writer, id).await;
         id += 1;
-        if let Some(arr) = resp["result"].as_array() {
-            if !arr.is_empty() {
-                break arr.clone();
-            }
+        if let Some(arr) = resp["result"].as_array()
+            && !arr.is_empty()
+        {
+            break arr.clone();
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     };
@@ -758,11 +758,11 @@ async fn call_hierarchy_cross_file_outgoing() {
 
         let resp = recv_response(&mut reader, &mut writer, id).await;
         id += 1;
-        if let Some(items) = resp["result"].as_array() {
-            if !items.is_empty() {
-                assert_eq!(items[0]["name"], "quadruple");
-                break items[0].clone();
-            }
+        if let Some(items) = resp["result"].as_array()
+            && !items.is_empty()
+        {
+            assert_eq!(items[0]["name"], "quadruple");
+            break items[0].clone();
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     };
@@ -786,10 +786,10 @@ async fn call_hierarchy_cross_file_outgoing() {
 
         let resp = recv_response(&mut reader, &mut writer, id).await;
         id += 1;
-        if let Some(arr) = resp["result"].as_array() {
-            if !arr.is_empty() {
-                break arr.clone();
-            }
+        if let Some(arr) = resp["result"].as_array()
+            && !arr.is_empty()
+        {
+            break arr.clone();
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     };
