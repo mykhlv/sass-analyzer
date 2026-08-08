@@ -444,8 +444,11 @@ impl ModuleGraph {
         name: &str,
         kind: symbols::SymbolKind,
     ) -> Option<(Uri, symbols::Symbol)> {
-        let edges = self.edges.get(from)?;
-        for edge in edges.value() {
+        // Clone the edges out: find_in_module below re-enters `self.files` and
+        // `self.edges`, and holding a shard guard across it can deadlock against
+        // the worker inserting into the same shard.
+        let edges: Vec<ImportEdge> = self.edges.get(from).map(|e| e.value().clone())?;
+        for edge in &edges {
             let ns_match = match &edge.namespace {
                 Namespace::Named(n) => n == namespace,
                 Namespace::Star => false, // star imports don't use namespace prefix
@@ -481,9 +484,12 @@ impl ModuleGraph {
             return Some((from.clone(), sym.clone()));
         }
 
-        // 2. Star imports and @import (merged scope)
-        let edges = self.edges.get(from)?;
-        for edge in edges.value() {
+        // 2. Star imports and @import (merged scope). Clone the edges out: the
+        // recursive find_in_module call below re-enters `self.files` and
+        // `self.edges`, and holding a shard guard across it can deadlock against
+        // the worker inserting into the same shard.
+        let edges: Vec<ImportEdge> = self.edges.get(from).map(|e| e.value().clone())?;
+        for edge in &edges {
             let is_merged =
                 matches!(edge.namespace, Namespace::Star) || edge.kind == ImportKind::Import;
             if !is_merged {
@@ -1034,10 +1040,18 @@ impl ModuleGraph {
     ) -> Vec<(Uri, TextRange)> {
         let mut results = Vec::new();
 
-        for entry in &self.edges {
-            let file_uri = entry.key();
-            let edges = entry.value();
+        // Snapshot the edges before iterating: `for entry in &self.edges` holds a
+        // read guard on the current shard for as long as it takes to process every
+        // entry in that shard, and forward_reaches below re-enters `self.edges` —
+        // if it lands on the same shard, that can deadlock against the worker
+        // inserting into it.
+        let all_edges: Vec<(Uri, Vec<ImportEdge>)> = self
+            .edges
+            .iter()
+            .map(|e| (e.key().clone(), e.value().clone()))
+            .collect();
 
+        for (file_uri, edges) in &all_edges {
             for edge in edges {
                 if edge.kind != ImportKind::Forward {
                     continue;
