@@ -221,6 +221,7 @@ impl ModuleGraph {
     }
 
     /// Get the green tree for a URI, re-parsing from stored source if evicted.
+    /// The parser (SCSS or indented Sass) is chosen by the URI's file extension.
     fn get_or_reparse_green(&self, uri: &Uri) -> Option<GreenNode> {
         let info = self.files.get(uri)?;
         if let Some(green) = &info.green {
@@ -229,10 +230,13 @@ impl ModuleGraph {
         // Re-parse from stored text (invariant: source_text is Some when green is None).
         let source = info.source_text.clone()?;
         drop(info);
-        let (green, _) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            sass_parser::parse_scss(&source)
-        }))
-        .ok()?;
+        let parse_fn = if crate::worker::is_sass_file(uri) {
+            sass_parser::parse_sass
+        } else {
+            sass_parser::parse_scss
+        };
+        let (green, _) =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| parse_fn(&source))).ok()?;
         if let Some(mut info) = self.files.get_mut(uri) {
             info.green = Some(green.clone());
         }
@@ -2302,5 +2306,51 @@ mod tests {
 
         let r = graph.resolve_unqualified(&a, "x", symbols::SymbolKind::Variable);
         assert!(r.is_some());
+    }
+
+    #[test]
+    fn evicted_sass_file_reparses_with_the_sass_parser() {
+        let config = std::sync::Arc::new(crate::config::RuntimeConfig::default());
+        config.apply(&crate::config::SassAnalyzerConfig {
+            max_cached_trees: Some(1),
+            ..Default::default()
+        });
+        let graph = ModuleGraph::new(std::sync::Arc::clone(&config));
+
+        let source = ".btn\n  color: red\n";
+        let (green, _) = sass_parser::parse_sass(source);
+        let line_index = sass_parser::line_index::LineIndex::new(source);
+        let symbols = {
+            let root = SyntaxNode::new_root(green.clone());
+            std::sync::Arc::new(symbols::collect_symbols(&root))
+        };
+        let uri: Uri = "file:///a.sass".parse().unwrap();
+        graph.index_file(&uri, green, symbols, line_index, source.to_owned());
+
+        // Index a second file so the first one's green tree is evicted.
+        let other = "$x: 1;\n";
+        let (other_green, _) = sass_parser::parse_scss(other);
+        let other_index = sass_parser::line_index::LineIndex::new(other);
+        let other_symbols = {
+            let root = SyntaxNode::new_root(other_green.clone());
+            std::sync::Arc::new(symbols::collect_symbols(&root))
+        };
+        let other_uri: Uri = "file:///b.scss".parse().unwrap();
+        graph.index_file(
+            &other_uri,
+            other_green,
+            other_symbols,
+            other_index,
+            other.to_owned(),
+        );
+
+        let green = graph.get_green(&uri).expect("green tree");
+        let root = SyntaxNode::new_root(green);
+        assert_eq!(root.text().to_string(), source, "lossless round-trip");
+        assert!(
+            root.descendants()
+                .any(|n| n.kind() == SyntaxKind::DECLARATION),
+            "indented Sass re-parsed as SCSS produces no DECLARATION; tree was:\n{root:#?}"
+        );
     }
 }
