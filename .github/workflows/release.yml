@@ -142,8 +142,10 @@ jobs:
       - name: Publish to VS Code Marketplace
         run: |
           shopt -s nullglob
+          seen=0
           published=0
           for vsix in *.vsix; do
+            seen=$((seen + 1))
             if out=$(npx @vscode/vsce publish --packagePath "$vsix" 2>&1); then
               echo "Published $vsix"
               published=$((published + 1))
@@ -154,8 +156,9 @@ jobs:
               exit 1
             fi
           done
-          if [ "$published" -eq 0 ]; then
-            echo "::error::no VSIX was published"
+          echo "Published $published of $seen VSIX artifact(s)"
+          if [ "$seen" -eq 0 ]; then
+            echo "::error::no VSIX artifacts were found to publish"
             exit 1
           fi
         env:
@@ -180,8 +183,10 @@ jobs:
       - name: Publish to Open VSX Registry
         run: |
           shopt -s nullglob
+          seen=0
           published=0
           for vsix in *.vsix; do
+            seen=$((seen + 1))
             if out=$(npx ovsx publish "$vsix" -p "$OVSX_PAT" 2>&1); then
               echo "Published $vsix"
               published=$((published + 1))
@@ -192,8 +197,9 @@ jobs:
               exit 1
             fi
           done
-          if [ "$published" -eq 0 ]; then
-            echo "::error::no VSIX was published"
+          echo "Published $published of $seen VSIX artifact(s)"
+          if [ "$seen" -eq 0 ]; then
+            echo "::error::no VSIX artifacts were found to publish"
             exit 1
           fi
         env:
