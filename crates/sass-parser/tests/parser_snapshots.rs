@@ -3421,3 +3421,56 @@ fn nested_property_with_bare_zero_value_stays_a_property() {
     "#]],
     );
 }
+
+#[test]
+fn nested_property_with_only_bracketed_value_is_read_as_a_selector() {
+    // Known limitation of the depth-0 heuristic: the only value-only evidence here
+    // sits inside `(...)`, so this parses as a rule set rather than a nested
+    // property. Distinguishing it from `p:nth-child(2) { }` needs full selector
+    // lookahead, which is deliberately out of scope.
+    check(
+        "p {\n  background: url(\"x.png\") { repeat: no-repeat; }\n}\n",
+        expect![[r#"
+            SOURCE_FILE@0..56
+              RULE_SET@0..55
+                SELECTOR_LIST@0..1
+                  SELECTOR@0..1
+                    SIMPLE_SELECTOR@0..1
+                      IDENT@0..1 "p"
+                BLOCK@1..55
+                  WHITESPACE@1..2 " "
+                  LBRACE@2..3 "{"
+                  RULE_SET@3..53
+                    SELECTOR_LIST@3..30
+                      SELECTOR@3..30
+                        SIMPLE_SELECTOR@3..16
+                          WHITESPACE@3..6 "\n  "
+                          IDENT@6..16 "background"
+                        PSEUDO_SELECTOR@16..30
+                          COLON@16..17 ":"
+                          WHITESPACE@17..18 " "
+                          IDENT@18..21 "url"
+                          LPAREN@21..22 "("
+                          QUOTED_STRING@22..29 "\"x.png\""
+                          RPAREN@29..30 ")"
+                    BLOCK@30..53
+                      WHITESPACE@30..31 " "
+                      LBRACE@31..32 "{"
+                      DECLARATION@32..51
+                        PROPERTY@32..39
+                          WHITESPACE@32..33 " "
+                          IDENT@33..39 "repeat"
+                        COLON@39..40 ":"
+                        VALUE@40..50
+                          VALUE@40..50
+                            WHITESPACE@40..41 " "
+                            IDENT@41..50 "no-repeat"
+                        SEMICOLON@50..51 ";"
+                      WHITESPACE@51..52 " "
+                      RBRACE@52..53 "}"
+                  WHITESPACE@53..54 "\n"
+                  RBRACE@54..55 "}"
+              WHITESPACE@55..56 "\n"
+        "#]],
+    );
+}
