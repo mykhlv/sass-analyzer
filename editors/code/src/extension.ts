@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { ExtensionContext, window, workspace } from "vscode";
 import {
+  DidChangeConfigurationNotification,
   LanguageClient,
   LanguageClientOptions,
   ServerOptions,
@@ -41,6 +42,37 @@ function resolveVariables(value: string, wsRoot: string): string {
     .replace(/\$\{workspaceRoot\}/g, wsRoot);
 }
 
+function buildSettings(
+  config: ReturnType<typeof workspace.getConfiguration>,
+  primaryRoot: string,
+): Record<string, unknown> {
+  const rawLoadPaths = config.get<string[]>("loadPaths", []);
+  const rawAliases = config.get<Record<string, string | string[]>>(
+    "importAliases",
+    {},
+  );
+  const rawPrependImports = config.get<string[]>("prependImports", []);
+
+  const importAliases: Record<string, string | string[]> = {};
+  for (const [prefix, targets] of Object.entries(rawAliases)) {
+    importAliases[prefix] = Array.isArray(targets)
+      ? targets.map((t) => resolveVariables(t, primaryRoot))
+      : resolveVariables(targets, primaryRoot);
+  }
+
+  return {
+    loadPaths: rawLoadPaths.map((p) => resolveVariables(p, primaryRoot)),
+    importAliases,
+    prependImports: rawPrependImports.map((p) =>
+      resolveVariables(p, primaryRoot),
+    ),
+    maxFileSize: config.get<number>("maxFileSize"),
+    debounceMs: config.get<number>("debounceMs"),
+    maxCachedTrees: config.get<number>("maxCachedTrees"),
+    maxCachedSources: config.get<number>("maxCachedSources"),
+  };
+}
+
 export async function activate(context: ExtensionContext): Promise<void> {
   const serverPath = getServerPath(context);
 
@@ -54,30 +86,6 @@ export async function activate(context: ExtensionContext): Promise<void> {
     workspace.workspaceFolders?.map((f) => f.uri.fsPath) ?? [];
   const primaryRoot = workspaceRoots[0] ?? "";
 
-  const rawLoadPaths = config.get<string[]>("loadPaths", []);
-  const rawAliases = config.get<Record<string, string | string[]>>(
-    "importAliases",
-    {},
-  );
-  const rawPrependImports = config.get<string[]>("prependImports", []);
-
-  const loadPaths = rawLoadPaths.map((p) =>
-    resolveVariables(p, primaryRoot),
-  );
-  const importAliases: Record<string, string | string[]> = {};
-  for (const [prefix, targets] of Object.entries(rawAliases)) {
-    if (Array.isArray(targets)) {
-      importAliases[prefix] = targets.map((t) =>
-        resolveVariables(t, primaryRoot),
-      );
-    } else {
-      importAliases[prefix] = resolveVariables(targets, primaryRoot);
-    }
-  }
-  const prependImports = rawPrependImports.map((p) =>
-    resolveVariables(p, primaryRoot),
-  );
-
   const outputChannel = window.createOutputChannel("sass-analyzer", "log");
 
   const clientOptions: LanguageClientOptions = {
@@ -85,18 +93,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
     connectionOptions: {
       maxRestartCount: 4,
     },
-    synchronize: {
-      configurationSection: "sass-analyzer",
-    },
-    initializationOptions: {
-      loadPaths,
-      importAliases,
-      prependImports,
-      maxFileSize: config.get<number>("maxFileSize"),
-      debounceMs: config.get<number>("debounceMs"),
-      maxCachedTrees: config.get<number>("maxCachedTrees"),
-      maxCachedSources: config.get<number>("maxCachedSources"),
-    },
+    initializationOptions: buildSettings(config, primaryRoot),
     outputChannel,
     traceOutputChannel: outputChannel,
   };
@@ -117,6 +114,18 @@ export async function activate(context: ExtensionContext): Promise<void> {
   }
 
   await client.start();
+
+  context.subscriptions.push(
+    workspace.onDidChangeConfiguration(async (event) => {
+      if (!event.affectsConfiguration("sass-analyzer") || !client) {
+        return;
+      }
+      const updated = workspace.getConfiguration("sass-analyzer");
+      await client.sendNotification(DidChangeConfigurationNotification.type, {
+        settings: { "sass-analyzer": buildSettings(updated, primaryRoot) },
+      });
+    }),
+  );
 }
 
 export async function deactivate(): Promise<void> {
