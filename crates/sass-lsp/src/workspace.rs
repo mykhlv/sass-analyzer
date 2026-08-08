@@ -297,11 +297,16 @@ impl ModuleGraph {
             }
 
             let Some(base) = &base_path else { continue };
-            let resolver = self
-                .resolver
-                .read()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let resolved = resolver.resolve(&import_ref.path, base);
+            // Scope the guard to the resolve call: index_dependency below recurses
+            // into index_file, and a recursive read lock can deadlock against
+            // set_resolver waiting to write.
+            let resolved = {
+                let resolver = self
+                    .resolver
+                    .read()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                resolver.resolve(&import_ref.path, base)
+            };
 
             if let Ok(ResolvedModule::File(target_path)) = resolved {
                 let target_uri = path_to_uri(&target_path);
@@ -346,14 +351,15 @@ impl ModuleGraph {
             .clone();
         for spec in &prepend {
             if let Some(base) = &base_path {
-                let resolver = self
-                    .resolver
-                    .read()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                let resolved = resolver.resolve(spec, base);
+                let resolved = {
+                    let resolver = self
+                        .resolver
+                        .read()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    resolver.resolve(spec, base)
+                };
                 if let Ok(ResolvedModule::File(target_path)) = resolved {
                     let target_uri = path_to_uri(&target_path);
-                    drop(resolver);
                     self.index_dependency(&target_uri, &target_path);
                     resolved_edges.push(ImportEdge {
                         target: target_uri,
@@ -505,27 +511,27 @@ impl ModuleGraph {
             }
         }
 
-        // Imported symbols
-        if let Some(edges) = self.edges.get(from) {
-            let mut visited = HashSet::new();
-            for edge in edges.value() {
-                let prefix = match &edge.namespace {
-                    Namespace::Named(n) => Some(n.clone()),
-                    Namespace::Star => None,
-                };
-                // @import merges into scope (no prefix)
-                let prefix = if edge.kind == ImportKind::Import {
-                    None
-                } else {
-                    prefix
-                };
-                self.collect_module_symbols(
-                    &edge.target,
-                    prefix.as_deref(),
-                    &mut result,
-                    &mut visited,
-                );
-            }
+        // Imported symbols. Clone the edges out: collect_module_symbols below
+        // recurses into `self.edges`, and holding a shard guard across it can
+        // deadlock against the worker inserting into the same shard.
+        let edges: Vec<ImportEdge> = self
+            .edges
+            .get(from)
+            .map(|e| e.value().clone())
+            .unwrap_or_default();
+        let mut visited = HashSet::new();
+        for edge in &edges {
+            let prefix = match &edge.namespace {
+                Namespace::Named(n) => Some(n.clone()),
+                Namespace::Star => None,
+            };
+            // @import merges into scope (no prefix)
+            let prefix = if edge.kind == ImportKind::Import {
+                None
+            } else {
+                prefix
+            };
+            self.collect_module_symbols(&edge.target, prefix.as_deref(), &mut result, &mut visited);
         }
 
         result
@@ -567,29 +573,33 @@ impl ModuleGraph {
             }
         }
 
-        // Follow @forward edges with visibility filtering
-        if let Some(edges) = self.edges.get(uri) {
-            for edge in edges.value() {
-                if edge.kind == ImportKind::Forward {
-                    // Strip prefix if present
-                    let search_name = if let Some(pfx) = &edge.visibility.prefix {
-                        let Some(stripped) = name.strip_prefix(pfx.as_str()) else {
-                            continue;
-                        };
-                        stripped
-                    } else {
-                        name
-                    };
-
-                    if !is_visible(&edge.visibility, search_name) {
+        // Follow @forward edges with visibility filtering. The edges are cloned out
+        // of the map first: holding a shard guard across the recursion below can
+        // deadlock against the worker inserting into `edges`.
+        let edges: Vec<ImportEdge> = self
+            .edges
+            .get(uri)
+            .map(|e| e.value().clone())
+            .unwrap_or_default();
+        for edge in &edges {
+            if edge.kind == ImportKind::Forward {
+                // Strip prefix if present
+                let search_name = if let Some(pfx) = &edge.visibility.prefix {
+                    let Some(stripped) = name.strip_prefix(pfx.as_str()) else {
                         continue;
-                    }
+                    };
+                    stripped
+                } else {
+                    name
+                };
 
-                    if let Some(result) =
-                        self.find_in_module(&edge.target, search_name, kind, visited)
-                    {
-                        return Some(result);
-                    }
+                if !is_visible(&edge.visibility, search_name) {
+                    continue;
+                }
+
+                if let Some(result) = self.find_in_module(&edge.target, search_name, kind, visited)
+                {
+                    return Some(result);
                 }
             }
         }
@@ -655,17 +665,23 @@ impl ModuleGraph {
             }
         }
 
-        if let Some(edges) = self.edges.get(uri) {
-            for edge in edges.value() {
-                if edge.kind == ImportKind::Forward {
-                    self.collect_module_symbols_filtered(
-                        &edge.target,
-                        ns_prefix,
-                        &edge.visibility,
-                        result,
-                        visited,
-                    );
-                }
+        // Clone the edges out: collect_module_symbols_filtered recurses back into
+        // `self.edges`, and holding a shard guard across that can deadlock against
+        // the worker inserting into the same shard.
+        let edges: Vec<ImportEdge> = self
+            .edges
+            .get(uri)
+            .map(|e| e.value().clone())
+            .unwrap_or_default();
+        for edge in &edges {
+            if edge.kind == ImportKind::Forward {
+                self.collect_module_symbols_filtered(
+                    &edge.target,
+                    ns_prefix,
+                    &edge.visibility,
+                    result,
+                    visited,
+                );
             }
         }
     }
@@ -939,12 +955,18 @@ impl ModuleGraph {
         let file_uris: Vec<Uri> = self.files.iter().map(|e| e.key().clone()).collect();
 
         for file_uri in &file_uris {
-            if let Some(info) = self.files.get(file_uri) {
+            // Clone the Arc out of the map: resolve_unqualified and resolve_qualified
+            // below both re-enter `self.files`, and holding a shard guard across them
+            // can deadlock against the worker inserting into the same shard.
+            let file_symbols = self
+                .files
+                .get(file_uri)
+                .map(|info| Arc::clone(&info.symbols));
+            if let Some(info) = &file_symbols {
                 // Include declaration if requested
                 if include_declaration
                     && file_uri == target_uri
                     && let Some(sym) = info
-                        .symbols
                         .definitions
                         .iter()
                         .find(|s| s.name == target_name && s.kind == target_kind)
@@ -953,7 +975,7 @@ impl ModuleGraph {
                 }
 
                 // Check unqualified references from SymbolRef
-                for sym_ref in &info.symbols.references {
+                for sym_ref in &info.references {
                     if sym_ref.name != target_name || sym_ref.kind != ref_kind {
                         continue;
                     }
@@ -967,12 +989,7 @@ impl ModuleGraph {
             }
 
             // Check namespace-qualified references from the pre-built index.
-            let ns_refs: Vec<symbols::NamespaceRef> = self
-                .files
-                .get(file_uri)
-                .map(|info| info.symbols.namespace_refs.clone())
-                .unwrap_or_default();
-            for ns_ref in ns_refs {
+            for ns_ref in file_symbols.iter().flat_map(|s| s.namespace_refs.iter()) {
                 if ns_ref.name != target_name || ns_ref.kind != target_kind {
                     continue;
                 }
@@ -1078,14 +1095,19 @@ impl ModuleGraph {
             return false;
         }
         // Check if this module directly defines the symbol (it IS the target)
-        // Also follow further @forward chains
-        if let Some(edges) = self.edges.get(current) {
-            for edge in edges.value() {
-                if edge.kind == ImportKind::Forward
-                    && self.forward_reaches_inner(&edge.target, target, visited)
-                {
-                    return true;
-                }
+        // Also follow further @forward chains. Clone the edges out first: the
+        // recursive call re-enters `self.edges`, and holding a shard guard across
+        // it can deadlock against the worker inserting into the same shard.
+        let edges: Vec<ImportEdge> = self
+            .edges
+            .get(current)
+            .map(|e| e.value().clone())
+            .unwrap_or_default();
+        for edge in &edges {
+            if edge.kind == ImportKind::Forward
+                && self.forward_reaches_inner(&edge.target, target, visited)
+            {
+                return true;
             }
         }
         false
@@ -2341,5 +2363,40 @@ mod tests {
                 .any(|n| n.kind() == SyntaxKind::DECLARATION),
             "indented Sass re-parsed as SCSS produces no DECLARATION; tree was:\n{root:#?}"
         );
+    }
+
+    #[test]
+    #[ignore = "stress test for lock recursion; run manually with --ignored"]
+    fn concurrent_set_resolver_and_index_does_not_deadlock() {
+        use std::sync::Arc;
+
+        let config = Arc::new(crate::config::RuntimeConfig::default());
+        let graph = Arc::new(ModuleGraph::new(config));
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+        let writer = {
+            let graph = Arc::clone(&graph);
+            let stop = Arc::clone(&stop);
+            std::thread::spawn(move || {
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    graph.set_resolver(ModuleResolver::new());
+                }
+            })
+        };
+
+        for i in 0..500 {
+            let src = "@use \"other\";\n$a: 1;\n";
+            let (green, _) = sass_parser::parse_scss(src);
+            let line_index = sass_parser::line_index::LineIndex::new(src);
+            let syms = {
+                let root = SyntaxNode::new_root(green.clone());
+                Arc::new(symbols::collect_symbols(&root))
+            };
+            let uri: Uri = format!("file:///f{i}.scss").parse().unwrap();
+            graph.index_file(&uri, green, syms, line_index, src.to_owned());
+        }
+
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        writer.join().unwrap();
     }
 }
