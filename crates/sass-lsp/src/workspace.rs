@@ -2384,6 +2384,22 @@ mod tests {
     fn concurrent_set_resolver_and_index_does_not_deadlock() {
         use std::sync::Arc;
 
+        const INDEXED: usize = 500;
+
+        // `_other.scss` must exist on disk and actually resolve: `ModuleResolver::resolve`
+        // stats the filesystem, so a `@use` of a file that isn't there returns `NotFound`
+        // and `index_file` never reaches `index_dependency`, never recurses into itself,
+        // and never re-takes `self.resolver.read()` on the same thread — the exact path
+        // Steps 1-2 fix. `_other.scss` importing itself makes the *recursive* `index_file`
+        // call resolve an import too, so it takes the resolver guard a second time before
+        // `index_dependency`'s `self.files.contains_key` check (see `self_import_does_not_loop`)
+        // stops the recursion.
+        let dir =
+            std::env::temp_dir().join(format!("sass-analyzer-lock-stress-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create stress test dir");
+        std::fs::write(dir.join("_other.scss"), "@use \"other\";\n$other: 1;\n")
+            .expect("write _other.scss");
+
         let config = Arc::new(crate::config::RuntimeConfig::default());
         let graph = Arc::new(ModuleGraph::new(config));
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -2398,7 +2414,7 @@ mod tests {
             })
         };
 
-        for i in 0..500 {
+        for i in 0..INDEXED {
             let src = "@use \"other\";\n$a: 1;\n";
             let (green, _) = sass_parser::parse_scss(src);
             let line_index = sass_parser::line_index::LineIndex::new(src);
@@ -2406,11 +2422,25 @@ mod tests {
                 let root = SyntaxNode::new_root(green.clone());
                 Arc::new(symbols::collect_symbols(&root))
             };
-            let uri: Uri = format!("file:///f{i}.scss").parse().unwrap();
+            let uri = path_to_uri(&dir.join(format!("f{i}.scss")));
             graph.index_file(&uri, green, syms, line_index, src.to_owned());
         }
 
         stop.store(true, std::sync::atomic::Ordering::Relaxed);
         writer.join().unwrap();
+
+        // If the @use above never resolved, `_other.scss` would never have been pulled
+        // in via `index_dependency`, and everything above would be exercising ordinary
+        // reader/writer contention rather than the recursive-lock hazard. Guard against
+        // that regressing back to a vacuous test.
+        let indexed_count = graph.file_count();
+        assert!(
+            indexed_count > INDEXED,
+            "expected _other.scss to be indexed as a dependency via index_dependency \
+             (file_count = {indexed_count}, {INDEXED} files were indexed directly); \
+             the @use \"other\" import must not have resolved"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
