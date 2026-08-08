@@ -18,6 +18,7 @@ mod basics;
 mod call_hierarchy;
 mod completion;
 mod config_commands;
+mod config_roots;
 mod diagnostics;
 mod document_links;
 mod empty_file;
@@ -161,6 +162,7 @@ fn spawn_server() -> (tokio::io::DuplexStream, tokio::io::DuplexStream) {
             runtime_config,
             task_tx,
             workspace_root: RwLock::new(None),
+            workspace_folders: RwLock::new(Vec::new()),
         }
     });
     tokio::spawn(Server::new(server_read, server_write, socket).serve(service));
