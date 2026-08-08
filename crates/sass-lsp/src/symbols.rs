@@ -29,10 +29,20 @@ pub struct SymbolRef {
     pub selection_range: TextRange,
 }
 
+/// A namespace-qualified reference: `ns.$var` or `ns.func()`.
+#[derive(Debug, Clone)]
+pub struct NamespaceRef {
+    pub namespace: String,
+    pub name: String,
+    pub kind: SymbolKind,
+    pub range: TextRange,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct FileSymbols {
     pub definitions: Vec<Symbol>,
     pub references: Vec<SymbolRef>,
+    pub namespace_refs: Vec<NamespaceRef>,
 }
 
 pub fn collect_symbols(root: &SyntaxNode) -> FileSymbols {
@@ -48,12 +58,14 @@ pub fn collect_symbols(root: &SyntaxNode) -> FileSymbols {
             SyntaxKind::FUNCTION_CALL => collect_function_call(&node, &mut symbols),
             SyntaxKind::INCLUDE_RULE => collect_include_ref(&node, &mut symbols),
             SyntaxKind::EXTEND_RULE => collect_extend_ref(&node, &mut symbols),
+            SyntaxKind::NAMESPACE_REF => collect_namespace_ref(&node, &mut symbols),
             _ => {}
         }
     }
 
     symbols.definitions.sort_by_key(|s| s.range.start());
     symbols.references.sort_by_key(|r| r.range.start());
+    symbols.namespace_refs.sort_by_key(|r| r.range.start());
     symbols
 }
 
@@ -208,6 +220,21 @@ fn collect_extend_ref(node: &SyntaxNode, symbols: &mut FileSymbols) {
         kind: SymbolKind::Placeholder,
         range: node.text_range(),
         selection_range: sel_range,
+    });
+}
+
+fn collect_namespace_ref(node: &SyntaxNode, symbols: &mut FileSymbols) {
+    let Some(info) = crate::navigation::extract_namespace_ref_info(node) else {
+        return;
+    };
+    let Some(namespace) = info.namespace else {
+        return;
+    };
+    symbols.namespace_refs.push(NamespaceRef {
+        namespace,
+        name: info.name,
+        kind: info.kind,
+        range: info.range,
     });
 }
 
@@ -526,6 +553,28 @@ $primary: blue;
         assert_eq!(
             s.definitions[0].doc.as_deref(),
             Some("Responsive breakpoint")
+        );
+    }
+
+    #[test]
+    fn collects_namespace_refs() {
+        let input = ".a {\n  color: c.$primary;\n  width: m.size(2);\n}\n";
+        let (green, _errors) = sass_parser::parse_scss(input);
+        let root = SyntaxNode::new_root(green);
+        let symbols = collect_symbols(&root);
+
+        let refs: Vec<(&str, &str, SymbolKind)> = symbols
+            .namespace_refs
+            .iter()
+            .map(|r| (r.namespace.as_str(), r.name.as_str(), r.kind))
+            .collect();
+
+        assert_eq!(
+            refs,
+            vec![
+                ("c", "primary", SymbolKind::Variable),
+                ("m", "size", SymbolKind::Function),
+            ]
         );
     }
 }

@@ -966,22 +966,21 @@ impl ModuleGraph {
                 }
             }
 
-            // Check namespace-qualified references via CST walk
-            if let Some(green) = self.get_or_reparse_green(file_uri) {
-                let root = SyntaxNode::new_root(green);
-                for node in root.descendants() {
-                    if node.kind() != SyntaxKind::NAMESPACE_REF {
-                        continue;
-                    }
-                    if let Some((ns, name, kind, range)) = extract_ns_ref_info(&node)
-                        && name == target_name
-                        && kind == target_kind
-                        && let Some((resolved_uri, _)) =
-                            self.resolve_qualified(file_uri, &ns, &name, target_kind)
-                        && &resolved_uri == target_uri
-                    {
-                        results.push((file_uri.clone(), range));
-                    }
+            // Check namespace-qualified references from the pre-built index.
+            let ns_refs: Vec<symbols::NamespaceRef> = self
+                .files
+                .get(file_uri)
+                .map(|info| info.symbols.namespace_refs.clone())
+                .unwrap_or_default();
+            for ns_ref in ns_refs {
+                if ns_ref.name != target_name || ns_ref.kind != target_kind {
+                    continue;
+                }
+                if let Some((resolved_uri, _)) =
+                    self.resolve_qualified(file_uri, &ns_ref.namespace, &ns_ref.name, target_kind)
+                    && &resolved_uri == target_uri
+                {
+                    results.push((file_uri.clone(), ns_ref.range));
                 }
             }
         }
@@ -1409,16 +1408,6 @@ pub(crate) fn path_to_uri(path: &Path) -> Uri {
             }
         }
     })
-}
-
-// ── Find-references helpers ─────────────────────────────────────────
-
-/// Extract namespace, name, kind, and selection range from a `NAMESPACE_REF` node.
-fn extract_ns_ref_info(
-    node: &SyntaxNode,
-) -> Option<(String, String, symbols::SymbolKind, TextRange)> {
-    let info = crate::navigation::extract_namespace_ref_info(node)?;
-    Some((info.namespace?, info.name, info.kind, info.range))
 }
 
 // ── Helpers for external callers ────────────────────────────────────
