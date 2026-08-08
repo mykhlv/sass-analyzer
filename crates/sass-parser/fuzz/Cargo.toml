@@ -37,3 +37,13 @@ doc = false
 name = "fuzz_parser_roundtrip"
 path = "fuzz_targets/fuzz_parser_roundtrip.rs"
 doc = false
+
+[[bin]]
+name = "fuzz_sass_parser_crash"
+path = "fuzz_targets/fuzz_sass_parser_crash.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_sass_parser_roundtrip"
+path = "fuzz_targets/fuzz_sass_parser_roundtrip.rs"
+doc = false
