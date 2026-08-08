@@ -1,0 +1,7 @@
+libsass-todo-issues/issue_221262	3
+  0..1: expected rule
+  4..6: expected IDENT
+  9..10: expected IDENT
+libsass-todo-issues/issue_221292	2
+  4..5: expected rule
+  8..9: expected IDENT
