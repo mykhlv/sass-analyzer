@@ -67,3 +67,26 @@ jobs:
         run: npm run lint
       - working-directory: editors/code
         run: npm run build
+
+  sass-spec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Cache sass-spec corpus
+        uses: actions/cache@v4
+        with:
+          path: test-corpus/sass-spec
+          key: sass-spec-63a0becd13d3639a60669d8b710e75b282415047
+      - name: Download corpus
+        run: bash test-corpus/download.sh
+      - name: Run sass-spec compatibility
+        run: cargo test -p sass-parser --test sass_spec_test -- --ignored --nocapture
+      - name: Fail on compliance drift
+        run: |
+          if ! git diff --exit-code -- test-corpus/sass-spec-sass-gaps.txt; then
+            echo "::error::sass-spec compliance changed. Review the diff above and \
+          commit the regenerated gap files if the change is an improvement."
+            exit 1
+          fi
