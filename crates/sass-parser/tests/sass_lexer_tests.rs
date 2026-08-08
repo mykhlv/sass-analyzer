@@ -937,3 +937,208 @@ fn parse_sass_tree_variable() {
     "#]],
     );
 }
+
+// ── At-rule header continuation after arguments (regression: 30ba7f4) ───
+
+#[test]
+fn for_header_continues_with_from_keyword() {
+    check_tree(
+        "@for $i\n  from 1 through 10\n",
+        expect![[r#"
+        SOURCE_FILE@0..28
+          FOR_RULE@0..27
+            AT@0..1 "@"
+            IDENT@1..4 "for"
+            WHITESPACE@4..5 " "
+            DOLLAR@5..6 "$"
+            IDENT@6..7 "i"
+            WHITESPACE@7..10 "\n  "
+            IDENT@10..14 "from"
+            NUMBER_LITERAL@14..16
+              WHITESPACE@14..15 " "
+              NUMBER@15..16 "1"
+            WHITESPACE@16..17 " "
+            IDENT@17..24 "through"
+            NUMBER_LITERAL@24..27
+              WHITESPACE@24..25 " "
+              NUMBER@25..27 "10"
+          SEMICOLON@27..27 ""
+          WHITESPACE@27..28 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn for_header_continues_with_through_keyword() {
+    check_tree(
+        "@for $i from 1\n  through 10\n",
+        expect![[r#"
+        SOURCE_FILE@0..28
+          FOR_RULE@0..27
+            AT@0..1 "@"
+            IDENT@1..4 "for"
+            WHITESPACE@4..5 " "
+            DOLLAR@5..6 "$"
+            IDENT@6..7 "i"
+            WHITESPACE@7..8 " "
+            IDENT@8..12 "from"
+            NUMBER_LITERAL@12..14
+              WHITESPACE@12..13 " "
+              NUMBER@13..14 "1"
+            WHITESPACE@14..17 "\n  "
+            IDENT@17..24 "through"
+            NUMBER_LITERAL@24..27
+              WHITESPACE@24..25 " "
+              NUMBER@25..27 "10"
+          SEMICOLON@27..27 ""
+          WHITESPACE@27..28 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn each_header_continues_with_in_keyword() {
+    check_tree(
+        "@each $a\n  in b, c\n",
+        expect![[r#"
+        SOURCE_FILE@0..19
+          EACH_RULE@0..18
+            AT@0..1 "@"
+            IDENT@1..5 "each"
+            WHITESPACE@5..6 " "
+            DOLLAR@6..7 "$"
+            IDENT@7..8 "a"
+            WHITESPACE@8..11 "\n  "
+            IDENT@11..13 "in"
+            VALUE@13..15
+              WHITESPACE@13..14 " "
+              IDENT@14..15 "b"
+            COMMA@15..16 ","
+            VALUE@16..18
+              WHITESPACE@16..17 " "
+              IDENT@17..18 "c"
+          SEMICOLON@18..18 ""
+          WHITESPACE@18..19 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn each_header_continues_with_comma() {
+    check_tree(
+        "@each $a\n  , $b in (c: d)\n",
+        expect![[r#"
+        SOURCE_FILE@0..26
+          EACH_RULE@0..25
+            AT@0..1 "@"
+            IDENT@1..5 "each"
+            WHITESPACE@5..6 " "
+            DOLLAR@6..7 "$"
+            IDENT@7..8 "a"
+            WHITESPACE@8..11 "\n  "
+            COMMA@11..12 ","
+            WHITESPACE@12..13 " "
+            DOLLAR@13..14 "$"
+            IDENT@14..15 "b"
+            WHITESPACE@15..16 " "
+            IDENT@16..18 "in"
+            MAP_EXPR@18..25
+              WHITESPACE@18..19 " "
+              LPAREN@19..20 "("
+              MAP_ENTRY@20..24
+                VALUE@20..21
+                  IDENT@20..21 "c"
+                COLON@21..22 ":"
+                VALUE@22..24
+                  WHITESPACE@22..23 " "
+                  IDENT@23..24 "d"
+              RPAREN@24..25 ")"
+          SEMICOLON@25..25 ""
+          WHITESPACE@25..26 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn function_header_continues_with_paren() {
+    check_tree(
+        "@function a\n  ()\n",
+        expect![[r#"
+        SOURCE_FILE@0..17
+          FUNCTION_RULE@0..16
+            AT@0..1 "@"
+            IDENT@1..9 "function"
+            WHITESPACE@9..10 " "
+            IDENT@10..11 "a"
+            PARAM_LIST@11..16
+              WHITESPACE@11..14 "\n  "
+              LPAREN@14..15 "("
+              RPAREN@15..16 ")"
+          SEMICOLON@16..16 ""
+          WHITESPACE@16..17 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn function_body_starts_after_params() {
+    // The behaviour 30ba7f4 introduced — must not regress.
+    check_tree(
+        "@function foo($bg)\n  $x: 100\n",
+        expect![[r#"
+        SOURCE_FILE@0..29
+          FUNCTION_RULE@0..28
+            AT@0..1 "@"
+            IDENT@1..9 "function"
+            WHITESPACE@9..10 " "
+            IDENT@10..13 "foo"
+            PARAM_LIST@13..18
+              LPAREN@13..14 "("
+              PARAM@14..17
+                DOLLAR@14..15 "$"
+                IDENT@15..17 "bg"
+              RPAREN@17..18 ")"
+            BLOCK@18..28
+              WHITESPACE@18..21 "\n  "
+              LBRACE@21..21 ""
+              VARIABLE_DECL@21..28
+                DOLLAR@21..22 "$"
+                IDENT@22..23 "x"
+                COLON@23..24 ":"
+                NUMBER_LITERAL@24..28
+                  WHITESPACE@24..25 " "
+                  NUMBER@25..28 "100"
+                SEMICOLON@28..28 ""
+              RBRACE@28..28 ""
+          WHITESPACE@28..29 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn for_header_continues_with_dollar_after_directive_name() {
+    check_tree(
+        "@for\n  $i from 1 through 3\n",
+        expect![[r#"
+        SOURCE_FILE@0..27
+          FOR_RULE@0..26
+            AT@0..1 "@"
+            IDENT@1..4 "for"
+            WHITESPACE@4..7 "\n  "
+            DOLLAR@7..8 "$"
+            IDENT@8..9 "i"
+            WHITESPACE@9..10 " "
+            IDENT@10..14 "from"
+            NUMBER_LITERAL@14..16
+              WHITESPACE@14..15 " "
+              NUMBER@15..16 "1"
+            WHITESPACE@16..17 " "
+            IDENT@17..24 "through"
+            NUMBER_LITERAL@24..26
+              WHITESPACE@24..25 " "
+              NUMBER@25..26 "3"
+          SEMICOLON@26..26 ""
+          WHITESPACE@26..27 "\n"
+    "#]],
+    );
+}
