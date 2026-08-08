@@ -5,6 +5,24 @@ All notable changes to sass-analyzer will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Fixed
+- Parser: nested selector lists containing an attribute selector or a pseudo-class with
+  arguments are no longer misparsed as nested properties — `p:nth-child(2) { }` inside a
+  rule was silently turned into a property, and `button:hover, [type="b"] { }` produced a
+  false "expected RBRACKET" error
+- Parser: indented Sass at-rule headers continue correctly after arguments again —
+  `@for $i` followed by an indented `from 1 through 10`, `@each $a` followed by `in b, c`,
+  and `@function a` followed by `()` regressed in 0.3.4 (indented Sass compliance
+  96.82% → 99.71%)
+
+### Known issues
+- A nested property whose only value evidence sits inside brackets — for example
+  `background: url("x.png") { repeat: no-repeat; }` — is now read as a rule set rather
+  than a nested property. This is an accepted consequence of the selector fix above;
+  telling the two apart needs full selector lookahead
+
 ## 0.3.4 — 2026-03-31
 
 ### Fixed
