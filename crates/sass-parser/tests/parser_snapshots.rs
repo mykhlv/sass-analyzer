@@ -3217,3 +3217,207 @@ fn property_hyphen_interpolation() {
         "##]],
     );
 }
+
+// ── Nested selector lists vs nested properties ──────────────────────────
+
+#[test]
+fn nested_pseudo_class_with_argument_is_a_rule() {
+    check(
+        ".x {\n  p:nth-child(2) { color: red; }\n}\n",
+        expect![[r#"
+        SOURCE_FILE@0..40
+          RULE_SET@0..39
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "x"
+            BLOCK@2..39
+              WHITESPACE@2..3 " "
+              LBRACE@3..4 "{"
+              RULE_SET@4..37
+                SELECTOR_LIST@4..21
+                  SELECTOR@4..21
+                    SIMPLE_SELECTOR@4..8
+                      WHITESPACE@4..7 "\n  "
+                      IDENT@7..8 "p"
+                    PSEUDO_SELECTOR@8..21
+                      COLON@8..9 ":"
+                      IDENT@9..18 "nth-child"
+                      LPAREN@18..19 "("
+                      NUMBER@19..20 "2"
+                      RPAREN@20..21 ")"
+                BLOCK@21..37
+                  WHITESPACE@21..22 " "
+                  LBRACE@22..23 "{"
+                  DECLARATION@23..35
+                    PROPERTY@23..29
+                      WHITESPACE@23..24 " "
+                      IDENT@24..29 "color"
+                    COLON@29..30 ":"
+                    VALUE@30..34
+                      VALUE@30..34
+                        WHITESPACE@30..31 " "
+                        IDENT@31..34 "red"
+                    SEMICOLON@34..35 ";"
+                  WHITESPACE@35..36 " "
+                  RBRACE@36..37 "}"
+              WHITESPACE@37..38 "\n"
+              RBRACE@38..39 "}"
+          WHITESPACE@39..40 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn nested_selector_list_with_attribute_selector_is_a_rule() {
+    check(
+        ".x {\n  button:hover,\n  [type=\"b\"] { color: red; }\n}\n",
+        expect![[r#"
+            SOURCE_FILE@0..52
+              RULE_SET@0..51
+                SELECTOR_LIST@0..2
+                  SELECTOR@0..2
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "x"
+                BLOCK@2..51
+                  WHITESPACE@2..3 " "
+                  LBRACE@3..4 "{"
+                  RULE_SET@4..49
+                    SELECTOR_LIST@4..33
+                      SELECTOR@4..19
+                        SIMPLE_SELECTOR@4..13
+                          WHITESPACE@4..7 "\n  "
+                          IDENT@7..13 "button"
+                        PSEUDO_SELECTOR@13..19
+                          COLON@13..14 ":"
+                          IDENT@14..19 "hover"
+                      COMMA@19..20 ","
+                      SELECTOR@20..33
+                        ATTR_SELECTOR@20..33
+                          WHITESPACE@20..23 "\n  "
+                          LBRACKET@23..24 "["
+                          IDENT@24..28 "type"
+                          EQ@28..29 "="
+                          QUOTED_STRING@29..32 "\"b\""
+                          RBRACKET@32..33 "]"
+                    BLOCK@33..49
+                      WHITESPACE@33..34 " "
+                      LBRACE@34..35 "{"
+                      DECLARATION@35..47
+                        PROPERTY@35..41
+                          WHITESPACE@35..36 " "
+                          IDENT@36..41 "color"
+                        COLON@41..42 ":"
+                        VALUE@42..46
+                          VALUE@42..46
+                            WHITESPACE@42..43 " "
+                            IDENT@43..46 "red"
+                        SEMICOLON@46..47 ";"
+                      WHITESPACE@47..48 " "
+                      RBRACE@48..49 "}"
+                  WHITESPACE@49..50 "\n"
+                  RBRACE@50..51 "}"
+              WHITESPACE@51..52 "\n"
+        "#]],
+    );
+}
+
+#[test]
+fn nested_pseudo_class_with_attribute_argument_is_a_rule() {
+    check(
+        ".x {\n  p:not([hidden]) { color: red; }\n}\n",
+        expect![[r#"
+        SOURCE_FILE@0..41
+          RULE_SET@0..40
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "x"
+            BLOCK@2..40
+              WHITESPACE@2..3 " "
+              LBRACE@3..4 "{"
+              RULE_SET@4..38
+                SELECTOR_LIST@4..22
+                  SELECTOR@4..22
+                    SIMPLE_SELECTOR@4..8
+                      WHITESPACE@4..7 "\n  "
+                      IDENT@7..8 "p"
+                    PSEUDO_SELECTOR@8..22
+                      COLON@8..9 ":"
+                      IDENT@9..12 "not"
+                      LPAREN@12..13 "("
+                      LBRACKET@13..14 "["
+                      IDENT@14..20 "hidden"
+                      RBRACKET@20..21 "]"
+                      RPAREN@21..22 ")"
+                BLOCK@22..38
+                  WHITESPACE@22..23 " "
+                  LBRACE@23..24 "{"
+                  DECLARATION@24..36
+                    PROPERTY@24..30
+                      WHITESPACE@24..25 " "
+                      IDENT@25..30 "color"
+                    COLON@30..31 ":"
+                    VALUE@31..35
+                      VALUE@31..35
+                        WHITESPACE@31..32 " "
+                        IDENT@32..35 "red"
+                    SEMICOLON@35..36 ";"
+                  WHITESPACE@36..37 " "
+                  RBRACE@37..38 "}"
+              WHITESPACE@38..39 "\n"
+              RBRACE@39..40 "}"
+          WHITESPACE@40..41 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn nested_property_with_bare_zero_value_stays_a_property() {
+    check(
+        ".x {\n  margin: 0 { bottom: 15px; }\n}\n",
+        expect![[r#"
+        SOURCE_FILE@0..37
+          RULE_SET@0..36
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "x"
+            BLOCK@2..36
+              WHITESPACE@2..3 " "
+              LBRACE@3..4 "{"
+              NESTED_PROPERTY@4..34
+                PROPERTY@4..13
+                  WHITESPACE@4..7 "\n  "
+                  IDENT@7..13 "margin"
+                COLON@13..14 ":"
+                VALUE@14..16
+                  NUMBER_LITERAL@14..16
+                    WHITESPACE@14..15 " "
+                    NUMBER@15..16 "0"
+                BLOCK@16..34
+                  WHITESPACE@16..17 " "
+                  LBRACE@17..18 "{"
+                  DECLARATION@18..32
+                    PROPERTY@18..25
+                      WHITESPACE@18..19 " "
+                      IDENT@19..25 "bottom"
+                    COLON@25..26 ":"
+                    VALUE@26..31
+                      DIMENSION@26..31
+                        WHITESPACE@26..27 " "
+                        NUMBER@27..29 "15"
+                        IDENT@29..31 "px"
+                    SEMICOLON@31..32 ";"
+                  WHITESPACE@32..33 " "
+                  RBRACE@33..34 "}"
+              WHITESPACE@34..35 "\n"
+              RBRACE@35..36 "}"
+          WHITESPACE@36..37 "\n"
+    "#]],
+    );
+}
