@@ -1,2 +1,2 @@
-non_conformant/sass/selectors	1
-  89..98: expected COLON
+css/percent/indented/after	1
+  13..14: expected declaration or nested rule

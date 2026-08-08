@@ -60,14 +60,8 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
         if let Some(pending_indent) = pending_lbrace
             && !kind.is_trivia()
         {
-            if ((after_at && at_name_is_last) || after_dollar)
-                && is_start_of_line_continuation(kind, text)
-            {
+            if continues_header(kind, text, after_at, after_dollar, at_name_is_last) {
                 // Cancel the pending LBRACE — this line continues the header.
-                // For at-rules, only continue when the directive name was the last
-                // significant token (e.g. `@for\n  $i`).  When the header already
-                // has arguments/params (at_name_is_last == false), the indented
-                // line starts the body (`@function foo($bg)\n  $x: 1`).
                 pending_lbrace = None;
             } else {
                 // Emit the deferred LBRACE.
@@ -329,6 +323,35 @@ fn is_start_of_line_continuation(kind: SyntaxKind, text: &str) -> bool {
         SyntaxKind::NUMBER => true,
         _ => false,
     }
+}
+
+/// Whether an indented line continues an at-rule/variable header instead of opening
+/// its body.
+///
+/// `$` is the one ambiguous starter: `@for\n  $i` continues the header, while
+/// `@function foo($bg)\n  $x: 1` starts the body. Only that case needs the directive
+/// name to be the last significant token. Keywords, commas and parens cannot open a
+/// body statement, so they continue the header unconditionally.
+fn continues_header(
+    kind: SyntaxKind,
+    text: &str,
+    after_at: bool,
+    after_dollar: bool,
+    at_name_is_last: bool,
+) -> bool {
+    if !is_start_of_line_continuation(kind, text) {
+        return false;
+    }
+    if after_dollar {
+        return true;
+    }
+    if !after_at {
+        return false;
+    }
+    if kind == SyntaxKind::DOLLAR {
+        return at_name_is_last;
+    }
+    true
 }
 
 #[allow(clippy::too_many_arguments)]

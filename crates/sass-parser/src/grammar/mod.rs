@@ -263,6 +263,7 @@ fn scan_for_declaration_end(p: &Parser<'_>, start: usize) -> bool {
     let limit = start + MAX_SCAN;
     // Track whether we've seen a token that can only appear in a value, not a selector.
     // Disambiguates `p:hover { }` (selector) from `margin: 0 { top: 20px; }` (declaration).
+    // Only counted at bracket depth 0 — see the match arm below.
     let mut has_value_only_token = false;
     loop {
         if offset >= limit {
@@ -288,8 +289,10 @@ fn scan_for_declaration_end(p: &Parser<'_>, start: usize) -> bool {
             SEMICOLON if depth == 0 => return true,
             LPAREN | LBRACKET => depth += 1,
             RPAREN | RBRACKET => depth = depth.saturating_sub(1),
-            // Tokens that can only appear in values, never in selectors
-            NUMBER | QUOTED_STRING | STRING_START | DOLLAR | UNICODE_RANGE => {
+            // Tokens that can only appear in values, never in selectors — but only
+            // at bracket depth 0. Inside `(...)` and `[...]` they occur in selectors
+            // too: `[type="b"]`, `:nth-child(2)`, `:not([hidden])`.
+            NUMBER | QUOTED_STRING | STRING_START | DOLLAR | UNICODE_RANGE if depth == 0 => {
                 has_value_only_token = true;
             }
             _ => {}
