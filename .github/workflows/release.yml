@@ -141,9 +141,23 @@ jobs:
 
       - name: Publish to VS Code Marketplace
         run: |
+          shopt -s nullglob
+          published=0
           for vsix in *.vsix; do
-            npx @vscode/vsce publish --packagePath "$vsix" || echo "Skipped $vsix (already published or error)"
+            if out=$(npx @vscode/vsce publish --packagePath "$vsix" 2>&1); then
+              echo "Published $vsix"
+              published=$((published + 1))
+            elif grep -qiE 'already (exists|published)' <<<"$out"; then
+              echo "Skipped $vsix (already published)"
+            else
+              echo "$out" >&2
+              exit 1
+            fi
           done
+          if [ "$published" -eq 0 ]; then
+            echo "::error::no VSIX was published"
+            exit 1
+          fi
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
@@ -165,8 +179,22 @@ jobs:
 
       - name: Publish to Open VSX Registry
         run: |
+          shopt -s nullglob
+          published=0
           for vsix in *.vsix; do
-            npx ovsx publish "$vsix" -p "$OVSX_PAT" || echo "Skipped $vsix (already published or error)"
+            if out=$(npx ovsx publish "$vsix" -p "$OVSX_PAT" 2>&1); then
+              echo "Published $vsix"
+              published=$((published + 1))
+            elif grep -qiE 'already (exists|published)' <<<"$out"; then
+              echo "Skipped $vsix (already published)"
+            else
+              echo "$out" >&2
+              exit 1
+            fi
           done
+          if [ "$published" -eq 0 ]; then
+            echo "::error::no VSIX was published"
+            exit 1
+          fi
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
