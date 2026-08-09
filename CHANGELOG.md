@@ -19,7 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Parser: indented Sass at-rule headers continue correctly after arguments again —
   `@for $i` followed by an indented `from 1 through 10`, `@each $a` followed by `in b, c`,
   and `@function a` followed by `()` regressed in 0.3.4 (indented Sass compliance
-  96.82% → 99.71%)
+  96.82% → 99.71%). Whether an indented line continues the header now depends on the
+  directive, so `from`/`to`/`0%` under an indented `@keyframes` open the body as keyframe
+  selectors, and a body starting with `:hover` no longer escapes its `@mixin` — the latter
+  previously reparented the mixin's contents into the enclosing scope with no diagnostic,
+  which misled go-to-definition and semantic diagnostics
 - LSP: indented `.sass` files are no longer re-parsed with the SCSS parser after the tree
   cache evicts them, which silently produced a file with no declarations
 - LSP: find-references and rename no longer re-parse every file in the workspace, which
