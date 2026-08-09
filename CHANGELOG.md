@@ -40,6 +40,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when a blank line happened to follow, so the failure looked intermittent. Found by
   testing against hundreds of real-world `.sass` files from Bulma, Vuetify and Quasar —
   the indented syntax previously had no real-world test coverage at all
+- Indented Sass: a bare `@else` no longer swallows a variable declaration indented under
+  it. `@else` followed by `$x: …` pulled the first declaration into its header — silently,
+  since a header can hold an expression — and then errored on the second, so a two-line
+  block reported a cascade that pointed at the wrong line. A bare `@else` is a complete
+  header, taking an optional `if …` and nothing else, so an indented `$` under it opens
+  the body. `@else` on one line with `if …` on the next still continues the header, and
+  the other expression directives (`@if`, `@for`, `@return` …) are unaffected — they are
+  genuinely incomplete after their bare name
 - Indented Sass: a bare `@at-root` now opens a body instead of pulling the next line into
   its header. `@at-root` followed by an indented `@include` reported "expected selector",
   because the header was continued to give the invalid `@at-root @include …`. This is

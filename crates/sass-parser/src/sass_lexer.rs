@@ -502,7 +502,15 @@ fn continues_header(
     let directive = ctx.directive;
     match kind {
         SyntaxKind::COLON => false,
-        SyntaxKind::DOLLAR => at_name_is_last && is_directive(directive, EXPR_DIRECTIVES),
+        // A bare `@else` is already a complete header — it takes an optional `if …` and
+        // nothing else — so an indented `$x: 1` under it opens the body. Every other
+        // expression directive is still incomplete after its bare name (`@if`, `@for`,
+        // `@return` … all need what follows), which is what `at_name_is_last` keys on.
+        SyntaxKind::DOLLAR => {
+            at_name_is_last
+                && is_directive(directive, EXPR_DIRECTIVES)
+                && !is_directive(directive, &["else"])
+        }
         SyntaxKind::LPAREN => is_directive(directive, PAREN_DIRECTIVES),
         SyntaxKind::COMMA => is_directive(directive, COMMA_DIRECTIVES),
         SyntaxKind::QUOTED_STRING | SyntaxKind::STRING_START => {

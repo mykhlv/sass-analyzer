@@ -1512,6 +1512,154 @@ fn star_after_number_still_continues_the_expression() {
 }
 
 #[test]
+fn bare_else_body_can_start_with_a_variable_declaration() {
+    // A bare `@else` is a complete header, so an indented `$x: …` under it is the body.
+    // It used to be pulled into the header, swallowing the first declaration silently and
+    // then erroring on the second.
+    check_tree(
+        "@if $a\n  p: 1\n@else\n  $lum: 2\n  $pct: 3\n",
+        expect![[r#"
+            SOURCE_FILE@0..40
+              IF_RULE@0..39
+                AT@0..1 "@"
+                IDENT@1..3 "if"
+                VARIABLE_REF@3..6
+                  WHITESPACE@3..4 " "
+                  DOLLAR@4..5 "$"
+                  IDENT@5..6 "a"
+                BLOCK@6..13
+                  WHITESPACE@6..9 "\n  "
+                  LBRACE@9..9 ""
+                  DECLARATION@9..13
+                    PROPERTY@9..10
+                      IDENT@9..10 "p"
+                    COLON@10..11 ":"
+                    VALUE@11..13
+                      NUMBER_LITERAL@11..13
+                        WHITESPACE@11..12 " "
+                        NUMBER@12..13 "1"
+                    SEMICOLON@13..13 ""
+                  RBRACE@13..13 ""
+                ELSE_CLAUSE@13..39
+                  WHITESPACE@13..14 "\n"
+                  AT@14..15 "@"
+                  IDENT@15..19 "else"
+                  BLOCK@19..39
+                    WHITESPACE@19..22 "\n  "
+                    LBRACE@22..22 ""
+                    VARIABLE_DECL@22..29
+                      DOLLAR@22..23 "$"
+                      IDENT@23..26 "lum"
+                      COLON@26..27 ":"
+                      NUMBER_LITERAL@27..29
+                        WHITESPACE@27..28 " "
+                        NUMBER@28..29 "2"
+                      SEMICOLON@29..29 ""
+                    VARIABLE_DECL@29..39
+                      WHITESPACE@29..32 "\n  "
+                      DOLLAR@32..33 "$"
+                      IDENT@33..36 "pct"
+                      COLON@36..37 ":"
+                      NUMBER_LITERAL@37..39
+                        WHITESPACE@37..38 " "
+                        NUMBER@38..39 "3"
+                      SEMICOLON@39..39 ""
+                    RBRACE@39..39 ""
+              WHITESPACE@39..40 "\n"
+        "#]],
+    );
+}
+
+#[test]
+fn else_if_on_the_next_line_still_continues_the_header() {
+    // `@else`'s one real header continuation. Goes through the IDENT arm, not the DOLLAR
+    // arm, so it is unaffected by the rule above.
+    check_tree(
+        "@if $a\n  p: 1\n@else\n  if $b\n    q: 2\n",
+        expect![[r#"
+        SOURCE_FILE@0..37
+          IF_RULE@0..36
+            AT@0..1 "@"
+            IDENT@1..3 "if"
+            VARIABLE_REF@3..6
+              WHITESPACE@3..4 " "
+              DOLLAR@4..5 "$"
+              IDENT@5..6 "a"
+            BLOCK@6..13
+              WHITESPACE@6..9 "\n  "
+              LBRACE@9..9 ""
+              DECLARATION@9..13
+                PROPERTY@9..10
+                  IDENT@9..10 "p"
+                COLON@10..11 ":"
+                VALUE@11..13
+                  NUMBER_LITERAL@11..13
+                    WHITESPACE@11..12 " "
+                    NUMBER@12..13 "1"
+                SEMICOLON@13..13 ""
+              RBRACE@13..13 ""
+            ELSE_CLAUSE@13..36
+              WHITESPACE@13..14 "\n"
+              AT@14..15 "@"
+              IDENT@15..19 "else"
+              WHITESPACE@19..22 "\n  "
+              IDENT@22..24 "if"
+              VARIABLE_REF@24..27
+                WHITESPACE@24..25 " "
+                DOLLAR@25..26 "$"
+                IDENT@26..27 "b"
+              BLOCK@27..36
+                WHITESPACE@27..32 "\n    "
+                LBRACE@32..32 ""
+                DECLARATION@32..36
+                  PROPERTY@32..33
+                    IDENT@32..33 "q"
+                  COLON@33..34 ":"
+                  VALUE@34..36
+                    NUMBER_LITERAL@34..36
+                      WHITESPACE@34..35 " "
+                      NUMBER@35..36 "2"
+                  SEMICOLON@36..36 ""
+                RBRACE@36..36 ""
+          WHITESPACE@36..37 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn if_header_still_continues_with_a_variable_on_the_next_line() {
+    // The other expression directives are incomplete after their bare name, so a `$` on
+    // the next line still continues *their* headers. `@else` is the only exclusion.
+    check_tree(
+        "@if\n  $a\n  p: 1\n",
+        expect![[r#"
+        SOURCE_FILE@0..16
+          IF_RULE@0..15
+            AT@0..1 "@"
+            IDENT@1..3 "if"
+            VARIABLE_REF@3..8
+              WHITESPACE@3..6 "\n  "
+              DOLLAR@6..7 "$"
+              IDENT@7..8 "a"
+            BLOCK@8..15
+              WHITESPACE@8..11 "\n  "
+              LBRACE@11..11 ""
+              DECLARATION@11..15
+                PROPERTY@11..12
+                  IDENT@11..12 "p"
+                COLON@12..13 ":"
+                VALUE@13..15
+                  NUMBER_LITERAL@13..15
+                    WHITESPACE@13..14 " "
+                    NUMBER@14..15 "1"
+                SEMICOLON@15..15 ""
+              RBRACE@15..15 ""
+          WHITESPACE@15..16 "\n"
+    "#]],
+    );
+}
+
+#[test]
 fn at_root_opens_a_body_for_an_indented_include() {
     // A bare `@at-root` takes a block, so an indented `@include` under it is the body.
     // It used to be forced into the header, producing `@at-root @include …` and an
