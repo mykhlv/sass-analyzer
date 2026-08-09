@@ -114,6 +114,8 @@ jobs:
         run: |
           if ! git diff --exit-code -- test-corpus/sass-corpus-baseline.txt; then
             echo "::error::indented-Sass corpus results changed. If files now parse, \
-          commit the regenerated baseline; if more fail, that is a regression."
+          commit the regenerated baseline; if more fail, that is a regression; if the \
+          failing count stayed the same but the file list changed, one file started \
+          parsing while another stopped — review the diff before committing either way."
             exit 1
           fi

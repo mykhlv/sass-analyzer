@@ -1,7 +1,13 @@
 # Indented-Sass corpus baseline: files that do not parse cleanly.
 # Regenerate with:
 #   cargo test -p sass-parser --test corpus_test -- --ignored sass_corpora_match_baseline
-# A shrinking list is the goal; a growing one is a regression.
+# A shrinking failure list is the goal; a growing one is a regression. The
+# per-corpus parsed counts below must not shrink either — a smaller corpus
+# (partial download, retagged upstream archive, restored partial cache) can
+# make failures drop for the wrong reason.
+# files parsed: bulma-sass 64
+# files parsed: vuetify 263
+# files parsed: quasar 93
 # total failing files: 33
 bulma-sass	components/message.sass	9
 bulma-sass	utilities/functions.sass	2
