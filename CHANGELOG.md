@@ -36,6 +36,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - LSP: changing `loadPaths` re-resolves imports in open files without requiring an edit
 - LSP: a stale parse can no longer overwrite a newer document state
 - LSP: degenerate configuration values (`maxFileSize: 0`, `maxCachedTrees: 0`) are clamped
+- Indented Sass: `@use "x" as *` no longer swallows the following line. It parsed only
+  when a blank line happened to follow, so the failure looked intermittent
+
+### Added
+- Test corpus: 301 real-world indented-Sass files from Bulma 0.9.4, Vuetify and Quasar,
+  parsed in CI against a committed baseline. The five existing vendor corpora are all
+  SCSS, so the indented syntax previously had no real-world coverage at all
 
 ### Documentation
 - Corrected the 0.3.3 indented-Sass compliance figure: it reported 100% (346/346), the

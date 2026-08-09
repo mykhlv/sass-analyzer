@@ -2,44 +2,31 @@
 # Regenerate with:
 #   cargo test -p sass-parser --test corpus_test -- --ignored sass_corpora_match_baseline
 # A shrinking list is the goal; a growing one is a regression.
-# total failing files: 46
+# total failing files: 33
 bulma-sass	components/message.sass	9
 bulma-sass	utilities/functions.sass	2
 bulma-sass	utilities/mixins.sass	1
 vuetify	components/VAlert/VAlert.sass	1
-vuetify	components/VAutocomplete/VAutocomplete.sass	1
-vuetify	components/VAvatar/VAvatar.sass	1
 vuetify	components/VBanner/VBanner.sass	1
 vuetify	components/VBreadcrumbs/VBreadcrumbs.sass	1
-vuetify	components/VBtn/VBtn.sass	3
-vuetify	components/VBtnGroup/VBtnGroup.sass	2
-vuetify	components/VBtnToggle/VBtnToggle.sass	1
-vuetify	components/VCard/VCard.sass	1
-vuetify	components/VChip/VChip.sass	2
+vuetify	components/VBtn/VBtn.sass	2
+vuetify	components/VBtnGroup/VBtnGroup.sass	1
+vuetify	components/VChip/VChip.sass	1
 vuetify	components/VColorInput/VColorInput.sass	1
-vuetify	components/VCombobox/VCombobox.sass	1
-vuetify	components/VDataTable/VDataTable.sass	2
-vuetify	components/VFab/VFab.sass	1
 vuetify	components/VField/VField.sass	5
-vuetify	components/VFileInput/VFileInput.sass	1
 vuetify	components/VGrid/VGrid.sass	1
 vuetify	components/VInput/VInput.sass	2
 vuetify	components/VList/VList.sass	1
 vuetify	components/VList/VListItem.sass	1
 vuetify	components/VOtpInput/VOtpInput.sass	5
-vuetify	components/VSelect/VSelect.sass	1
 vuetify	components/VSelectionControl/VSelectionControl.sass	1
-vuetify	components/VSlider/VSlider.sass	1
 vuetify	components/VSnackbar/VSnackbar.sass	2
-vuetify	components/VTable/VTable.sass	2
+vuetify	components/VTable/VTable.sass	1
 vuetify	components/VTabs/VTabs.sass	1
 vuetify	components/VTimePicker/VTimePickerControls.sass	2
-vuetify	components/VTimeline/VTimeline.sass	1
 vuetify	labs/VVideo/VVideo.sass	3
 vuetify	labs/VVideo/VVideoControls.sass	1
-vuetify	styles/tools/_display.sass	1
 vuetify	styles/tools/_layer.scss	1
-vuetify	styles/tools/_variant.sass	2
 vuetify	styles/utilities/_pointer-events.sass	1
 quasar	components/field/QField.sass	5
 quasar	components/responsive/QResponsive.sass	4
