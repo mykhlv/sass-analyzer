@@ -1,0 +1,35 @@
+name: Fuzz
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - fuzz_lexer_crash
+          - fuzz_lexer_roundtrip
+          - fuzz_parser_crash
+          - fuzz_parser_roundtrip
+          - fuzz_sass_parser_crash
+          - fuzz_sass_parser_roundtrip
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - name: Run ${{ matrix.target }}
+        working-directory: crates/sass-parser
+        run: cargo fuzz run ${{ matrix.target }} -- -max_total_time=60
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: crates/sass-parser/fuzz/artifacts/

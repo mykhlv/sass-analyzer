@@ -10,6 +10,7 @@ fn apply_edit(source: &str, offset: u32, delete: u32, insert: &str) -> String {
 
 /// Oracle: verify incremental reparse matches full reparse.
 /// Returns true if incremental succeeded, false if it fell back.
+#[allow(clippy::cast_possible_truncation)] // test inputs are short; truncation cannot occur
 fn check(old: &str, offset: u32, delete: u32, insert: &str) -> bool {
     let new_source = apply_edit(old, offset, delete, insert);
     let (old_green, old_errors) = sass_parser::parse_scss(old);
@@ -187,10 +188,13 @@ fn edit_with_existing_error() {
 // ── Large file simulation ───────────────────────────────────────────
 
 #[test]
+#[allow(clippy::cast_possible_truncation)] // generated source is small; truncation cannot occur
 fn large_file_single_edit() {
+    use std::fmt::Write;
+
     let mut source = String::new();
     for i in 0..200 {
-        source.push_str(&format!(".rule-{i} {{ color: val-{i}; }}\n"));
+        let _ = writeln!(source, ".rule-{i} {{ color: val-{i}; }}");
     }
 
     // Edit a value in the middle

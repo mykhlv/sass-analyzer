@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Breaking
+- Minimum supported VS Code version is now 1.110 (was 1.80). This was raised in 0.3.4
+  without a changelog entry.
+
 ### Fixed
 - Parser: nested selector lists containing an attribute selector or a pseudo-class with
   arguments are no longer misparsed as nested properties — `p:nth-child(2) { }` inside a
@@ -29,6 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - LSP: a stale parse can no longer overwrite a newer document state
 - LSP: degenerate configuration values (`maxFileSize: 0`, `maxCachedTrees: 0`) are clamped
 
+### Documentation
+- Corrected the 0.3.3 indented-Sass compliance figure: it reported 100% (346/346), the
+  measured value against the pinned sass-spec corpus was 345/346
+
 ### Known issues
 - A nested property whose only value evidence sits inside brackets — for example
   `background: url("x.png") { repeat: no-repeat; }` — is now read as a rule set rather
@@ -48,7 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## 0.3.3 — 2026-03-21
 
 ### Fixed
-- Parser: indented Sass (.sass) compliance improved from 97.11% to 100% (346/346 valid inputs):
+- Parser: indented Sass (.sass) compliance improved from 97.11% to 99.71% (345/346 valid inputs):
   - Unterminated block comments (`/* ...` without `*/`) now valid in indented Sass
   - Unquoted `@import` paths (`@import other.css`) for legacy Sass syntax
   - Standalone `//` comments extend to subsequent indented continuation lines

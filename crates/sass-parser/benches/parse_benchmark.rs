@@ -29,11 +29,11 @@ fn collect_scss_recursive(dir: &Path, out: &mut String) {
     for path in paths {
         if path.is_dir() {
             collect_scss_recursive(&path, out);
-        } else if path.extension().is_some_and(|ext| ext == "scss") {
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                out.push_str(&content);
-                out.push('\n');
-            }
+        } else if path.extension().is_some_and(|ext| ext == "scss")
+            && let Ok(content) = std::fs::read_to_string(&path)
+        {
+            out.push_str(&content);
+            out.push('\n');
         }
     }
 }
@@ -161,7 +161,8 @@ fn parse_and_build_tree_angular_material(bencher: Bencher<'_, '_>) {
 // ── Incremental reparse benchmarks ──────────────────────────────────────
 
 /// Prepare an incremental edit scenario: parse old source, apply a single-char
-/// insert at `offset`, return (old_green, old_errors, edit, new_source).
+/// insert at `offset`, return (`old_green`, `old_errors`, edit, `new_source`).
+#[allow(clippy::cast_possible_truncation)] // insert is a short benchmark literal
 fn prepare_incremental(
     source: &str,
     offset: u32,
@@ -194,6 +195,7 @@ fn full_reparse_normalize_css(bencher: Bencher<'_, '_>) {
 }
 
 #[divan::bench]
+#[allow(clippy::cast_possible_truncation)] // fixture is small; truncation cannot occur
 fn incremental_reparse_normalize_css(bencher: Bencher<'_, '_>) {
     let offset = NORMALIZE_CSS.len() as u32 / 2;
     let (old_green, old_errors, edit, new_source) = prepare_incremental(NORMALIZE_CSS, offset, "x");
@@ -218,6 +220,7 @@ fn full_reparse_angular_material(bencher: Bencher<'_, '_>) {
 }
 
 #[divan::bench]
+#[allow(clippy::cast_possible_truncation)] // fixture source is well under u32::MAX bytes
 fn incremental_reparse_angular_material(bencher: Bencher<'_, '_>) {
     let source = &*ANGULAR_MATERIAL;
     if source.is_empty() {

@@ -36,6 +36,21 @@ cargo fmt --check
 UPDATE_EXPECT=1 cargo test
 ```
 
+## Fuzzing
+
+Fuzz targets live under `crates/sass-parser/fuzz/`. Run one with:
+
+```sh
+cargo +nightly fuzz run <target> -- -max_total_time=60
+```
+
+The fuzzing corpus grows quickly — several hundred megabytes after a long campaign.
+Minimise it periodically so seed selection stays fast:
+
+```sh
+cargo +nightly fuzz cmin <target>
+```
+
 ## Project Structure
 
 - `crates/sass-parser/` — SCSS parser library (lexer, parser, syntax tree)

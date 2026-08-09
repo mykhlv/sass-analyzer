@@ -49,7 +49,7 @@ async fn get_selection_ranges(
     resp["result"].as_array().cloned().unwrap_or_default()
 }
 
-/// Flatten a nested SelectionRange into a list of ranges from innermost to outermost.
+/// Flatten a nested `SelectionRange` into a list of ranges from innermost to outermost.
 fn flatten_selection_range(sr: &Value) -> Vec<&Value> {
     let mut result = Vec::new();
     let mut current = sr;
