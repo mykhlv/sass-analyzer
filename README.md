@@ -171,7 +171,7 @@ sass-cli lex file.scss        # Dump token stream
 ```
 cargo build --workspace
 cargo test --workspace
-cargo clippy --workspace -- -D warnings
+cargo clippy --workspace --all-targets -- -D warnings
 ```
 
 Requires Rust 1.94+ (edition 2024).

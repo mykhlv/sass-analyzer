@@ -27,7 +27,7 @@ npm run build
 cargo test --workspace
 
 # Run clippy
-cargo clippy --workspace -- -D warnings
+cargo clippy --workspace --all-targets -- -D warnings
 
 # Check formatting
 cargo fmt --check

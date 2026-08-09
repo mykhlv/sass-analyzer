@@ -944,9 +944,10 @@ impl ModuleGraph {
     /// Find all references to a symbol across the entire workspace.
     ///
     /// O(files × refs) — iterates all indexed files and checks each reference.
-    /// No reverse index is maintained. Acceptable for typical SCSS workspaces
-    /// (hundreds of files); consider a reverse index if profiling shows this as
-    /// a bottleneck in large monorepos.
+    /// Namespace-qualified references come from the per-file index built during
+    /// symbol collection; unqualified ones are still resolved on the fly. No index
+    /// keyed by target symbol exists, so the scan is linear in workspace size —
+    /// acceptable for typical SCSS workspaces (hundreds of files).
     pub fn find_all_references(
         &self,
         target_uri: &Uri,

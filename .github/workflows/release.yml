@@ -152,6 +152,7 @@ jobs:
             elif grep -qiE 'already (exists|published)' <<<"$out"; then
               echo "Skipped $vsix (already published)"
             else
+              echo "::error::failed to publish $vsix"
               echo "$out" >&2
               exit 1
             fi
@@ -193,6 +194,7 @@ jobs:
             elif grep -qiE 'already (exists|published)' <<<"$out"; then
               echo "Skipped $vsix (already published)"
             else
+              echo "::error::failed to publish $vsix"
               echo "$out" >&2
               exit 1
             fi

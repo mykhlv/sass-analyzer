@@ -105,7 +105,8 @@ struct Backend {
     module_graph: Arc<workspace::ModuleGraph>,
     runtime_config: Arc<config::RuntimeConfig>,
     task_tx: mpsc::UnboundedSender<Task>,
-    /// Workspace root, captured from `initialize` for use in `didChangeConfiguration`.
+    /// Workspace root, captured from `initialize`. Read by `execute_command` to scope
+    /// the `sass-analyzer.checkWorkspace` command.
     workspace_root: RwLock<Option<PathBuf>>,
     /// Every workspace folder, primary first. Captured from `initialize`.
     workspace_folders: RwLock<Vec<PathBuf>>,

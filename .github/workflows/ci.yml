@@ -78,7 +78,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: test-corpus/sass-spec
-          key: sass-spec-63a0becd13d3639a60669d8b710e75b282415047
+          key: sass-spec-${{ hashFiles('test-corpus/download.sh') }}
       - name: Download corpus
         run: bash test-corpus/download.sh sass-spec
       - name: Run sass-spec compatibility
