@@ -8,27 +8,8 @@
 # files parsed: bulma-sass 64
 # files parsed: vuetify 263
 # files parsed: quasar 93
-# total failing files: 23
+# total failing files: 4
 bulma-sass	components/message.sass	9
 bulma-sass	utilities/functions.sass	2
 bulma-sass	utilities/mixins.sass	1
-vuetify	components/VAlert/VAlert.sass	1
-vuetify	components/VBanner/VBanner.sass	1
-vuetify	components/VBreadcrumbs/VBreadcrumbs.sass	1
-vuetify	components/VBtn/VBtn.sass	2
-vuetify	components/VBtnGroup/VBtnGroup.sass	1
-vuetify	components/VChip/VChip.sass	1
-vuetify	components/VColorInput/VColorInput.sass	1
-vuetify	components/VField/VField.sass	5
-vuetify	components/VGrid/VGrid.sass	1
-vuetify	components/VInput/VInput.sass	2
-vuetify	components/VList/VList.sass	1
-vuetify	components/VList/VListItem.sass	1
-vuetify	components/VOtpInput/VOtpInput.sass	1
-vuetify	components/VSelectionControl/VSelectionControl.sass	1
-vuetify	components/VTable/VTable.sass	1
-vuetify	components/VTabs/VTabs.sass	1
-vuetify	components/VTimePicker/VTimePickerControls.sass	2
-vuetify	labs/VVideo/VVideo.sass	1
-vuetify	labs/VVideo/VVideoControls.sass	1
 vuetify	styles/tools/_layer.scss	1

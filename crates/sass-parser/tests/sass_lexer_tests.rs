@@ -1512,6 +1512,167 @@ fn star_after_number_still_continues_the_expression() {
 }
 
 #[test]
+fn at_root_opens_a_body_for_an_indented_include() {
+    // A bare `@at-root` takes a block, so an indented `@include` under it is the body.
+    // It used to be forced into the header, producing `@at-root @include …` and an
+    // "expected selector" error — Vuetify's density-variant pattern, 19 corpus files.
+    check_tree(
+        ".foo\n  @at-root\n    @include bar()\n      baz: 1\n",
+        expect![[r#"
+            SOURCE_FILE@0..48
+              RULE_SET@0..47
+                SELECTOR_LIST@0..4
+                  SELECTOR@0..4
+                    SIMPLE_SELECTOR@0..4
+                      DOT@0..1 "."
+                      IDENT@1..4 "foo"
+                BLOCK@4..47
+                  LBRACE@4..4 ""
+                  AT_ROOT_RULE@4..47
+                    WHITESPACE@4..7 "\n  "
+                    AT@7..8 "@"
+                    IDENT@8..15 "at-root"
+                    BLOCK@15..47
+                      WHITESPACE@15..20 "\n    "
+                      LBRACE@20..20 ""
+                      INCLUDE_RULE@20..47
+                        AT@20..21 "@"
+                        IDENT@21..28 "include"
+                        WHITESPACE@28..29 " "
+                        IDENT@29..32 "bar"
+                        ARG_LIST@32..34
+                          LPAREN@32..33 "("
+                          RPAREN@33..34 ")"
+                        BLOCK@34..47
+                          WHITESPACE@34..41 "\n      "
+                          LBRACE@41..41 ""
+                          DECLARATION@41..47
+                            PROPERTY@41..44
+                              IDENT@41..44 "baz"
+                            COLON@44..45 ":"
+                            VALUE@45..47
+                              NUMBER_LITERAL@45..47
+                                WHITESPACE@45..46 " "
+                                NUMBER@46..47 "1"
+                            SEMICOLON@47..47 ""
+                          RBRACE@47..47 ""
+                      RBRACE@47..47 ""
+                  RBRACE@47..47 ""
+              WHITESPACE@47..48 "\n"
+        "#]],
+    );
+}
+
+#[test]
+fn at_root_opens_a_body_for_an_indented_selector() {
+    // Behaviour change worth pinning: this used to parse as the selector form
+    // `@at-root .bar`, with `.bar` inside AT_ROOT_RULE's own SELECTOR_LIST. In the
+    // indented syntax the header ends at the newline, so it is the block form — the
+    // same CSS either way, which is why the wrong shape went unnoticed.
+    check_tree(
+        ".foo\n  @at-root\n    .bar\n      baz: 1\n",
+        expect![[r#"
+        SOURCE_FILE@0..38
+          RULE_SET@0..37
+            SELECTOR_LIST@0..4
+              SELECTOR@0..4
+                SIMPLE_SELECTOR@0..4
+                  DOT@0..1 "."
+                  IDENT@1..4 "foo"
+            BLOCK@4..37
+              LBRACE@4..4 ""
+              AT_ROOT_RULE@4..37
+                WHITESPACE@4..7 "\n  "
+                AT@7..8 "@"
+                IDENT@8..15 "at-root"
+                BLOCK@15..37
+                  WHITESPACE@15..20 "\n    "
+                  LBRACE@20..20 ""
+                  RULE_SET@20..37
+                    SELECTOR_LIST@20..24
+                      SELECTOR@20..24
+                        SIMPLE_SELECTOR@20..24
+                          DOT@20..21 "."
+                          IDENT@21..24 "bar"
+                    BLOCK@24..37
+                      LBRACE@24..24 ""
+                      DECLARATION@24..37
+                        PROPERTY@24..34
+                          WHITESPACE@24..31 "\n      "
+                          IDENT@31..34 "baz"
+                        COLON@34..35 ":"
+                        VALUE@35..37
+                          NUMBER_LITERAL@35..37
+                            WHITESPACE@35..36 " "
+                            NUMBER@36..37 "1"
+                        SEMICOLON@37..37 ""
+                      RBRACE@37..37 ""
+                  RBRACE@37..37 ""
+              RBRACE@37..37 ""
+          WHITESPACE@37..38 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn at_root_header_still_continues_for_a_parenthesised_query() {
+    // The one real header continuation `@at-root` has. It survives the removal above
+    // because `continues_header` accepts LPAREN under `at-root` on the start-of-line
+    // path, which is directive-aware where the end-of-line path is not.
+    check_tree(
+        ".foo\n  @at-root\n    (without: media)\n    .bar\n      x: 1\n",
+        expect![[r#"
+            SOURCE_FILE@0..57
+              RULE_SET@0..56
+                SELECTOR_LIST@0..4
+                  SELECTOR@0..4
+                    SIMPLE_SELECTOR@0..4
+                      DOT@0..1 "."
+                      IDENT@1..4 "foo"
+                BLOCK@4..56
+                  LBRACE@4..4 ""
+                  AT_ROOT_RULE@4..56
+                    WHITESPACE@4..7 "\n  "
+                    AT@7..8 "@"
+                    IDENT@8..15 "at-root"
+                    AT_ROOT_QUERY@15..36
+                      WHITESPACE@15..20 "\n    "
+                      LPAREN@20..21 "("
+                      IDENT@21..28 "without"
+                      COLON@28..29 ":"
+                      WHITESPACE@29..30 " "
+                      IDENT@30..35 "media"
+                      RPAREN@35..36 ")"
+                    BLOCK@36..56
+                      WHITESPACE@36..41 "\n    "
+                      LBRACE@41..41 ""
+                      RULE_SET@41..56
+                        SELECTOR_LIST@41..45
+                          SELECTOR@41..45
+                            SIMPLE_SELECTOR@41..45
+                              DOT@41..42 "."
+                              IDENT@42..45 "bar"
+                        BLOCK@45..56
+                          LBRACE@45..45 ""
+                          DECLARATION@45..56
+                            PROPERTY@45..53
+                              WHITESPACE@45..52 "\n      "
+                              IDENT@52..53 "x"
+                            COLON@53..54 ":"
+                            VALUE@54..56
+                              NUMBER_LITERAL@54..56
+                                WHITESPACE@54..55 " "
+                                NUMBER@55..56 "1"
+                            SEMICOLON@56..56 ""
+                          RBRACE@56..56 ""
+                      RBRACE@56..56 ""
+                  RBRACE@56..56 ""
+              WHITESPACE@56..57 "\n"
+        "#]],
+    );
+}
+
+#[test]
 fn combinator_and_universal_selector_open_a_block() {
     // `> *` is a selector, not a trailing `*` operator — the next line is its body,
     // not a continuation of the selector. Common in Vuetify/Quasar.

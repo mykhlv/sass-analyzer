@@ -40,6 +40,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when a blank line happened to follow, so the failure looked intermittent. Found by
   testing against hundreds of real-world `.sass` files from Bulma, Vuetify and Quasar —
   the indented syntax previously had no real-world test coverage at all
+- Indented Sass: a bare `@at-root` now opens a body instead of pulling the next line into
+  its header. `@at-root` followed by an indented `@include` reported "expected selector",
+  because the header was continued to give the invalid `@at-root @include …`. This is
+  Vuetify's density-variant pattern and was the second-largest source of failures in the
+  real-world indented-Sass corpus: 26 errors across 19 files. Followed by an indented
+  *selector* it produced no error but the wrong shape — the selector form `@at-root .bar`
+  rather than a block containing `.bar`, which compiles to the same CSS and so went
+  unnoticed; it is now the block form the indented syntax calls for. `@at-root` followed
+  by an indented `(without: …)` query still continues the header, as it should
 - Indented Sass: a selector ending in a universal selector — `> *`, `& ~ *`, `.a *` — no
   longer swallows the block indented under it. `*` at the end of a line was always read as
   a multiplication operator, so the whole nested block was parsed as part of the selector

@@ -353,6 +353,13 @@ fn is_end_of_line_continuation(
         }
         // Directive name keywords — continue only when the directive name is
         // at EOL. Covers `@mixin\n name`, `@debug\n expr`, `=\n name`, etc.
+        //
+        // `at-root` is deliberately absent: every one of these forces the next line into
+        // the header, and `@at-root` is the one directive here whose bare form is
+        // meaningful on its own — a bare `@at-root` takes a block, so an indented line
+        // under it is the body. Its one header continuation, `@at-root\n  (without: …)`,
+        // still works, because `continues_header` accepts LPAREN under `at-root` on the
+        // start-of-line path, which is directive-aware where this one is not.
         if at_name_is_last {
             return matches!(
                 text,
@@ -367,7 +374,6 @@ fn is_end_of_line_continuation(
                     | "error"
                     | "return"
                     | "extend"
-                    | "at-root"
                     | "="
             );
         }
