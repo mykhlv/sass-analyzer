@@ -15,7 +15,7 @@ fn corpus_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test-corpus")
 }
 
-fn collect_scss_files(dir: &Path) -> Vec<PathBuf> {
+fn collect_source_files(dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     collect_recursive(dir, &mut files);
     files.sort();
@@ -33,7 +33,10 @@ fn collect_recursive(dir: &Path, out: &mut Vec<PathBuf>) {
 
         if path.is_dir() {
             collect_recursive(&path, out);
-        } else if path.extension().is_some_and(|ext| ext == "scss") {
+        } else if path
+            .extension()
+            .is_some_and(|ext| ext == "scss" || ext == "sass")
+        {
             out.push(path);
         }
     }
@@ -47,10 +50,10 @@ struct FileResult {
 }
 
 fn parse_corpus_dir(dir: &Path) -> Vec<FileResult> {
-    let files = collect_scss_files(dir);
+    let files = collect_source_files(dir);
     assert!(
         !files.is_empty(),
-        "no .scss files found in {}",
+        "no .scss or .sass files found in {}",
         dir.display()
     );
 
@@ -60,7 +63,12 @@ fn parse_corpus_dir(dir: &Path) -> Vec<FileResult> {
             let source = std::fs::read_to_string(&path)
                 .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
 
-            let (green, errors) = sass_parser::parse_scss(&source);
+            let parse_fn = if path.extension().is_some_and(|ext| ext == "sass") {
+                sass_parser::parse_sass
+            } else {
+                sass_parser::parse_scss
+            };
+            let (green, errors) = parse_fn(&source);
             let tree = SyntaxNode::new_root(green);
 
             let round_trip_ok = tree.text().to_string() == source;
@@ -225,4 +233,30 @@ fn bulma_scss_zero_panics_and_round_trip() {
 #[ignore = "requires downloading test corpus"]
 fn angular_material_scss_zero_panics_and_round_trip() {
     run_corpus_test("Angular Material", "angular-material/scss");
+}
+
+#[test]
+fn harness_collects_and_parses_indented_sass() {
+    let dir = std::env::temp_dir().join(format!("sass_harness_{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    std::fs::write(dir.join("a.sass"), ".btn\n  color: red\n").unwrap();
+    std::fs::write(dir.join("b.scss"), ".btn { color: red; }\n").unwrap();
+
+    let results = parse_corpus_dir(&dir);
+
+    assert_eq!(results.len(), 2, "both extensions must be collected");
+    for r in &results {
+        assert!(
+            r.round_trip_ok,
+            "round-trip failed for {}",
+            r.path.display()
+        );
+        assert_eq!(
+            r.error_count,
+            0,
+            "{} parsed with errors — the .sass file was parsed as SCSS",
+            r.path.display()
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
 }
