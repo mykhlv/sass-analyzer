@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "CLI tool for sass-parser (debug, lex, lint)"
+description = "CLI tool for sass-parser (parse, check, lex)"
 publish = false
 
 [[bin]]

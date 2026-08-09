@@ -6,6 +6,10 @@
 
 A hand-written recursive descent SCSS/Sass parser and language server in Rust, built for IDE tooling. Supports both SCSS (`.scss`) and indented Sass (`.sass`) syntax.
 
+## Requirements
+
+- VS Code 1.110 or newer
+
 ## Why
 
 Existing SCSS extensions for VS Code struggle in monorepos: slow startup, high memory usage, incomplete module system support. sass-analyzer is a native Rust alternative — a lossless CST parser and full-featured LSP server that handles large workspaces without breaking a sweat.

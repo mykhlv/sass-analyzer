@@ -5,7 +5,7 @@
 //! (inferred from the presence of `output.css` vs `error` sibling entries).
 //!
 //! Download the spec first:
-//!   cd test-corpus && bash download.sh
+//!   cd test-corpus && bash download.sh sass-spec
 //!
 //! Run with:
 //!   `cargo test --test sass_spec_test -- --ignored --nocapture`
