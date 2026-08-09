@@ -302,7 +302,7 @@ fn sass_corpora_match_baseline() {
          #   cargo test -p sass-parser --test corpus_test -- --ignored sass_corpora_match_baseline\n\
          # A shrinking list is the goal; a growing one is a regression.\n",
     );
-    out.push_str(&format!("# total failing files: {}\n", lines.len()));
+    let _ = writeln!(out, "# total failing files: {}", lines.len());
     for line in &lines {
         out.push_str(line);
         out.push('\n');
