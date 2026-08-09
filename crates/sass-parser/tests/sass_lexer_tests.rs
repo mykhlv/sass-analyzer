@@ -1465,3 +1465,99 @@ fn star_after_number_still_continues_the_expression() {
     "#]],
     );
 }
+
+#[test]
+fn forward_as_prefix_star_followed_by_rule() {
+    check_tree(
+        "@forward 'lib' as btn-*\n.x\n  color: red\n",
+        expect![[r#"
+        SOURCE_FILE@0..40
+          FORWARD_RULE@0..23
+            AT@0..1 "@"
+            IDENT@1..8 "forward"
+            WHITESPACE@8..9 " "
+            QUOTED_STRING@9..14 "'lib'"
+            WHITESPACE@14..15 " "
+            IDENT@15..17 "as"
+            WHITESPACE@17..18 " "
+            IDENT@18..22 "btn-"
+            STAR@22..23 "*"
+            SEMICOLON@23..23 ""
+          RULE_SET@23..39
+            SELECTOR_LIST@23..26
+              SELECTOR@23..26
+                SIMPLE_SELECTOR@23..26
+                  WHITESPACE@23..24 "\n"
+                  DOT@24..25 "."
+                  IDENT@25..26 "x"
+            BLOCK@26..39
+              LBRACE@26..26 ""
+              DECLARATION@26..39
+                PROPERTY@26..34
+                  WHITESPACE@26..29 "\n  "
+                  IDENT@29..34 "color"
+                COLON@34..35 ":"
+                VALUE@35..39
+                  VALUE@35..39
+                    WHITESPACE@35..36 " "
+                    IDENT@36..39 "red"
+                SEMICOLON@39..39 ""
+              RBRACE@39..39 ""
+          WHITESPACE@39..40 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn use_with_multiplication_in_config_still_parses() {
+    check_tree(
+        "@use 'a' with ($w: 2 * 3)\n.x\n  color: red\n",
+        expect![[r#"
+        SOURCE_FILE@0..42
+          USE_RULE@0..25
+            AT@0..1 "@"
+            IDENT@1..4 "use"
+            WHITESPACE@4..5 " "
+            QUOTED_STRING@5..8 "'a'"
+            WHITESPACE@8..9 " "
+            IDENT@9..13 "with"
+            WHITESPACE@13..14 " "
+            LPAREN@14..15 "("
+            DOLLAR@15..16 "$"
+            IDENT@16..17 "w"
+            COLON@17..18 ":"
+            BINARY_EXPR@18..24
+              NUMBER_LITERAL@18..20
+                WHITESPACE@18..19 " "
+                NUMBER@19..20 "2"
+              WHITESPACE@20..21 " "
+              STAR@21..22 "*"
+              NUMBER_LITERAL@22..24
+                WHITESPACE@22..23 " "
+                NUMBER@23..24 "3"
+            RPAREN@24..25 ")"
+            SEMICOLON@25..25 ""
+          RULE_SET@25..41
+            SELECTOR_LIST@25..28
+              SELECTOR@25..28
+                SIMPLE_SELECTOR@25..28
+                  WHITESPACE@25..26 "\n"
+                  DOT@26..27 "."
+                  IDENT@27..28 "x"
+            BLOCK@28..41
+              LBRACE@28..28 ""
+              DECLARATION@28..41
+                PROPERTY@28..36
+                  WHITESPACE@28..31 "\n  "
+                  IDENT@31..36 "color"
+                COLON@36..37 ":"
+                VALUE@37..41
+                  VALUE@37..41
+                    WHITESPACE@37..38 " "
+                    IDENT@38..41 "red"
+                SEMICOLON@41..41 ""
+              RBRACE@41..41 ""
+          WHITESPACE@41..42 "\n"
+    "#]],
+    );
+}

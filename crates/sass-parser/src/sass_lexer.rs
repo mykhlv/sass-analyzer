@@ -27,7 +27,6 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
     let mut last_sig_kind = SyntaxKind::EOF;
     let mut last_sig_text: &str = "";
     let mut prev_sig_kind = SyntaxKind::EOF;
-    let mut prev_sig_text: &str = "";
     // Combined nesting depth for (), [], and #{}
     let mut nesting: u32 = 0;
     // Pending virtual LBRACE: Some(indent) when we've deferred a block-open decision.
@@ -87,7 +86,6 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
         // Save previous significant kind before the match overwrites last_sig_kind.
         if !kind.is_trivia() {
             prev_sig_kind = last_sig_kind;
-            prev_sig_text = last_sig_text;
         }
 
         match kind {
@@ -133,11 +131,11 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
                     last_sig_kind,
                     last_sig_text,
                     prev_sig_kind,
-                    prev_sig_text,
                     &mut pending_lbrace,
                     &mut after_at,
                     &mut after_dollar,
                     at_name_is_last,
+                    at_directive,
                     had_prior_content,
                 );
             }
@@ -283,13 +281,15 @@ fn is_end_of_line_continuation(
     kind: SyntaxKind,
     text: &str,
     at_name_is_last: bool,
-    prev_sig_kind: SyntaxKind,
-    prev_sig_text: &str,
+    after_at: bool,
+    at_directive: &str,
 ) -> bool {
-    // `*` continues an expression (`$a: 1 *`) but ends a statement after `as`
-    // (`@use "x" as *`), where it is a wildcard rather than an operator.
+    // `*` continues an expression (`$a: 1 *`) but ends a statement in a `@use` or
+    // `@forward` header, where it is a wildcard: `as *`, `as prefix-*`. Neither
+    // directive can contain arithmetic at this point (any parenthesised `with`
+    // config is skipped entirely — newlines inside `()` never reach this function).
     if kind == SyntaxKind::STAR {
-        return !(prev_sig_kind == SyntaxKind::IDENT && prev_sig_text == "as");
+        return !(after_at && matches!(at_directive, "use" | "forward"));
     }
     #[rustfmt::skip]
     let by_kind = matches!(
@@ -476,11 +476,11 @@ fn process_newline<'src>(
     last_sig_kind: SyntaxKind,
     last_sig_text: &str,
     prev_sig_kind: SyntaxKind,
-    prev_sig_text: &str,
     pending_lbrace: &mut Option<u32>,
     after_at: &mut bool,
     after_dollar: &mut bool,
     at_name_is_last: bool,
+    at_directive: &str,
     had_prior_content: bool,
 ) {
     let new_indent = measure_indent_after_last_newline(ws_text);
@@ -493,8 +493,8 @@ fn process_newline<'src>(
         last_sig_kind,
         last_sig_text,
         at_name_is_last,
-        prev_sig_kind,
-        prev_sig_text,
+        *after_at,
+        at_directive,
     );
     // `50%` is a unit, not modulo — don't treat PERCENT after NUMBER as continuation.
     if last_sig_kind == SyntaxKind::PERCENT && prev_sig_kind == SyntaxKind::NUMBER {
