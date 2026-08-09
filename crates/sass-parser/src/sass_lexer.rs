@@ -347,8 +347,19 @@ fn is_end_of_line_continuation(
         return true;
     }
     if kind == SyntaxKind::IDENT {
-        // Expression/module keywords — always continue.
-        if is_continuation_keyword(text) {
+        // Keyword continuations, by where the keyword can legitimately appear. Matching on
+        // the bare token text is not enough: every one of these is an ordinary identifier
+        // elsewhere, and treating one as a continuation silently glues the next line onto
+        // this statement — `margin: 1in` ends in the IDENT `in`, `@if $from` in `from`.
+        //
+        // Header keywords need the directive to actually take them: `from`/`through`/`to`
+        // under `@for`, `in` under `@each`, `as`/`with` under `@use`, and so on.
+        let continues_a_header = ctx.after_at && keyword_continues_header(text, ctx.directive);
+        // The boolean operators are the exception: they are expression operators, so they
+        // also continue inside a value, where there is no directive to consult at all
+        // (`$a: not\n  b`, `$a: 1 and\n  2`).
+        let continues_a_value = ctx.saw_colon && matches!(text, "and" | "or" | "not");
+        if continues_a_header || continues_a_value {
             return true;
         }
         // Directive name keywords — continue only when the directive name is

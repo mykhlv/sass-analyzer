@@ -40,6 +40,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when a blank line happened to follow, so the failure looked intermittent. Found by
   testing against hundreds of real-world `.sass` files from Bulma, Vuetify and Quasar —
   the indented syntax previously had no real-world test coverage at all
+- Indented Sass: an identifier that happens to match a keyword the lexer uses for line
+  continuation no longer glues the next line onto the current statement. The check fired
+  on the bare token text, with no regard for the directive or for whether a directive was
+  involved at all, so `margin: 1in` (the IDENT `in`), `content: from`, and any at-rule
+  ending in a variable like `$from` or `$to` all swallowed the line below them. This was
+  usually **silent** — `margin: 1in` followed by `color: red` produced one declaration
+  instead of two, with no diagnostic — and became visible only when the merged result
+  could not parse, as in `@if $from` leaving its `@else` without a matching `@if`. These
+  keywords now continue only where they can legitimately occur: in the header of a
+  directive that takes them, or, for the boolean operators `and`/`or`/`not`, inside a
+  value as well
+- Indented Sass: `@keyframes` frames written as `from`/`to` now open a body of their own.
+  They previously produced a flat tree in which each frame's declarations were siblings of
+  the frame selector rather than its children, so a `from` frame's properties appeared to
+  belong to the `@keyframes` rule itself. Percentage frames (`0%`, `100%`) were already
+  correct, which is why the two forms disagreed. Same root cause as the entry above
 - Indented Sass: a bare `@else` no longer swallows a variable declaration indented under
   it. `@else` followed by `$x: …` pulled the first declaration into its header — silently,
   since a header can hold an expression — and then errored on the second, so a two-line
