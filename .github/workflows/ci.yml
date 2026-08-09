@@ -80,7 +80,7 @@ jobs:
           path: test-corpus/sass-spec
           key: sass-spec-63a0becd13d3639a60669d8b710e75b282415047
       - name: Download corpus
-        run: bash test-corpus/download.sh
+        run: bash test-corpus/download.sh sass-spec
       - name: Run sass-spec compatibility
         run: cargo test -p sass-parser --test sass_spec_test -- --ignored --nocapture
       - name: Fail on compliance drift
