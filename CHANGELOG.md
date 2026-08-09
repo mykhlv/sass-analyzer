@@ -41,6 +41,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Corrected the 0.3.3 indented-Sass compliance figure: it reported 100% (346/346), the
   measured value against the pinned sass-spec corpus was 345/346
 
+### Changed
+- Dependencies refreshed: 47 transitive Rust crates within semver, `rowan` 0.16 → 0.17,
+  TypeScript 6 → 7, `@types/node` 25 → 26, esbuild 0.27 → 0.28
+- `@types/vscode` is now pinned with a tilde (`~1.110.0`) so it tracks the supported
+  `engines.vscode` floor instead of drifting above it on every dependency update
+
 ### Known issues
 - A nested property whose only value evidence sits inside brackets — for example
   `background: url("x.png") { repeat: no-repeat; }` — is now read as a rule set rather
