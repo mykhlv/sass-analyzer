@@ -1368,6 +1368,51 @@ fn use_as_star_followed_by_rule() {
 }
 
 #[test]
+fn use_as_star_is_case_insensitive() {
+    // `@USE` is dispatched to GENERIC_AT_RULE rather than USE_RULE — the parser's
+    // directive-name dispatch (grammar/at_rules.rs) is a separate, case-sensitive
+    // mechanism from the sass_lexer.rs continuation check fixed here. The point of
+    // this test is that STAR still ends the header instead of swallowing `.x`.
+    check_tree(
+        "@USE 'a' as *\n.x\n  color: red\n",
+        expect![[r#"
+        SOURCE_FILE@0..30
+          GENERIC_AT_RULE@0..13
+            AT@0..1 "@"
+            IDENT@1..4 "USE"
+            WHITESPACE@4..5 " "
+            QUOTED_STRING@5..8 "'a'"
+            WHITESPACE@8..9 " "
+            IDENT@9..11 "as"
+            WHITESPACE@11..12 " "
+            STAR@12..13 "*"
+            SEMICOLON@13..13 ""
+          RULE_SET@13..29
+            SELECTOR_LIST@13..16
+              SELECTOR@13..16
+                SIMPLE_SELECTOR@13..16
+                  WHITESPACE@13..14 "\n"
+                  DOT@14..15 "."
+                  IDENT@15..16 "x"
+            BLOCK@16..29
+              LBRACE@16..16 ""
+              DECLARATION@16..29
+                PROPERTY@16..24
+                  WHITESPACE@16..19 "\n  "
+                  IDENT@19..24 "color"
+                COLON@24..25 ":"
+                VALUE@25..29
+                  VALUE@25..29
+                    WHITESPACE@25..26 " "
+                    IDENT@26..29 "red"
+                SEMICOLON@29..29 ""
+              RBRACE@29..29 ""
+          WHITESPACE@29..30 "\n"
+    "#]],
+    );
+}
+
+#[test]
 fn use_as_star_followed_by_another_use() {
     check_tree(
         "@use 'a' as *\n@use 'b' as *\n",
