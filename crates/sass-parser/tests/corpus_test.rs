@@ -235,6 +235,98 @@ fn angular_material_scss_zero_panics_and_round_trip() {
     run_corpus_test("Angular Material", "angular-material/scss");
 }
 
+fn sass_corpus_baseline_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test-corpus/sass-corpus-baseline.txt")
+}
+
+/// Parse one indented-Sass corpus. Round-trip failures fail the test outright;
+/// parse errors are recorded in the baseline instead, because 45 files fail today
+/// and the point of the baseline is that the number can only go down.
+fn run_sass_corpus_test(name: &str, subdir: &str) -> Vec<String> {
+    let corpus = corpus_root();
+    let dir = corpus.join(subdir);
+
+    assert!(
+        dir.exists(),
+        "{name} corpus not found at {}. Run: cd test-corpus && bash download.sh",
+        dir.display()
+    );
+
+    let results = parse_corpus_dir(&dir);
+    print_corpus_report(name, &results, &dir);
+
+    let rt_failures: Vec<_> = results
+        .iter()
+        .filter(|r| !r.round_trip_ok)
+        .map(|r| r.path.display().to_string())
+        .collect();
+    assert!(
+        rt_failures.is_empty(),
+        "round-trip failed for {} files: {:?}",
+        rt_failures.len(),
+        rt_failures,
+    );
+
+    let mut lines: Vec<String> = results
+        .iter()
+        .filter(|r| r.error_count > 0)
+        .map(|r| {
+            let rel = r.path.strip_prefix(&dir).unwrap_or(&r.path);
+            format!("{name}\t{}\t{}", rel.display(), r.error_count)
+        })
+        .collect();
+    lines.sort();
+    lines
+}
+
+/// Read `# total failing files: N` from the committed baseline.
+/// Returns `None` the first time, when no baseline exists yet.
+fn committed_failure_count() -> Option<usize> {
+    let text = std::fs::read_to_string(sass_corpus_baseline_path()).ok()?;
+    text.lines()
+        .find_map(|l| l.strip_prefix("# total failing files: "))
+        .and_then(|n| n.trim().parse().ok())
+}
+
+#[test]
+#[ignore = "requires downloading test corpus"]
+fn sass_corpora_match_baseline() {
+    let mut lines = Vec::new();
+    lines.extend(run_sass_corpus_test("bulma-sass", "bulma-sass/sass"));
+    lines.extend(run_sass_corpus_test("vuetify", "vuetify/src"));
+    lines.extend(run_sass_corpus_test("quasar", "quasar/src"));
+
+    let mut out = String::from(
+        "# Indented-Sass corpus baseline: files that do not parse cleanly.\n\
+         # Regenerate with:\n\
+         #   cargo test -p sass-parser --test corpus_test -- --ignored sass_corpora_match_baseline\n\
+         # A shrinking list is the goal; a growing one is a regression.\n",
+    );
+    out.push_str(&format!("# total failing files: {}\n", lines.len()));
+    for line in &lines {
+        out.push_str(line);
+        out.push('\n');
+    }
+
+    let previous = committed_failure_count();
+    std::fs::write(sass_corpus_baseline_path(), &out).expect("write baseline");
+    eprintln!("\nsass corpus baseline: {} failing files", lines.len());
+
+    // Fail here on a regression rather than relying on CI's diff alone. An
+    // improvement still shows up as a diff, which CI turns into a prompt to
+    // commit the smaller baseline.
+    if let Some(previous) = previous {
+        assert!(
+            lines.len() <= previous,
+            "indented-Sass corpus regressed: {} files now fail, baseline was {}. \
+             Review the rewritten {} before committing it.",
+            lines.len(),
+            previous,
+            sass_corpus_baseline_path().display(),
+        );
+    }
+}
+
 #[test]
 fn harness_collects_and_parses_indented_sass() {
     let dir = std::env::temp_dir().join(format!("sass_harness_{}", std::process::id()));
