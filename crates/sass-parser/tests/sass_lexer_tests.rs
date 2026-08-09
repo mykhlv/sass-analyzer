@@ -1149,6 +1149,11 @@ fn for_header_continues_with_dollar_after_directive_name() {
 
 #[test]
 fn keyframes_from_to_open_the_body() {
+    // Each frame gets its own BLOCK. This was flat until the end-of-line keyword check
+    // became directive-aware: `from`/`to` matched unconditionally, suppressing the line
+    // break so the frame never opened a body. `0%` frames escaped it via the
+    // PERCENT-after-NUMBER exception, which is why this and
+    // `keyframes_percent_selectors_open_the_body` used to disagree in shape.
     check_tree(
         "@keyframes slide\n  from\n    opacity: 0\n  to\n    opacity: 1\n",
         expect![[r#"
@@ -1160,31 +1165,37 @@ fn keyframes_from_to_open_the_body() {
                 IDENT@11..16 "slide"
                 WHITESPACE@16..19 "\n  "
                 LBRACE@19..19 ""
-                KEYFRAME_SELECTOR@19..23
+                KEYFRAME_SELECTOR@19..38
                   IDENT@19..23 "from"
-                DECLARATION@23..38
-                  PROPERTY@23..35
-                    WHITESPACE@23..28 "\n    "
-                    IDENT@28..35 "opacity"
-                  COLON@35..36 ":"
-                  VALUE@36..38
-                    NUMBER_LITERAL@36..38
-                      WHITESPACE@36..37 " "
-                      NUMBER@37..38 "0"
-                  SEMICOLON@38..38 ""
-                KEYFRAME_SELECTOR@38..43
+                  BLOCK@23..38
+                    LBRACE@23..23 ""
+                    DECLARATION@23..38
+                      PROPERTY@23..35
+                        WHITESPACE@23..28 "\n    "
+                        IDENT@28..35 "opacity"
+                      COLON@35..36 ":"
+                      VALUE@36..38
+                        NUMBER_LITERAL@36..38
+                          WHITESPACE@36..37 " "
+                          NUMBER@37..38 "0"
+                      SEMICOLON@38..38 ""
+                    RBRACE@38..38 ""
+                KEYFRAME_SELECTOR@38..58
                   WHITESPACE@38..41 "\n  "
                   IDENT@41..43 "to"
-                DECLARATION@43..58
-                  PROPERTY@43..55
-                    WHITESPACE@43..48 "\n    "
-                    IDENT@48..55 "opacity"
-                  COLON@55..56 ":"
-                  VALUE@56..58
-                    NUMBER_LITERAL@56..58
-                      WHITESPACE@56..57 " "
-                      NUMBER@57..58 "1"
-                  SEMICOLON@58..58 ""
+                  BLOCK@43..58
+                    LBRACE@43..43 ""
+                    DECLARATION@43..58
+                      PROPERTY@43..55
+                        WHITESPACE@43..48 "\n    "
+                        IDENT@48..55 "opacity"
+                      COLON@55..56 ":"
+                      VALUE@56..58
+                        NUMBER_LITERAL@56..58
+                          WHITESPACE@56..57 " "
+                          NUMBER@57..58 "1"
+                      SEMICOLON@58..58 ""
+                    RBRACE@58..58 ""
                 RBRACE@58..58 ""
               WHITESPACE@58..59 "\n"
         "#]],
@@ -1293,34 +1304,43 @@ fn mixin_body_starting_with_pseudo_selector() {
 // continuation path (`is_end_of_line_continuation`), which is not directive-aware.
 #[test]
 fn mixin_body_starting_with_continuation_keyword() {
+    // `to` opens a rule set inside the mixin body. This snapshot previously recorded the
+    // declaration being absorbed into the selector as `SIMPLE_SELECTOR(color)` +
+    // `PSEUDO_SELECTOR(:red)` — a silent misparse pinned as if it were correct, because
+    // the trailing `to` was read as a continuation keyword.
     check_tree(
         "@mixin m\n  to\n    color: red\n",
         expect![[r#"
-        SOURCE_FILE@0..29
-          MIXIN_RULE@0..28
-            AT@0..1 "@"
-            IDENT@1..6 "mixin"
-            WHITESPACE@6..7 " "
-            IDENT@7..8 "m"
-            BLOCK@8..28
-              WHITESPACE@8..11 "\n  "
-              LBRACE@11..11 ""
-              RULE_SET@11..28
-                SELECTOR_LIST@11..28
-                  SELECTOR@11..28
-                    SIMPLE_SELECTOR@11..13
-                      IDENT@11..13 "to"
-                    SIMPLE_SELECTOR@13..23
-                      WHITESPACE@13..18 "\n    "
-                      IDENT@18..23 "color"
-                    PSEUDO_SELECTOR@23..28
-                      COLON@23..24 ":"
-                      WHITESPACE@24..25 " "
-                      IDENT@25..28 "red"
-              SEMICOLON@28..28 ""
-              RBRACE@28..28 ""
-          WHITESPACE@28..29 "\n"
-    "#]],
+            SOURCE_FILE@0..29
+              MIXIN_RULE@0..28
+                AT@0..1 "@"
+                IDENT@1..6 "mixin"
+                WHITESPACE@6..7 " "
+                IDENT@7..8 "m"
+                BLOCK@8..28
+                  WHITESPACE@8..11 "\n  "
+                  LBRACE@11..11 ""
+                  RULE_SET@11..28
+                    SELECTOR_LIST@11..13
+                      SELECTOR@11..13
+                        SIMPLE_SELECTOR@11..13
+                          IDENT@11..13 "to"
+                    BLOCK@13..28
+                      LBRACE@13..13 ""
+                      DECLARATION@13..28
+                        PROPERTY@13..23
+                          WHITESPACE@13..18 "\n    "
+                          IDENT@18..23 "color"
+                        COLON@23..24 ":"
+                        VALUE@24..28
+                          VALUE@24..28
+                            WHITESPACE@24..25 " "
+                            IDENT@25..28 "red"
+                        SEMICOLON@28..28 ""
+                      RBRACE@28..28 ""
+                  RBRACE@28..28 ""
+              WHITESPACE@28..29 "\n"
+        "#]],
     );
 }
 
@@ -1507,6 +1527,1040 @@ fn star_after_number_still_continues_the_expression() {
                 NUMBER@10..11 "2"
             SEMICOLON@11..11 ""
           WHITESPACE@11..12 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn variable_named_after_a_continuation_keyword_does_not_break_the_header() {
+    // `@if $from` ends in the IDENT `from`. That used to read as an unfinished `@for`
+    // header regardless of the actual directive, so the `@if` body never opened and the
+    // `@else` below had no `@if` to attach to.
+    check_tree(
+        ".foo\n  @if $from\n    x: 1\n  @else\n    y: 2\n",
+        expect![[r#"
+            SOURCE_FILE@0..43
+              RULE_SET@0..42
+                SELECTOR_LIST@0..4
+                  SELECTOR@0..4
+                    SIMPLE_SELECTOR@0..4
+                      DOT@0..1 "."
+                      IDENT@1..4 "foo"
+                BLOCK@4..42
+                  LBRACE@4..4 ""
+                  IF_RULE@4..42
+                    WHITESPACE@4..7 "\n  "
+                    AT@7..8 "@"
+                    IDENT@8..10 "if"
+                    VARIABLE_REF@10..16
+                      WHITESPACE@10..11 " "
+                      DOLLAR@11..12 "$"
+                      IDENT@12..16 "from"
+                    BLOCK@16..25
+                      WHITESPACE@16..21 "\n    "
+                      LBRACE@21..21 ""
+                      DECLARATION@21..25
+                        PROPERTY@21..22
+                          IDENT@21..22 "x"
+                        COLON@22..23 ":"
+                        VALUE@23..25
+                          NUMBER_LITERAL@23..25
+                            WHITESPACE@23..24 " "
+                            NUMBER@24..25 "1"
+                        SEMICOLON@25..25 ""
+                      RBRACE@25..25 ""
+                    ELSE_CLAUSE@25..42
+                      WHITESPACE@25..28 "\n  "
+                      AT@28..29 "@"
+                      IDENT@29..33 "else"
+                      BLOCK@33..42
+                        WHITESPACE@33..38 "\n    "
+                        LBRACE@38..38 ""
+                        DECLARATION@38..42
+                          PROPERTY@38..39
+                            IDENT@38..39 "y"
+                          COLON@39..40 ":"
+                          VALUE@40..42
+                            NUMBER_LITERAL@40..42
+                              WHITESPACE@40..41 " "
+                              NUMBER@41..42 "2"
+                          SEMICOLON@42..42 ""
+                        RBRACE@42..42 ""
+                  RBRACE@42..42 ""
+              WHITESPACE@42..43 "\n"
+        "#]],
+    );
+}
+
+#[test]
+fn unit_colliding_with_a_continuation_keyword_ends_the_declaration() {
+    // `1in` lexes as NUMBER + IDENT `in` — an ordinary CSS length. The keyword check used
+    // to fire on the bare text, silently gluing the next declaration onto this one: no
+    // diagnostic, one DECLARATION where there should be two.
+    check_tree(
+        ".foo\n  margin: 1in\n  color: red\n",
+        expect![[r#"
+        SOURCE_FILE@0..32
+          RULE_SET@0..31
+            SELECTOR_LIST@0..4
+              SELECTOR@0..4
+                SIMPLE_SELECTOR@0..4
+                  DOT@0..1 "."
+                  IDENT@1..4 "foo"
+            BLOCK@4..31
+              LBRACE@4..4 ""
+              DECLARATION@4..18
+                PROPERTY@4..13
+                  WHITESPACE@4..7 "\n  "
+                  IDENT@7..13 "margin"
+                COLON@13..14 ":"
+                VALUE@14..18
+                  DIMENSION@14..18
+                    WHITESPACE@14..15 " "
+                    NUMBER@15..16 "1"
+                    IDENT@16..18 "in"
+                SEMICOLON@18..18 ""
+              DECLARATION@18..31
+                PROPERTY@18..26
+                  WHITESPACE@18..21 "\n  "
+                  IDENT@21..26 "color"
+                COLON@26..27 ":"
+                VALUE@27..31
+                  VALUE@27..31
+                    WHITESPACE@27..28 " "
+                    IDENT@28..31 "red"
+                SEMICOLON@31..31 ""
+              RBRACE@31..31 ""
+          WHITESPACE@31..32 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn boolean_operator_still_continues_inside_a_value() {
+    // The exception to the rule above. `and`/`or`/`not` are expression operators, so they
+    // continue in a value, where there is no directive to consult. From sass-spec
+    // `operators/newlines/unary/after`.
+    check_tree(
+        "$a: not\nb\nc\n  d: $a\n",
+        expect![[r#"
+        SOURCE_FILE@0..20
+          VARIABLE_DECL@0..9
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "a"
+            COLON@2..3 ":"
+            UNARY_EXPR@3..9
+              WHITESPACE@3..4 " "
+              IDENT@4..7 "not"
+              VALUE@7..9
+                WHITESPACE@7..8 "\n"
+                IDENT@8..9 "b"
+            SEMICOLON@9..9 ""
+          RULE_SET@9..19
+            SELECTOR_LIST@9..11
+              SELECTOR@9..11
+                SIMPLE_SELECTOR@9..11
+                  WHITESPACE@9..10 "\n"
+                  IDENT@10..11 "c"
+            BLOCK@11..19
+              LBRACE@11..11 ""
+              DECLARATION@11..19
+                PROPERTY@11..15
+                  WHITESPACE@11..14 "\n  "
+                  IDENT@14..15 "d"
+                COLON@15..16 ":"
+                VALUE@16..19
+                  VARIABLE_REF@16..19
+                    WHITESPACE@16..17 " "
+                    DOLLAR@17..18 "$"
+                    IDENT@18..19 "a"
+                SEMICOLON@19..19 ""
+              RBRACE@19..19 ""
+          WHITESPACE@19..20 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn boolean_operator_still_continues_a_media_query() {
+    // And in a header whose directive takes it — `media` is not an expression directive,
+    // so this needs the header branch rather than the value one.
+    check_tree(
+        "@media screen and\n  (min-width: 1px)\n  p: 1\n",
+        expect![[r#"
+            SOURCE_FILE@0..44
+              MEDIA_RULE@0..43
+                AT@0..1 "@"
+                IDENT@1..6 "media"
+                MEDIA_QUERY@6..36
+                  WHITESPACE@6..7 " "
+                  IDENT@7..13 "screen"
+                  WHITESPACE@13..14 " "
+                  IDENT@14..17 "and"
+                  WHITESPACE@17..20 "\n  "
+                  LPAREN@20..21 "("
+                  IDENT@21..30 "min-width"
+                  COLON@30..31 ":"
+                  WHITESPACE@31..32 " "
+                  NUMBER@32..33 "1"
+                  IDENT@33..35 "px"
+                  RPAREN@35..36 ")"
+                BLOCK@36..43
+                  WHITESPACE@36..39 "\n  "
+                  LBRACE@39..39 ""
+                  DECLARATION@39..43
+                    PROPERTY@39..40
+                      IDENT@39..40 "p"
+                    COLON@40..41 ":"
+                    VALUE@41..43
+                      NUMBER_LITERAL@41..43
+                        WHITESPACE@41..42 " "
+                        NUMBER@42..43 "1"
+                    SEMICOLON@43..43 ""
+                  RBRACE@43..43 ""
+              WHITESPACE@43..44 "\n"
+        "#]],
+    );
+}
+
+#[test]
+fn bare_else_body_can_start_with_a_variable_declaration() {
+    // A bare `@else` is a complete header, so an indented `$x: …` under it is the body.
+    // It used to be pulled into the header, swallowing the first declaration silently and
+    // then erroring on the second.
+    check_tree(
+        "@if $a\n  p: 1\n@else\n  $lum: 2\n  $pct: 3\n",
+        expect![[r#"
+            SOURCE_FILE@0..40
+              IF_RULE@0..39
+                AT@0..1 "@"
+                IDENT@1..3 "if"
+                VARIABLE_REF@3..6
+                  WHITESPACE@3..4 " "
+                  DOLLAR@4..5 "$"
+                  IDENT@5..6 "a"
+                BLOCK@6..13
+                  WHITESPACE@6..9 "\n  "
+                  LBRACE@9..9 ""
+                  DECLARATION@9..13
+                    PROPERTY@9..10
+                      IDENT@9..10 "p"
+                    COLON@10..11 ":"
+                    VALUE@11..13
+                      NUMBER_LITERAL@11..13
+                        WHITESPACE@11..12 " "
+                        NUMBER@12..13 "1"
+                    SEMICOLON@13..13 ""
+                  RBRACE@13..13 ""
+                ELSE_CLAUSE@13..39
+                  WHITESPACE@13..14 "\n"
+                  AT@14..15 "@"
+                  IDENT@15..19 "else"
+                  BLOCK@19..39
+                    WHITESPACE@19..22 "\n  "
+                    LBRACE@22..22 ""
+                    VARIABLE_DECL@22..29
+                      DOLLAR@22..23 "$"
+                      IDENT@23..26 "lum"
+                      COLON@26..27 ":"
+                      NUMBER_LITERAL@27..29
+                        WHITESPACE@27..28 " "
+                        NUMBER@28..29 "2"
+                      SEMICOLON@29..29 ""
+                    VARIABLE_DECL@29..39
+                      WHITESPACE@29..32 "\n  "
+                      DOLLAR@32..33 "$"
+                      IDENT@33..36 "pct"
+                      COLON@36..37 ":"
+                      NUMBER_LITERAL@37..39
+                        WHITESPACE@37..38 " "
+                        NUMBER@38..39 "3"
+                      SEMICOLON@39..39 ""
+                    RBRACE@39..39 ""
+              WHITESPACE@39..40 "\n"
+        "#]],
+    );
+}
+
+#[test]
+fn else_if_on_the_next_line_still_continues_the_header() {
+    // `@else`'s one real header continuation. Goes through the IDENT arm, not the DOLLAR
+    // arm, so it is unaffected by the rule above.
+    check_tree(
+        "@if $a\n  p: 1\n@else\n  if $b\n    q: 2\n",
+        expect![[r#"
+        SOURCE_FILE@0..37
+          IF_RULE@0..36
+            AT@0..1 "@"
+            IDENT@1..3 "if"
+            VARIABLE_REF@3..6
+              WHITESPACE@3..4 " "
+              DOLLAR@4..5 "$"
+              IDENT@5..6 "a"
+            BLOCK@6..13
+              WHITESPACE@6..9 "\n  "
+              LBRACE@9..9 ""
+              DECLARATION@9..13
+                PROPERTY@9..10
+                  IDENT@9..10 "p"
+                COLON@10..11 ":"
+                VALUE@11..13
+                  NUMBER_LITERAL@11..13
+                    WHITESPACE@11..12 " "
+                    NUMBER@12..13 "1"
+                SEMICOLON@13..13 ""
+              RBRACE@13..13 ""
+            ELSE_CLAUSE@13..36
+              WHITESPACE@13..14 "\n"
+              AT@14..15 "@"
+              IDENT@15..19 "else"
+              WHITESPACE@19..22 "\n  "
+              IDENT@22..24 "if"
+              VARIABLE_REF@24..27
+                WHITESPACE@24..25 " "
+                DOLLAR@25..26 "$"
+                IDENT@26..27 "b"
+              BLOCK@27..36
+                WHITESPACE@27..32 "\n    "
+                LBRACE@32..32 ""
+                DECLARATION@32..36
+                  PROPERTY@32..33
+                    IDENT@32..33 "q"
+                  COLON@33..34 ":"
+                  VALUE@34..36
+                    NUMBER_LITERAL@34..36
+                      WHITESPACE@34..35 " "
+                      NUMBER@35..36 "2"
+                  SEMICOLON@36..36 ""
+                RBRACE@36..36 ""
+          WHITESPACE@36..37 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn if_header_still_continues_with_a_variable_on_the_next_line() {
+    // The other expression directives are incomplete after their bare name, so a `$` on
+    // the next line still continues *their* headers. `@else` is the only exclusion.
+    check_tree(
+        "@if\n  $a\n  p: 1\n",
+        expect![[r#"
+        SOURCE_FILE@0..16
+          IF_RULE@0..15
+            AT@0..1 "@"
+            IDENT@1..3 "if"
+            VARIABLE_REF@3..8
+              WHITESPACE@3..6 "\n  "
+              DOLLAR@6..7 "$"
+              IDENT@7..8 "a"
+            BLOCK@8..15
+              WHITESPACE@8..11 "\n  "
+              LBRACE@11..11 ""
+              DECLARATION@11..15
+                PROPERTY@11..12
+                  IDENT@11..12 "p"
+                COLON@12..13 ":"
+                VALUE@13..15
+                  NUMBER_LITERAL@13..15
+                    WHITESPACE@13..14 " "
+                    NUMBER@14..15 "1"
+                SEMICOLON@15..15 ""
+              RBRACE@15..15 ""
+          WHITESPACE@15..16 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn at_root_opens_a_body_for_an_indented_include() {
+    // A bare `@at-root` takes a block, so an indented `@include` under it is the body.
+    // It used to be forced into the header, producing `@at-root @include …` and an
+    // "expected selector" error — Vuetify's density-variant pattern, 19 corpus files.
+    check_tree(
+        ".foo\n  @at-root\n    @include bar()\n      baz: 1\n",
+        expect![[r#"
+            SOURCE_FILE@0..48
+              RULE_SET@0..47
+                SELECTOR_LIST@0..4
+                  SELECTOR@0..4
+                    SIMPLE_SELECTOR@0..4
+                      DOT@0..1 "."
+                      IDENT@1..4 "foo"
+                BLOCK@4..47
+                  LBRACE@4..4 ""
+                  AT_ROOT_RULE@4..47
+                    WHITESPACE@4..7 "\n  "
+                    AT@7..8 "@"
+                    IDENT@8..15 "at-root"
+                    BLOCK@15..47
+                      WHITESPACE@15..20 "\n    "
+                      LBRACE@20..20 ""
+                      INCLUDE_RULE@20..47
+                        AT@20..21 "@"
+                        IDENT@21..28 "include"
+                        WHITESPACE@28..29 " "
+                        IDENT@29..32 "bar"
+                        ARG_LIST@32..34
+                          LPAREN@32..33 "("
+                          RPAREN@33..34 ")"
+                        BLOCK@34..47
+                          WHITESPACE@34..41 "\n      "
+                          LBRACE@41..41 ""
+                          DECLARATION@41..47
+                            PROPERTY@41..44
+                              IDENT@41..44 "baz"
+                            COLON@44..45 ":"
+                            VALUE@45..47
+                              NUMBER_LITERAL@45..47
+                                WHITESPACE@45..46 " "
+                                NUMBER@46..47 "1"
+                            SEMICOLON@47..47 ""
+                          RBRACE@47..47 ""
+                      RBRACE@47..47 ""
+                  RBRACE@47..47 ""
+              WHITESPACE@47..48 "\n"
+        "#]],
+    );
+}
+
+#[test]
+fn at_root_opens_a_body_for_an_indented_selector() {
+    // Behaviour change worth pinning: this used to parse as the selector form
+    // `@at-root .bar`, with `.bar` inside AT_ROOT_RULE's own SELECTOR_LIST. In the
+    // indented syntax the header ends at the newline, so it is the block form — the
+    // same CSS either way, which is why the wrong shape went unnoticed.
+    check_tree(
+        ".foo\n  @at-root\n    .bar\n      baz: 1\n",
+        expect![[r#"
+        SOURCE_FILE@0..38
+          RULE_SET@0..37
+            SELECTOR_LIST@0..4
+              SELECTOR@0..4
+                SIMPLE_SELECTOR@0..4
+                  DOT@0..1 "."
+                  IDENT@1..4 "foo"
+            BLOCK@4..37
+              LBRACE@4..4 ""
+              AT_ROOT_RULE@4..37
+                WHITESPACE@4..7 "\n  "
+                AT@7..8 "@"
+                IDENT@8..15 "at-root"
+                BLOCK@15..37
+                  WHITESPACE@15..20 "\n    "
+                  LBRACE@20..20 ""
+                  RULE_SET@20..37
+                    SELECTOR_LIST@20..24
+                      SELECTOR@20..24
+                        SIMPLE_SELECTOR@20..24
+                          DOT@20..21 "."
+                          IDENT@21..24 "bar"
+                    BLOCK@24..37
+                      LBRACE@24..24 ""
+                      DECLARATION@24..37
+                        PROPERTY@24..34
+                          WHITESPACE@24..31 "\n      "
+                          IDENT@31..34 "baz"
+                        COLON@34..35 ":"
+                        VALUE@35..37
+                          NUMBER_LITERAL@35..37
+                            WHITESPACE@35..36 " "
+                            NUMBER@36..37 "1"
+                        SEMICOLON@37..37 ""
+                      RBRACE@37..37 ""
+                  RBRACE@37..37 ""
+              RBRACE@37..37 ""
+          WHITESPACE@37..38 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn at_root_header_still_continues_for_a_parenthesised_query() {
+    // The one real header continuation `@at-root` has. It survives the removal above
+    // because `continues_header` accepts LPAREN under `at-root` on the start-of-line
+    // path, which is directive-aware where the end-of-line path is not.
+    check_tree(
+        ".foo\n  @at-root\n    (without: media)\n    .bar\n      x: 1\n",
+        expect![[r#"
+            SOURCE_FILE@0..57
+              RULE_SET@0..56
+                SELECTOR_LIST@0..4
+                  SELECTOR@0..4
+                    SIMPLE_SELECTOR@0..4
+                      DOT@0..1 "."
+                      IDENT@1..4 "foo"
+                BLOCK@4..56
+                  LBRACE@4..4 ""
+                  AT_ROOT_RULE@4..56
+                    WHITESPACE@4..7 "\n  "
+                    AT@7..8 "@"
+                    IDENT@8..15 "at-root"
+                    AT_ROOT_QUERY@15..36
+                      WHITESPACE@15..20 "\n    "
+                      LPAREN@20..21 "("
+                      IDENT@21..28 "without"
+                      COLON@28..29 ":"
+                      WHITESPACE@29..30 " "
+                      IDENT@30..35 "media"
+                      RPAREN@35..36 ")"
+                    BLOCK@36..56
+                      WHITESPACE@36..41 "\n    "
+                      LBRACE@41..41 ""
+                      RULE_SET@41..56
+                        SELECTOR_LIST@41..45
+                          SELECTOR@41..45
+                            SIMPLE_SELECTOR@41..45
+                              DOT@41..42 "."
+                              IDENT@42..45 "bar"
+                        BLOCK@45..56
+                          LBRACE@45..45 ""
+                          DECLARATION@45..56
+                            PROPERTY@45..53
+                              WHITESPACE@45..52 "\n      "
+                              IDENT@52..53 "x"
+                            COLON@53..54 ":"
+                            VALUE@54..56
+                              NUMBER_LITERAL@54..56
+                                WHITESPACE@54..55 " "
+                                NUMBER@55..56 "1"
+                            SEMICOLON@56..56 ""
+                          RBRACE@56..56 ""
+                      RBRACE@56..56 ""
+                  RBRACE@56..56 ""
+              WHITESPACE@56..57 "\n"
+        "#]],
+    );
+}
+
+#[test]
+fn combinator_and_universal_selector_open_a_block() {
+    // `> *` is a selector, not a trailing `*` operator — the next line is its body,
+    // not a continuation of the selector. Common in Vuetify/Quasar.
+    check_tree(
+        ".foo\n  > *\n    opacity: 0\n",
+        expect![[r#"
+        SOURCE_FILE@0..26
+          RULE_SET@0..25
+            SELECTOR_LIST@0..4
+              SELECTOR@0..4
+                SIMPLE_SELECTOR@0..4
+                  DOT@0..1 "."
+                  IDENT@1..4 "foo"
+            BLOCK@4..25
+              LBRACE@4..4 ""
+              RULE_SET@4..25
+                SELECTOR_LIST@4..10
+                  SELECTOR@4..10
+                    COMBINATOR@4..8
+                      WHITESPACE@4..7 "\n  "
+                      GT@7..8 ">"
+                    SIMPLE_SELECTOR@8..10
+                      WHITESPACE@8..9 " "
+                      STAR@9..10 "*"
+                BLOCK@10..25
+                  LBRACE@10..10 ""
+                  DECLARATION@10..25
+                    PROPERTY@10..22
+                      WHITESPACE@10..15 "\n    "
+                      IDENT@15..22 "opacity"
+                    COLON@22..23 ":"
+                    VALUE@23..25
+                      NUMBER_LITERAL@23..25
+                        WHITESPACE@23..24 " "
+                        NUMBER@24..25 "0"
+                    SEMICOLON@25..25 ""
+                  RBRACE@25..25 ""
+              RBRACE@25..25 ""
+          WHITESPACE@25..26 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn descendant_universal_selector_opens_a_block() {
+    check_tree(
+        ".foo *\n  opacity: 0\n",
+        expect![[r#"
+        SOURCE_FILE@0..20
+          RULE_SET@0..19
+            SELECTOR_LIST@0..6
+              SELECTOR@0..6
+                SIMPLE_SELECTOR@0..4
+                  DOT@0..1 "."
+                  IDENT@1..4 "foo"
+                SIMPLE_SELECTOR@4..6
+                  WHITESPACE@4..5 " "
+                  STAR@5..6 "*"
+            BLOCK@6..19
+              LBRACE@6..6 ""
+              DECLARATION@6..19
+                PROPERTY@6..16
+                  WHITESPACE@6..9 "\n  "
+                  IDENT@9..16 "opacity"
+                COLON@16..17 ":"
+                VALUE@17..19
+                  NUMBER_LITERAL@17..19
+                    WHITESPACE@17..18 " "
+                    NUMBER@18..19 "0"
+                SEMICOLON@19..19 ""
+              RBRACE@19..19 ""
+          WHITESPACE@19..20 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn star_in_property_value_still_continues_the_expression() {
+    // A top-level colon puts us in a value, where `*` is arithmetic again.
+    check_tree(
+        "a\n  width: 2px *\n    2\n",
+        expect![[r#"
+        SOURCE_FILE@0..23
+          RULE_SET@0..22
+            SELECTOR_LIST@0..1
+              SELECTOR@0..1
+                SIMPLE_SELECTOR@0..1
+                  IDENT@0..1 "a"
+            BLOCK@1..22
+              LBRACE@1..1 ""
+              DECLARATION@1..22
+                PROPERTY@1..9
+                  WHITESPACE@1..4 "\n  "
+                  IDENT@4..9 "width"
+                COLON@9..10 ":"
+                VALUE@10..22
+                  BINARY_EXPR@10..22
+                    DIMENSION@10..14
+                      WHITESPACE@10..11 " "
+                      NUMBER@11..12 "2"
+                      IDENT@12..14 "px"
+                    WHITESPACE@14..15 " "
+                    STAR@15..16 "*"
+                    NUMBER_LITERAL@16..22
+                      WHITESPACE@16..21 "\n    "
+                      NUMBER@21..22 "2"
+                SEMICOLON@22..22 ""
+              RBRACE@22..22 ""
+          WHITESPACE@22..23 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn star_in_directive_expression_still_continues() {
+    // `@return` takes an expression header, so a trailing `*` is arithmetic there too.
+    check_tree(
+        "@function f($x)\n  @return $x *\n    2\n",
+        expect![[r#"
+        SOURCE_FILE@0..37
+          FUNCTION_RULE@0..36
+            AT@0..1 "@"
+            IDENT@1..9 "function"
+            WHITESPACE@9..10 " "
+            IDENT@10..11 "f"
+            PARAM_LIST@11..15
+              LPAREN@11..12 "("
+              PARAM@12..14
+                DOLLAR@12..13 "$"
+                IDENT@13..14 "x"
+              RPAREN@14..15 ")"
+            BLOCK@15..36
+              WHITESPACE@15..18 "\n  "
+              LBRACE@18..18 ""
+              RETURN_RULE@18..36
+                AT@18..19 "@"
+                IDENT@19..25 "return"
+                BINARY_EXPR@25..36
+                  VARIABLE_REF@25..28
+                    WHITESPACE@25..26 " "
+                    DOLLAR@26..27 "$"
+                    IDENT@27..28 "x"
+                  WHITESPACE@28..29 " "
+                  STAR@29..30 "*"
+                  NUMBER_LITERAL@30..36
+                    WHITESPACE@30..35 "\n    "
+                    NUMBER@35..36 "2"
+                SEMICOLON@36..36 ""
+              RBRACE@36..36 ""
+          WHITESPACE@36..37 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn universal_selector_after_tilde_combinator_opens_a_block() {
+    check_tree(
+        ".foo\n  & ~ *\n    x: 1\n",
+        expect![[r#"
+        SOURCE_FILE@0..22
+          RULE_SET@0..21
+            SELECTOR_LIST@0..4
+              SELECTOR@0..4
+                SIMPLE_SELECTOR@0..4
+                  DOT@0..1 "."
+                  IDENT@1..4 "foo"
+            BLOCK@4..21
+              LBRACE@4..4 ""
+              RULE_SET@4..21
+                SELECTOR_LIST@4..12
+                  SELECTOR@4..12
+                    SIMPLE_SELECTOR@4..8
+                      WHITESPACE@4..7 "\n  "
+                      AMP@7..8 "&"
+                    COMBINATOR@8..10
+                      WHITESPACE@8..9 " "
+                      TILDE@9..10 "~"
+                    SIMPLE_SELECTOR@10..12
+                      WHITESPACE@10..11 " "
+                      STAR@11..12 "*"
+                BLOCK@12..21
+                  LBRACE@12..12 ""
+                  DECLARATION@12..21
+                    PROPERTY@12..18
+                      WHITESPACE@12..17 "\n    "
+                      IDENT@17..18 "x"
+                    COLON@18..19 ":"
+                    VALUE@19..21
+                      NUMBER_LITERAL@19..21
+                        WHITESPACE@19..20 " "
+                        NUMBER@20..21 "1"
+                    SEMICOLON@21..21 ""
+                  RBRACE@21..21 ""
+              RBRACE@21..21 ""
+          WHITESPACE@21..22 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn owl_selector_opens_a_block() {
+    // `* + *` — the line both starts and ends with `*`.
+    check_tree(
+        ".foo\n  * + *\n    x: 1\n",
+        expect![[r#"
+        SOURCE_FILE@0..22
+          RULE_SET@0..21
+            SELECTOR_LIST@0..4
+              SELECTOR@0..4
+                SIMPLE_SELECTOR@0..4
+                  DOT@0..1 "."
+                  IDENT@1..4 "foo"
+            BLOCK@4..21
+              LBRACE@4..4 ""
+              RULE_SET@4..21
+                SELECTOR_LIST@4..12
+                  SELECTOR@4..12
+                    SIMPLE_SELECTOR@4..8
+                      WHITESPACE@4..7 "\n  "
+                      STAR@7..8 "*"
+                    COMBINATOR@8..10
+                      WHITESPACE@8..9 " "
+                      PLUS@9..10 "+"
+                    SIMPLE_SELECTOR@10..12
+                      WHITESPACE@10..11 " "
+                      STAR@11..12 "*"
+                BLOCK@12..21
+                  LBRACE@12..12 ""
+                  DECLARATION@12..21
+                    PROPERTY@12..18
+                      WHITESPACE@12..17 "\n    "
+                      IDENT@17..18 "x"
+                    COLON@18..19 ":"
+                    VALUE@19..21
+                      NUMBER_LITERAL@19..21
+                        WHITESPACE@19..20 " "
+                        NUMBER@20..21 "1"
+                    SEMICOLON@21..21 ""
+                  RBRACE@21..21 ""
+              RBRACE@21..21 ""
+          WHITESPACE@21..22 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn pseudo_element_before_universal_selector_is_unaffected() {
+    // `::` lexes as a single COLON_COLON, so a pseudo-element never sets the
+    // value-context flag. Splitting it into two COLON tokens would silently widen
+    // the pseudo-class limitation below to every pseudo-element.
+    check_tree(
+        ".a::before > *\n  color: red\n",
+        expect![[r#"
+        SOURCE_FILE@0..28
+          RULE_SET@0..27
+            SELECTOR_LIST@0..14
+              SELECTOR@0..14
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+                PSEUDO_SELECTOR@2..10
+                  COLON_COLON@2..4 "::"
+                  IDENT@4..10 "before"
+                COMBINATOR@10..12
+                  WHITESPACE@10..11 " "
+                  GT@11..12 ">"
+                SIMPLE_SELECTOR@12..14
+                  WHITESPACE@12..13 " "
+                  STAR@13..14 "*"
+            BLOCK@14..27
+              LBRACE@14..14 ""
+              DECLARATION@14..27
+                PROPERTY@14..22
+                  WHITESPACE@14..17 "\n  "
+                  IDENT@17..22 "color"
+                COLON@22..23 ":"
+                VALUE@23..27
+                  VALUE@23..27
+                    WHITESPACE@23..24 " "
+                    IDENT@24..27 "red"
+                SEMICOLON@27..27 ""
+              RBRACE@27..27 ""
+          WHITESPACE@27..28 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn value_context_is_cleared_when_a_statement_ends() {
+    // The declaration's colon must not leak into the sibling rule's selector, or its
+    // trailing `*` is read as multiplication again. Nothing else in the suite covers
+    // the reset on the virtual-SEMICOLON path.
+    check_tree(
+        "a\n  color: red\n  .b > *\n    width: 1px\n",
+        expect![[r#"
+        SOURCE_FILE@0..39
+          RULE_SET@0..38
+            SELECTOR_LIST@0..1
+              SELECTOR@0..1
+                SIMPLE_SELECTOR@0..1
+                  IDENT@0..1 "a"
+            BLOCK@1..38
+              LBRACE@1..1 ""
+              DECLARATION@1..14
+                PROPERTY@1..9
+                  WHITESPACE@1..4 "\n  "
+                  IDENT@4..9 "color"
+                COLON@9..10 ":"
+                VALUE@10..14
+                  VALUE@10..14
+                    WHITESPACE@10..11 " "
+                    IDENT@11..14 "red"
+                SEMICOLON@14..14 ""
+              RULE_SET@14..38
+                SELECTOR_LIST@14..23
+                  SELECTOR@14..23
+                    SIMPLE_SELECTOR@14..19
+                      WHITESPACE@14..17 "\n  "
+                      DOT@17..18 "."
+                      IDENT@18..19 "b"
+                    COMBINATOR@19..21
+                      WHITESPACE@19..20 " "
+                      GT@20..21 ">"
+                    SIMPLE_SELECTOR@21..23
+                      WHITESPACE@21..22 " "
+                      STAR@22..23 "*"
+                BLOCK@23..38
+                  LBRACE@23..23 ""
+                  DECLARATION@23..38
+                    PROPERTY@23..33
+                      WHITESPACE@23..28 "\n    "
+                      IDENT@28..33 "width"
+                    COLON@33..34 ":"
+                    VALUE@34..38
+                      DIMENSION@34..38
+                        WHITESPACE@34..35 " "
+                        NUMBER@35..36 "1"
+                        IDENT@36..38 "px"
+                    SEMICOLON@38..38 ""
+                  RBRACE@38..38 ""
+              RBRACE@38..38 ""
+          WHITESPACE@38..39 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn value_context_is_cleared_when_a_block_opens() {
+    // A pseudo-class colon in the *parent* selector must not leak into the nested
+    // rule. Without the reset on the virtual-LBRACE path this misparses silently —
+    // no diagnostic, just a declaration swallowed into a selector.
+    check_tree(
+        "a:hover\n  .b > *\n    color: red\n",
+        expect![[r#"
+        SOURCE_FILE@0..32
+          RULE_SET@0..31
+            SELECTOR_LIST@0..7
+              SELECTOR@0..7
+                SIMPLE_SELECTOR@0..1
+                  IDENT@0..1 "a"
+                PSEUDO_SELECTOR@1..7
+                  COLON@1..2 ":"
+                  IDENT@2..7 "hover"
+            BLOCK@7..31
+              LBRACE@7..7 ""
+              RULE_SET@7..31
+                SELECTOR_LIST@7..16
+                  SELECTOR@7..16
+                    SIMPLE_SELECTOR@7..12
+                      WHITESPACE@7..10 "\n  "
+                      DOT@10..11 "."
+                      IDENT@11..12 "b"
+                    COMBINATOR@12..14
+                      WHITESPACE@12..13 " "
+                      GT@13..14 ">"
+                    SIMPLE_SELECTOR@14..16
+                      WHITESPACE@14..15 " "
+                      STAR@15..16 "*"
+                BLOCK@16..31
+                  LBRACE@16..16 ""
+                  DECLARATION@16..31
+                    PROPERTY@16..26
+                      WHITESPACE@16..21 "\n    "
+                      IDENT@21..26 "color"
+                    COLON@26..27 ":"
+                    VALUE@27..31
+                      VALUE@27..31
+                        WHITESPACE@27..28 " "
+                        IDENT@28..31 "red"
+                    SEMICOLON@31..31 ""
+                  RBRACE@31..31 ""
+              RBRACE@31..31 ""
+          WHITESPACE@31..32 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn value_context_is_cleared_when_a_deferred_block_opens() {
+    // Same reset, third path: an at-rule header defers its LBRACE, so the flush site
+    // inside the main loop clears the flag rather than `process_newline`.
+    check_tree(
+        "@page :first\n  .b > *\n    color: red\n",
+        expect![[r#"
+        SOURCE_FILE@0..37
+          PAGE_RULE@0..36
+            AT@0..1 "@"
+            IDENT@1..5 "page"
+            WHITESPACE@5..6 " "
+            COLON@6..7 ":"
+            IDENT@7..12 "first"
+            BLOCK@12..36
+              WHITESPACE@12..15 "\n  "
+              LBRACE@15..15 ""
+              RULE_SET@15..36
+                SELECTOR_LIST@15..21
+                  SELECTOR@15..21
+                    SIMPLE_SELECTOR@15..17
+                      DOT@15..16 "."
+                      IDENT@16..17 "b"
+                    COMBINATOR@17..19
+                      WHITESPACE@17..18 " "
+                      GT@18..19 ">"
+                    SIMPLE_SELECTOR@19..21
+                      WHITESPACE@19..20 " "
+                      STAR@20..21 "*"
+                BLOCK@21..36
+                  LBRACE@21..21 ""
+                  DECLARATION@21..36
+                    PROPERTY@21..31
+                      WHITESPACE@21..26 "\n    "
+                      IDENT@26..31 "color"
+                    COLON@31..32 ":"
+                    VALUE@32..36
+                      VALUE@32..36
+                        WHITESPACE@32..33 " "
+                        IDENT@33..36 "red"
+                    SEMICOLON@36..36 ""
+                  RBRACE@36..36 ""
+              RBRACE@36..36 ""
+          WHITESPACE@36..37 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn pseudo_class_before_universal_selector_is_a_known_limitation() {
+    // A pseudo-class colon is indistinguishable from a declaration colon at the lexer
+    // level, so it sets the same value-context flag and a trailing `*` on the same
+    // statement is read as multiplication. The block indented under it is then absorbed
+    // into the selector.
+    //
+    // Note this snapshot reports NO errors: the misparse is silent whenever the
+    // swallowed value is an identifier (`color: red` reads as a pseudo-class), and only
+    // becomes loud when it cannot be one (`opacity: 0`). Whether a diagnostic appears is
+    // decided by the value's token type, not by the bug — so a partial fix that only
+    // addresses the loud path would leave this test green and the defect alive.
+    //
+    // This form occurs zero times across the Bulma/Vuetify/Quasar corpus. See the
+    // known-limitations entry in CHANGELOG.md.
+    check_tree(
+        ".a:hover > *\n  color: red\n",
+        expect![[r#"
+        SOURCE_FILE@0..26
+          RULE_SET@0..25
+            SELECTOR_LIST@0..25
+              SELECTOR@0..25
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+                PSEUDO_SELECTOR@2..8
+                  COLON@2..3 ":"
+                  IDENT@3..8 "hover"
+                COMBINATOR@8..10
+                  WHITESPACE@8..9 " "
+                  GT@9..10 ">"
+                SIMPLE_SELECTOR@10..12
+                  WHITESPACE@10..11 " "
+                  STAR@11..12 "*"
+                SIMPLE_SELECTOR@12..20
+                  WHITESPACE@12..15 "\n  "
+                  IDENT@15..20 "color"
+                PSEUDO_SELECTOR@20..25
+                  COLON@20..21 ":"
+                  WHITESPACE@21..22 " "
+                  IDENT@22..25 "red"
+          SEMICOLON@25..25 ""
+          WHITESPACE@25..26 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn pseudo_class_poisons_a_trailing_star_on_another_line_of_the_selector_list() {
+    // The flag is statement-scoped, and a comma-continued selector list is one
+    // statement — so the pseudo-class and the trailing `*` need not share a line.
+    // Also silent. Same limitation as above, wider blast radius.
+    check_tree(
+        ".a:focus,\n.b *\n  outline: none\n",
+        expect![[r#"
+        SOURCE_FILE@0..31
+          RULE_SET@0..30
+            SELECTOR_LIST@0..30
+              SELECTOR@0..8
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+                PSEUDO_SELECTOR@2..8
+                  COLON@2..3 ":"
+                  IDENT@3..8 "focus"
+              COMMA@8..9 ","
+              SELECTOR@9..30
+                SIMPLE_SELECTOR@9..12
+                  WHITESPACE@9..10 "\n"
+                  DOT@10..11 "."
+                  IDENT@11..12 "b"
+                SIMPLE_SELECTOR@12..14
+                  WHITESPACE@12..13 " "
+                  STAR@13..14 "*"
+                SIMPLE_SELECTOR@14..24
+                  WHITESPACE@14..17 "\n  "
+                  IDENT@17..24 "outline"
+                PSEUDO_SELECTOR@24..30
+                  COLON@24..25 ":"
+                  WHITESPACE@25..26 " "
+                  IDENT@26..30 "none"
+          SEMICOLON@30..30 ""
+          WHITESPACE@30..31 "\n"
     "#]],
     );
 }

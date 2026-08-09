@@ -40,6 +40,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when a blank line happened to follow, so the failure looked intermittent. Found by
   testing against hundreds of real-world `.sass` files from Bulma, Vuetify and Quasar —
   the indented syntax previously had no real-world test coverage at all
+- Indented Sass: an identifier that happens to match a keyword the lexer uses for line
+  continuation no longer glues the next line onto the current statement. The check fired
+  on the bare token text, with no regard for the directive or for whether a directive was
+  involved at all, so `margin: 1in` (the IDENT `in`), `content: from`, and any at-rule
+  ending in a variable like `$from` or `$to` all swallowed the line below them. This was
+  usually **silent** — `margin: 1in` followed by `color: red` produced one declaration
+  instead of two, with no diagnostic — and became visible only when the merged result
+  could not parse, as in `@if $from` leaving its `@else` without a matching `@if`. These
+  keywords now continue only where they can legitimately occur: in the header of a
+  directive that takes them, or, for the boolean operators `and`/`or`/`not`, inside a
+  value as well
+- Indented Sass: `@keyframes` frames written as `from`/`to` now open a body of their own.
+  They previously produced a flat tree in which each frame's declarations were siblings of
+  the frame selector rather than its children, so a `from` frame's properties appeared to
+  belong to the `@keyframes` rule itself. Percentage frames (`0%`, `100%`) were already
+  correct, which is why the two forms disagreed. Same root cause as the entry above
+- Indented Sass: a bare `@else` no longer swallows a variable declaration indented under
+  it. `@else` followed by `$x: …` pulled the first declaration into its header — silently,
+  since a header can hold an expression — and then errored on the second, so a two-line
+  block reported a cascade that pointed at the wrong line. A bare `@else` is a complete
+  header, taking an optional `if …` and nothing else, so an indented `$` under it opens
+  the body. `@else` on one line with `if …` on the next still continues the header, and
+  the other expression directives (`@if`, `@for`, `@return` …) are unaffected — they are
+  genuinely incomplete after their bare name
+- Indented Sass: a bare `@at-root` now opens a body instead of pulling the next line into
+  its header. `@at-root` followed by an indented `@include` reported "expected selector",
+  because the header was continued to give the invalid `@at-root @include …`. This is
+  Vuetify's density-variant pattern and was the second-largest source of failures in the
+  real-world indented-Sass corpus: 26 errors across 19 files. Followed by an indented
+  *selector* it produced no error but the wrong shape — the selector form `@at-root .bar`
+  rather than a block containing `.bar`, which compiles to the same CSS and so went
+  unnoticed; it is now the block form the indented syntax calls for. `@at-root` followed
+  by an indented `(without: …)` query still continues the header, as it should
+- Indented Sass: a selector ending in a universal selector — `> *`, `& ~ *`, `.a *` — no
+  longer swallows the block indented under it. `*` at the end of a line was always read as
+  a multiplication operator, so the whole nested block was parsed as part of the selector
+  and produced a cascade of errors. It is now treated as an operator only inside a value
+  or an expression-taking directive header. This was the largest source of failures in the
+  real-world indented-Sass corpus: 63 errors across 12 files, in Vuetify and Quasar
 
 ### Documentation
 - Corrected the 0.3.3 indented-Sass compliance figure: it reported 100% (346/346), the
@@ -56,6 +95,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `background: url("x.png") { repeat: no-repeat; }` — is now read as a rule set rather
   than a nested property. This is an accepted consequence of the selector fix above;
   telling the two apart needs full selector lookahead
+- In indented Sass, a selector that combines a pseudo-class with a trailing universal
+  selector still swallows the block indented under it — `.a:hover > *`, `.a:not(.b) *`.
+  A pseudo-class colon is indistinguishable from a declaration colon at the lexer level,
+  so it is read as the start of a value and the trailing `*` as multiplication. Two
+  things worth knowing about this one: the misparse is usually **silent** — no
+  diagnostic, just a declaration absorbed into the selector — and it becomes loud only
+  when the swallowed value cannot pass for a pseudo-class (`opacity: 0` errors,
+  `color: red` does not). And the pseudo-class need not share a line with the `*`: a
+  comma-continued selector list is a single statement, so `.a:focus,` on one line poisons
+  `.b *` on the next. This form occurs zero times across the Bulma, Vuetify and Quasar
+  corpora, which is the only reason it is acceptable to ship
 
 ## 0.3.4 — 2026-03-31
 
