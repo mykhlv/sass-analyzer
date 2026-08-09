@@ -35,6 +35,11 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
     let mut after_at = false;
     // True when DOLLAR has been seen at statement start (for `$var\n  : value` continuation).
     let mut after_dollar = false;
+    // True when a top-level COLON has been seen on the current statement. Used as an
+    // approximation of "we are in a value", to decide whether a trailing `*` is
+    // arithmetic or a universal selector. Deliberately over-approximates: a pseudo-class
+    // colon sets it too, which is the `.a:hover > *` limitation pinned in the tests.
+    let mut after_colon = false;
     // True when the last significant token is the directive keyword name (first IDENT after AT).
     // Used for end-of-line continuation: `@mixin\n name` but NOT `@extend .error\n body`.
     let mut at_name_is_last = false;
@@ -80,6 +85,7 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
                 pending_lbrace = None;
                 after_at = false;
                 after_dollar = false;
+                after_colon = false;
             }
         }
 
@@ -134,6 +140,7 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
                     &mut pending_lbrace,
                     &mut after_at,
                     &mut after_dollar,
+                    &mut after_colon,
                     at_name_is_last,
                     at_directive,
                     had_prior_content,
@@ -223,6 +230,12 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
             _ => {
                 result.push((kind, text));
                 saw_content = true;
+                // `::` lexes as a single COLON_COLON, so pseudo-elements never land here
+                // — splitting it into two COLON tokens would widen the pseudo-class
+                // limitation to every `::before > *`.
+                if kind == SyntaxKind::COLON && nesting == 0 {
+                    after_colon = true;
+                }
                 // Track when this IDENT is the directive keyword name (first IDENT after AT).
                 at_name_is_last = kind == SyntaxKind::IDENT && last_sig_kind == SyntaxKind::AT;
                 if at_name_is_last {
@@ -283,13 +296,19 @@ fn is_end_of_line_continuation(
     at_name_is_last: bool,
     after_at: bool,
     at_directive: &str,
+    after_colon: bool,
 ) -> bool {
-    // `*` continues an expression (`$a: 1 *`) but ends a statement in a `@use` or
-    // `@forward` header, where it is a wildcard: `as *`, `as prefix-*`. Neither
-    // directive can contain arithmetic at this point (any parenthesised `with`
-    // config is skipped entirely — newlines inside `()` never reach this function).
+    // `*` is a binary operator only where an expression can appear: after a top-level
+    // colon (`$a: 1 *`, `width: 2px *`) or in a directive header that takes an
+    // expression (`@return $x *`, `@if $a *`). Everywhere else it is a universal
+    // selector — `> *`, `& ~ *`, `.a *` — and treating it as a continuation swallows
+    // the next line into the selector. `is_sole_combinator` is not enough: it exempts
+    // only a line whose entire content is `*`, so `> *` still fell through.
+    // This also covers the `@use`/`@forward` wildcard (`as *`, `as prefix-*`): neither
+    // takes an expression header, and their parenthesised `with` config never reaches
+    // here because newlines inside `()` are not processed.
     if kind == SyntaxKind::STAR {
-        return !(after_at && is_directive(at_directive, &["use", "forward"]));
+        return after_colon || (after_at && is_directive(at_directive, EXPR_DIRECTIVES));
     }
     #[rustfmt::skip]
     let by_kind = matches!(
@@ -479,6 +498,7 @@ fn process_newline<'src>(
     pending_lbrace: &mut Option<u32>,
     after_at: &mut bool,
     after_dollar: &mut bool,
+    after_colon: &mut bool,
     at_name_is_last: bool,
     at_directive: &str,
     had_prior_content: bool,
@@ -495,6 +515,7 @@ fn process_newline<'src>(
         at_name_is_last,
         *after_at,
         at_directive,
+        *after_colon,
     );
     // `50%` is a unit, not modulo — don't treat PERCENT after NUMBER as continuation.
     if last_sig_kind == SyntaxKind::PERCENT && prev_sig_kind == SyntaxKind::NUMBER {
@@ -526,12 +547,14 @@ fn process_newline<'src>(
                 indent_stack.push(new_indent);
                 *after_at = false;
                 *after_dollar = false;
+                *after_colon = false;
             }
         } else {
             // Same or less indentation: end of statement
             result.push((SyntaxKind::SEMICOLON, ""));
             *after_at = false;
             *after_dollar = false;
+            *after_colon = false;
             // Close blocks for dedent
             while indent_stack.len() > 1 && *indent_stack.last().unwrap() > new_indent {
                 indent_stack.pop();

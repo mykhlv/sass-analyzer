@@ -1512,6 +1512,539 @@ fn star_after_number_still_continues_the_expression() {
 }
 
 #[test]
+fn combinator_and_universal_selector_open_a_block() {
+    // `> *` is a selector, not a trailing `*` operator — the next line is its body,
+    // not a continuation of the selector. Common in Vuetify/Quasar.
+    check_tree(
+        ".foo\n  > *\n    opacity: 0\n",
+        expect![[r#"
+        SOURCE_FILE@0..26
+          RULE_SET@0..25
+            SELECTOR_LIST@0..4
+              SELECTOR@0..4
+                SIMPLE_SELECTOR@0..4
+                  DOT@0..1 "."
+                  IDENT@1..4 "foo"
+            BLOCK@4..25
+              LBRACE@4..4 ""
+              RULE_SET@4..25
+                SELECTOR_LIST@4..10
+                  SELECTOR@4..10
+                    COMBINATOR@4..8
+                      WHITESPACE@4..7 "\n  "
+                      GT@7..8 ">"
+                    SIMPLE_SELECTOR@8..10
+                      WHITESPACE@8..9 " "
+                      STAR@9..10 "*"
+                BLOCK@10..25
+                  LBRACE@10..10 ""
+                  DECLARATION@10..25
+                    PROPERTY@10..22
+                      WHITESPACE@10..15 "\n    "
+                      IDENT@15..22 "opacity"
+                    COLON@22..23 ":"
+                    VALUE@23..25
+                      NUMBER_LITERAL@23..25
+                        WHITESPACE@23..24 " "
+                        NUMBER@24..25 "0"
+                    SEMICOLON@25..25 ""
+                  RBRACE@25..25 ""
+              RBRACE@25..25 ""
+          WHITESPACE@25..26 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn descendant_universal_selector_opens_a_block() {
+    check_tree(
+        ".foo *\n  opacity: 0\n",
+        expect![[r#"
+        SOURCE_FILE@0..20
+          RULE_SET@0..19
+            SELECTOR_LIST@0..6
+              SELECTOR@0..6
+                SIMPLE_SELECTOR@0..4
+                  DOT@0..1 "."
+                  IDENT@1..4 "foo"
+                SIMPLE_SELECTOR@4..6
+                  WHITESPACE@4..5 " "
+                  STAR@5..6 "*"
+            BLOCK@6..19
+              LBRACE@6..6 ""
+              DECLARATION@6..19
+                PROPERTY@6..16
+                  WHITESPACE@6..9 "\n  "
+                  IDENT@9..16 "opacity"
+                COLON@16..17 ":"
+                VALUE@17..19
+                  NUMBER_LITERAL@17..19
+                    WHITESPACE@17..18 " "
+                    NUMBER@18..19 "0"
+                SEMICOLON@19..19 ""
+              RBRACE@19..19 ""
+          WHITESPACE@19..20 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn star_in_property_value_still_continues_the_expression() {
+    // A top-level colon puts us in a value, where `*` is arithmetic again.
+    check_tree(
+        "a\n  width: 2px *\n    2\n",
+        expect![[r#"
+        SOURCE_FILE@0..23
+          RULE_SET@0..22
+            SELECTOR_LIST@0..1
+              SELECTOR@0..1
+                SIMPLE_SELECTOR@0..1
+                  IDENT@0..1 "a"
+            BLOCK@1..22
+              LBRACE@1..1 ""
+              DECLARATION@1..22
+                PROPERTY@1..9
+                  WHITESPACE@1..4 "\n  "
+                  IDENT@4..9 "width"
+                COLON@9..10 ":"
+                VALUE@10..22
+                  BINARY_EXPR@10..22
+                    DIMENSION@10..14
+                      WHITESPACE@10..11 " "
+                      NUMBER@11..12 "2"
+                      IDENT@12..14 "px"
+                    WHITESPACE@14..15 " "
+                    STAR@15..16 "*"
+                    NUMBER_LITERAL@16..22
+                      WHITESPACE@16..21 "\n    "
+                      NUMBER@21..22 "2"
+                SEMICOLON@22..22 ""
+              RBRACE@22..22 ""
+          WHITESPACE@22..23 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn star_in_directive_expression_still_continues() {
+    // `@return` takes an expression header, so a trailing `*` is arithmetic there too.
+    check_tree(
+        "@function f($x)\n  @return $x *\n    2\n",
+        expect![[r#"
+        SOURCE_FILE@0..37
+          FUNCTION_RULE@0..36
+            AT@0..1 "@"
+            IDENT@1..9 "function"
+            WHITESPACE@9..10 " "
+            IDENT@10..11 "f"
+            PARAM_LIST@11..15
+              LPAREN@11..12 "("
+              PARAM@12..14
+                DOLLAR@12..13 "$"
+                IDENT@13..14 "x"
+              RPAREN@14..15 ")"
+            BLOCK@15..36
+              WHITESPACE@15..18 "\n  "
+              LBRACE@18..18 ""
+              RETURN_RULE@18..36
+                AT@18..19 "@"
+                IDENT@19..25 "return"
+                BINARY_EXPR@25..36
+                  VARIABLE_REF@25..28
+                    WHITESPACE@25..26 " "
+                    DOLLAR@26..27 "$"
+                    IDENT@27..28 "x"
+                  WHITESPACE@28..29 " "
+                  STAR@29..30 "*"
+                  NUMBER_LITERAL@30..36
+                    WHITESPACE@30..35 "\n    "
+                    NUMBER@35..36 "2"
+                SEMICOLON@36..36 ""
+              RBRACE@36..36 ""
+          WHITESPACE@36..37 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn universal_selector_after_tilde_combinator_opens_a_block() {
+    check_tree(
+        ".foo\n  & ~ *\n    x: 1\n",
+        expect![[r#"
+        SOURCE_FILE@0..22
+          RULE_SET@0..21
+            SELECTOR_LIST@0..4
+              SELECTOR@0..4
+                SIMPLE_SELECTOR@0..4
+                  DOT@0..1 "."
+                  IDENT@1..4 "foo"
+            BLOCK@4..21
+              LBRACE@4..4 ""
+              RULE_SET@4..21
+                SELECTOR_LIST@4..12
+                  SELECTOR@4..12
+                    SIMPLE_SELECTOR@4..8
+                      WHITESPACE@4..7 "\n  "
+                      AMP@7..8 "&"
+                    COMBINATOR@8..10
+                      WHITESPACE@8..9 " "
+                      TILDE@9..10 "~"
+                    SIMPLE_SELECTOR@10..12
+                      WHITESPACE@10..11 " "
+                      STAR@11..12 "*"
+                BLOCK@12..21
+                  LBRACE@12..12 ""
+                  DECLARATION@12..21
+                    PROPERTY@12..18
+                      WHITESPACE@12..17 "\n    "
+                      IDENT@17..18 "x"
+                    COLON@18..19 ":"
+                    VALUE@19..21
+                      NUMBER_LITERAL@19..21
+                        WHITESPACE@19..20 " "
+                        NUMBER@20..21 "1"
+                    SEMICOLON@21..21 ""
+                  RBRACE@21..21 ""
+              RBRACE@21..21 ""
+          WHITESPACE@21..22 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn owl_selector_opens_a_block() {
+    // `* + *` — the line both starts and ends with `*`.
+    check_tree(
+        ".foo\n  * + *\n    x: 1\n",
+        expect![[r#"
+        SOURCE_FILE@0..22
+          RULE_SET@0..21
+            SELECTOR_LIST@0..4
+              SELECTOR@0..4
+                SIMPLE_SELECTOR@0..4
+                  DOT@0..1 "."
+                  IDENT@1..4 "foo"
+            BLOCK@4..21
+              LBRACE@4..4 ""
+              RULE_SET@4..21
+                SELECTOR_LIST@4..12
+                  SELECTOR@4..12
+                    SIMPLE_SELECTOR@4..8
+                      WHITESPACE@4..7 "\n  "
+                      STAR@7..8 "*"
+                    COMBINATOR@8..10
+                      WHITESPACE@8..9 " "
+                      PLUS@9..10 "+"
+                    SIMPLE_SELECTOR@10..12
+                      WHITESPACE@10..11 " "
+                      STAR@11..12 "*"
+                BLOCK@12..21
+                  LBRACE@12..12 ""
+                  DECLARATION@12..21
+                    PROPERTY@12..18
+                      WHITESPACE@12..17 "\n    "
+                      IDENT@17..18 "x"
+                    COLON@18..19 ":"
+                    VALUE@19..21
+                      NUMBER_LITERAL@19..21
+                        WHITESPACE@19..20 " "
+                        NUMBER@20..21 "1"
+                    SEMICOLON@21..21 ""
+                  RBRACE@21..21 ""
+              RBRACE@21..21 ""
+          WHITESPACE@21..22 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn pseudo_element_before_universal_selector_is_unaffected() {
+    // `::` lexes as a single COLON_COLON, so a pseudo-element never sets the
+    // value-context flag. Splitting it into two COLON tokens would silently widen
+    // the pseudo-class limitation below to every pseudo-element.
+    check_tree(
+        ".a::before > *\n  color: red\n",
+        expect![[r#"
+        SOURCE_FILE@0..28
+          RULE_SET@0..27
+            SELECTOR_LIST@0..14
+              SELECTOR@0..14
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+                PSEUDO_SELECTOR@2..10
+                  COLON_COLON@2..4 "::"
+                  IDENT@4..10 "before"
+                COMBINATOR@10..12
+                  WHITESPACE@10..11 " "
+                  GT@11..12 ">"
+                SIMPLE_SELECTOR@12..14
+                  WHITESPACE@12..13 " "
+                  STAR@13..14 "*"
+            BLOCK@14..27
+              LBRACE@14..14 ""
+              DECLARATION@14..27
+                PROPERTY@14..22
+                  WHITESPACE@14..17 "\n  "
+                  IDENT@17..22 "color"
+                COLON@22..23 ":"
+                VALUE@23..27
+                  VALUE@23..27
+                    WHITESPACE@23..24 " "
+                    IDENT@24..27 "red"
+                SEMICOLON@27..27 ""
+              RBRACE@27..27 ""
+          WHITESPACE@27..28 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn value_context_is_cleared_when_a_statement_ends() {
+    // The declaration's colon must not leak into the sibling rule's selector, or its
+    // trailing `*` is read as multiplication again. Nothing else in the suite covers
+    // the reset on the virtual-SEMICOLON path.
+    check_tree(
+        "a\n  color: red\n  .b > *\n    width: 1px\n",
+        expect![[r#"
+        SOURCE_FILE@0..39
+          RULE_SET@0..38
+            SELECTOR_LIST@0..1
+              SELECTOR@0..1
+                SIMPLE_SELECTOR@0..1
+                  IDENT@0..1 "a"
+            BLOCK@1..38
+              LBRACE@1..1 ""
+              DECLARATION@1..14
+                PROPERTY@1..9
+                  WHITESPACE@1..4 "\n  "
+                  IDENT@4..9 "color"
+                COLON@9..10 ":"
+                VALUE@10..14
+                  VALUE@10..14
+                    WHITESPACE@10..11 " "
+                    IDENT@11..14 "red"
+                SEMICOLON@14..14 ""
+              RULE_SET@14..38
+                SELECTOR_LIST@14..23
+                  SELECTOR@14..23
+                    SIMPLE_SELECTOR@14..19
+                      WHITESPACE@14..17 "\n  "
+                      DOT@17..18 "."
+                      IDENT@18..19 "b"
+                    COMBINATOR@19..21
+                      WHITESPACE@19..20 " "
+                      GT@20..21 ">"
+                    SIMPLE_SELECTOR@21..23
+                      WHITESPACE@21..22 " "
+                      STAR@22..23 "*"
+                BLOCK@23..38
+                  LBRACE@23..23 ""
+                  DECLARATION@23..38
+                    PROPERTY@23..33
+                      WHITESPACE@23..28 "\n    "
+                      IDENT@28..33 "width"
+                    COLON@33..34 ":"
+                    VALUE@34..38
+                      DIMENSION@34..38
+                        WHITESPACE@34..35 " "
+                        NUMBER@35..36 "1"
+                        IDENT@36..38 "px"
+                    SEMICOLON@38..38 ""
+                  RBRACE@38..38 ""
+              RBRACE@38..38 ""
+          WHITESPACE@38..39 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn value_context_is_cleared_when_a_block_opens() {
+    // A pseudo-class colon in the *parent* selector must not leak into the nested
+    // rule. Without the reset on the virtual-LBRACE path this misparses silently —
+    // no diagnostic, just a declaration swallowed into a selector.
+    check_tree(
+        "a:hover\n  .b > *\n    color: red\n",
+        expect![[r#"
+        SOURCE_FILE@0..32
+          RULE_SET@0..31
+            SELECTOR_LIST@0..7
+              SELECTOR@0..7
+                SIMPLE_SELECTOR@0..1
+                  IDENT@0..1 "a"
+                PSEUDO_SELECTOR@1..7
+                  COLON@1..2 ":"
+                  IDENT@2..7 "hover"
+            BLOCK@7..31
+              LBRACE@7..7 ""
+              RULE_SET@7..31
+                SELECTOR_LIST@7..16
+                  SELECTOR@7..16
+                    SIMPLE_SELECTOR@7..12
+                      WHITESPACE@7..10 "\n  "
+                      DOT@10..11 "."
+                      IDENT@11..12 "b"
+                    COMBINATOR@12..14
+                      WHITESPACE@12..13 " "
+                      GT@13..14 ">"
+                    SIMPLE_SELECTOR@14..16
+                      WHITESPACE@14..15 " "
+                      STAR@15..16 "*"
+                BLOCK@16..31
+                  LBRACE@16..16 ""
+                  DECLARATION@16..31
+                    PROPERTY@16..26
+                      WHITESPACE@16..21 "\n    "
+                      IDENT@21..26 "color"
+                    COLON@26..27 ":"
+                    VALUE@27..31
+                      VALUE@27..31
+                        WHITESPACE@27..28 " "
+                        IDENT@28..31 "red"
+                    SEMICOLON@31..31 ""
+                  RBRACE@31..31 ""
+              RBRACE@31..31 ""
+          WHITESPACE@31..32 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn value_context_is_cleared_when_a_deferred_block_opens() {
+    // Same reset, third path: an at-rule header defers its LBRACE, so the flush site
+    // inside the main loop clears the flag rather than `process_newline`.
+    check_tree(
+        "@page :first\n  .b > *\n    color: red\n",
+        expect![[r#"
+        SOURCE_FILE@0..37
+          PAGE_RULE@0..36
+            AT@0..1 "@"
+            IDENT@1..5 "page"
+            WHITESPACE@5..6 " "
+            COLON@6..7 ":"
+            IDENT@7..12 "first"
+            BLOCK@12..36
+              WHITESPACE@12..15 "\n  "
+              LBRACE@15..15 ""
+              RULE_SET@15..36
+                SELECTOR_LIST@15..21
+                  SELECTOR@15..21
+                    SIMPLE_SELECTOR@15..17
+                      DOT@15..16 "."
+                      IDENT@16..17 "b"
+                    COMBINATOR@17..19
+                      WHITESPACE@17..18 " "
+                      GT@18..19 ">"
+                    SIMPLE_SELECTOR@19..21
+                      WHITESPACE@19..20 " "
+                      STAR@20..21 "*"
+                BLOCK@21..36
+                  LBRACE@21..21 ""
+                  DECLARATION@21..36
+                    PROPERTY@21..31
+                      WHITESPACE@21..26 "\n    "
+                      IDENT@26..31 "color"
+                    COLON@31..32 ":"
+                    VALUE@32..36
+                      VALUE@32..36
+                        WHITESPACE@32..33 " "
+                        IDENT@33..36 "red"
+                    SEMICOLON@36..36 ""
+                  RBRACE@36..36 ""
+              RBRACE@36..36 ""
+          WHITESPACE@36..37 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn pseudo_class_before_universal_selector_is_a_known_limitation() {
+    // A pseudo-class colon is indistinguishable from a declaration colon at the lexer
+    // level, so it sets the same value-context flag and a trailing `*` on the same
+    // statement is read as multiplication. The block indented under it is then absorbed
+    // into the selector.
+    //
+    // Note this snapshot reports NO errors: the misparse is silent whenever the
+    // swallowed value is an identifier (`color: red` reads as a pseudo-class), and only
+    // becomes loud when it cannot be one (`opacity: 0`). Whether a diagnostic appears is
+    // decided by the value's token type, not by the bug — so a partial fix that only
+    // addresses the loud path would leave this test green and the defect alive.
+    //
+    // This form occurs zero times across the Bulma/Vuetify/Quasar corpus. See the
+    // known-limitations entry in CHANGELOG.md.
+    check_tree(
+        ".a:hover > *\n  color: red\n",
+        expect![[r#"
+        SOURCE_FILE@0..26
+          RULE_SET@0..25
+            SELECTOR_LIST@0..25
+              SELECTOR@0..25
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+                PSEUDO_SELECTOR@2..8
+                  COLON@2..3 ":"
+                  IDENT@3..8 "hover"
+                COMBINATOR@8..10
+                  WHITESPACE@8..9 " "
+                  GT@9..10 ">"
+                SIMPLE_SELECTOR@10..12
+                  WHITESPACE@10..11 " "
+                  STAR@11..12 "*"
+                SIMPLE_SELECTOR@12..20
+                  WHITESPACE@12..15 "\n  "
+                  IDENT@15..20 "color"
+                PSEUDO_SELECTOR@20..25
+                  COLON@20..21 ":"
+                  WHITESPACE@21..22 " "
+                  IDENT@22..25 "red"
+          SEMICOLON@25..25 ""
+          WHITESPACE@25..26 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn pseudo_class_poisons_a_trailing_star_on_another_line_of_the_selector_list() {
+    // The flag is statement-scoped, and a comma-continued selector list is one
+    // statement — so the pseudo-class and the trailing `*` need not share a line.
+    // Also silent. Same limitation as above, wider blast radius.
+    check_tree(
+        ".a:focus,\n.b *\n  outline: none\n",
+        expect![[r#"
+        SOURCE_FILE@0..31
+          RULE_SET@0..30
+            SELECTOR_LIST@0..30
+              SELECTOR@0..8
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+                PSEUDO_SELECTOR@2..8
+                  COLON@2..3 ":"
+                  IDENT@3..8 "focus"
+              COMMA@8..9 ","
+              SELECTOR@9..30
+                SIMPLE_SELECTOR@9..12
+                  WHITESPACE@9..10 "\n"
+                  DOT@10..11 "."
+                  IDENT@11..12 "b"
+                SIMPLE_SELECTOR@12..14
+                  WHITESPACE@12..13 " "
+                  STAR@13..14 "*"
+                SIMPLE_SELECTOR@14..24
+                  WHITESPACE@14..17 "\n  "
+                  IDENT@17..24 "outline"
+                PSEUDO_SELECTOR@24..30
+                  COLON@24..25 ":"
+                  WHITESPACE@25..26 " "
+                  IDENT@26..30 "none"
+          SEMICOLON@30..30 ""
+          WHITESPACE@30..31 "\n"
+    "#]],
+    );
+}
+
+#[test]
 fn forward_as_prefix_star_followed_by_rule() {
     check_tree(
         "@forward 'lib' as btn-*\n.x\n  color: red\n",

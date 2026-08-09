@@ -40,6 +40,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when a blank line happened to follow, so the failure looked intermittent. Found by
   testing against hundreds of real-world `.sass` files from Bulma, Vuetify and Quasar —
   the indented syntax previously had no real-world test coverage at all
+- Indented Sass: a selector ending in a universal selector — `> *`, `& ~ *`, `.a *` — no
+  longer swallows the block indented under it. `*` at the end of a line was always read as
+  a multiplication operator, so the whole nested block was parsed as part of the selector
+  and produced a cascade of errors. It is now treated as an operator only inside a value
+  or an expression-taking directive header. This was the largest source of failures in the
+  real-world indented-Sass corpus: 63 errors across 12 files, in Vuetify and Quasar
 
 ### Documentation
 - Corrected the 0.3.3 indented-Sass compliance figure: it reported 100% (346/346), the
@@ -56,6 +62,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `background: url("x.png") { repeat: no-repeat; }` — is now read as a rule set rather
   than a nested property. This is an accepted consequence of the selector fix above;
   telling the two apart needs full selector lookahead
+- In indented Sass, a selector that combines a pseudo-class with a trailing universal
+  selector still swallows the block indented under it — `.a:hover > *`, `.a:not(.b) *`.
+  A pseudo-class colon is indistinguishable from a declaration colon at the lexer level,
+  so it is read as the start of a value and the trailing `*` as multiplication. Two
+  things worth knowing about this one: the misparse is usually **silent** — no
+  diagnostic, just a declaration absorbed into the selector — and it becomes loud only
+  when the swallowed value cannot pass for a pseudo-class (`opacity: 0` errors,
+  `color: red` does not). And the pseudo-class need not share a line with the `*`: a
+  comma-continued selector list is a single statement, so `.a:focus,` on one line poisons
+  `.b *` on the next. This form occurs zero times across the Bulma, Vuetify and Quasar
+  corpora, which is the only reason it is acceptable to ship
 
 ## 0.3.4 — 2026-03-31
 
