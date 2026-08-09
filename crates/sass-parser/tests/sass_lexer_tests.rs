@@ -1144,3 +1144,182 @@ fn for_header_continues_with_dollar_after_directive_name() {
     "#]],
     );
 }
+
+// ── Header continuation is directive-dependent ───────────────────────
+
+#[test]
+fn keyframes_from_to_open_the_body() {
+    check_tree(
+        "@keyframes slide\n  from\n    opacity: 0\n  to\n    opacity: 1\n",
+        expect![[r#"
+            SOURCE_FILE@0..59
+              KEYFRAMES_RULE@0..58
+                AT@0..1 "@"
+                IDENT@1..10 "keyframes"
+                WHITESPACE@10..11 " "
+                IDENT@11..16 "slide"
+                WHITESPACE@16..19 "\n  "
+                LBRACE@19..19 ""
+                KEYFRAME_SELECTOR@19..23
+                  IDENT@19..23 "from"
+                DECLARATION@23..38
+                  PROPERTY@23..35
+                    WHITESPACE@23..28 "\n    "
+                    IDENT@28..35 "opacity"
+                  COLON@35..36 ":"
+                  VALUE@36..38
+                    NUMBER_LITERAL@36..38
+                      WHITESPACE@36..37 " "
+                      NUMBER@37..38 "0"
+                  SEMICOLON@38..38 ""
+                KEYFRAME_SELECTOR@38..43
+                  WHITESPACE@38..41 "\n  "
+                  IDENT@41..43 "to"
+                DECLARATION@43..58
+                  PROPERTY@43..55
+                    WHITESPACE@43..48 "\n    "
+                    IDENT@48..55 "opacity"
+                  COLON@55..56 ":"
+                  VALUE@56..58
+                    NUMBER_LITERAL@56..58
+                      WHITESPACE@56..57 " "
+                      NUMBER@57..58 "1"
+                  SEMICOLON@58..58 ""
+                RBRACE@58..58 ""
+              WHITESPACE@58..59 "\n"
+        "#]],
+    );
+}
+
+#[test]
+fn keyframes_percent_selectors_open_the_body() {
+    check_tree(
+        "@keyframes slide\n  0%\n    opacity: 0\n  100%\n    opacity: 1\n",
+        expect![[r#"
+            SOURCE_FILE@0..59
+              KEYFRAMES_RULE@0..58
+                AT@0..1 "@"
+                IDENT@1..10 "keyframes"
+                WHITESPACE@10..11 " "
+                IDENT@11..16 "slide"
+                WHITESPACE@16..19 "\n  "
+                LBRACE@19..19 ""
+                KEYFRAME_SELECTOR@19..36
+                  NUMBER@19..20 "0"
+                  PERCENT@20..21 "%"
+                  BLOCK@21..36
+                    LBRACE@21..21 ""
+                    DECLARATION@21..36
+                      PROPERTY@21..33
+                        WHITESPACE@21..26 "\n    "
+                        IDENT@26..33 "opacity"
+                      COLON@33..34 ":"
+                      VALUE@34..36
+                        NUMBER_LITERAL@34..36
+                          WHITESPACE@34..35 " "
+                          NUMBER@35..36 "0"
+                      SEMICOLON@36..36 ""
+                    RBRACE@36..36 ""
+                KEYFRAME_SELECTOR@36..58
+                  WHITESPACE@36..39 "\n  "
+                  NUMBER@39..42 "100"
+                  PERCENT@42..43 "%"
+                  BLOCK@43..58
+                    LBRACE@43..43 ""
+                    DECLARATION@43..58
+                      PROPERTY@43..55
+                        WHITESPACE@43..48 "\n    "
+                        IDENT@48..55 "opacity"
+                      COLON@55..56 ":"
+                      VALUE@56..58
+                        NUMBER_LITERAL@56..58
+                          WHITESPACE@56..57 " "
+                          NUMBER@57..58 "1"
+                      SEMICOLON@58..58 ""
+                    RBRACE@58..58 ""
+                RBRACE@58..58 ""
+              WHITESPACE@58..59 "\n"
+        "#]],
+    );
+}
+
+#[test]
+fn mixin_body_starting_with_pseudo_selector() {
+    check_tree(
+        "@mixin m($x)\n  :hover\n    color: red\n",
+        expect![[r#"
+        SOURCE_FILE@0..37
+          MIXIN_RULE@0..36
+            AT@0..1 "@"
+            IDENT@1..6 "mixin"
+            WHITESPACE@6..7 " "
+            IDENT@7..8 "m"
+            PARAM_LIST@8..12
+              LPAREN@8..9 "("
+              PARAM@9..11
+                DOLLAR@9..10 "$"
+                IDENT@10..11 "x"
+              RPAREN@11..12 ")"
+            BLOCK@12..36
+              WHITESPACE@12..15 "\n  "
+              LBRACE@15..15 ""
+              RULE_SET@15..36
+                SELECTOR_LIST@15..21
+                  SELECTOR@15..21
+                    PSEUDO_SELECTOR@15..21
+                      COLON@15..16 ":"
+                      IDENT@16..21 "hover"
+                BLOCK@21..36
+                  LBRACE@21..21 ""
+                  DECLARATION@21..36
+                    PROPERTY@21..31
+                      WHITESPACE@21..26 "\n    "
+                      IDENT@26..31 "color"
+                    COLON@31..32 ":"
+                    VALUE@32..36
+                      VALUE@32..36
+                        WHITESPACE@32..33 " "
+                        IDENT@33..36 "red"
+                    SEMICOLON@36..36 ""
+                  RBRACE@36..36 ""
+              RBRACE@36..36 ""
+          WHITESPACE@36..37 "\n"
+    "#]],
+    );
+}
+
+// `to` continues a header only under `@for`, so here it opens the mixin body.
+// The selector merging inside that body comes from the separate end-of-line
+// continuation path (`is_end_of_line_continuation`), which is not directive-aware.
+#[test]
+fn mixin_body_starting_with_continuation_keyword() {
+    check_tree(
+        "@mixin m\n  to\n    color: red\n",
+        expect![[r#"
+        SOURCE_FILE@0..29
+          MIXIN_RULE@0..28
+            AT@0..1 "@"
+            IDENT@1..6 "mixin"
+            WHITESPACE@6..7 " "
+            IDENT@7..8 "m"
+            BLOCK@8..28
+              WHITESPACE@8..11 "\n  "
+              LBRACE@11..11 ""
+              RULE_SET@11..28
+                SELECTOR_LIST@11..28
+                  SELECTOR@11..28
+                    SIMPLE_SELECTOR@11..13
+                      IDENT@11..13 "to"
+                    SIMPLE_SELECTOR@13..23
+                      WHITESPACE@13..18 "\n    "
+                      IDENT@18..23 "color"
+                    PSEUDO_SELECTOR@23..28
+                      COLON@23..24 ":"
+                      WHITESPACE@24..25 " "
+                      IDENT@25..28 "red"
+              SEMICOLON@28..28 ""
+              RBRACE@28..28 ""
+          WHITESPACE@28..29 "\n"
+    "#]],
+    );
+}

@@ -38,6 +38,9 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
     // True when the last significant token is the directive keyword name (first IDENT after AT).
     // Used for end-of-line continuation: `@mixin\n name` but NOT `@extend .error\n body`.
     let mut at_name_is_last = false;
+    // Name of the directive being parsed (the first IDENT after AT), or "" when unknown.
+    // Decides which indented lines continue the header — see `continues_header`.
+    let mut at_directive: &str = "";
     // Indentation of the current line (updated on each newline-containing WHITESPACE).
     let mut current_line_indent: u32 = 0;
     // True when there was content on this line before the last significant token.
@@ -60,7 +63,14 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
         if let Some(pending_indent) = pending_lbrace
             && !kind.is_trivia()
         {
-            if continues_header(kind, text, after_at, after_dollar, at_name_is_last) {
+            if continues_header(
+                kind,
+                text,
+                after_at,
+                after_dollar,
+                at_name_is_last,
+                at_directive,
+            ) {
                 // Cancel the pending LBRACE — this line continues the header.
                 pending_lbrace = None;
             } else {
@@ -137,6 +147,7 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
                 last_sig_text = text;
                 after_at = true;
                 at_name_is_last = true;
+                at_directive = "mixin";
             }
             // Sass shorthand: `+name` at statement start → @include
             SyntaxKind::PLUS if nesting == 0 && !saw_content => {
@@ -148,6 +159,7 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
                     last_sig_text = text;
                     after_at = true;
                     at_name_is_last = true;
+                    at_directive = "include";
                 } else {
                     result.push((kind, text));
                     saw_content = true;
@@ -161,6 +173,7 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
                 last_sig_kind = kind;
                 last_sig_text = text;
                 after_at = true;
+                at_directive = "";
             }
             SyntaxKind::DOLLAR if nesting == 0 && !saw_content => {
                 result.push((kind, text));
@@ -211,6 +224,9 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
                 saw_content = true;
                 // Track when this IDENT is the directive keyword name (first IDENT after AT).
                 at_name_is_last = kind == SyntaxKind::IDENT && last_sig_kind == SyntaxKind::AT;
+                if at_name_is_last {
+                    at_directive = text;
+                }
                 last_sig_kind = kind;
                 last_sig_text = text;
             }
@@ -325,19 +341,94 @@ fn is_start_of_line_continuation(kind: SyntaxKind, text: &str) -> bool {
     }
 }
 
+/// Directives whose header is an expression or condition, so a bare value on the
+/// next line still belongs to the header (`@for\n  $i`, `@debug\n  1 + 2`).
+const EXPR_DIRECTIVES: &[&str] = &[
+    "if", "else", "while", "return", "debug", "warn", "error", "for", "each",
+];
+
+/// Directives whose header can take a parenthesised parameter, argument or query
+/// list (`@function a\n  ()`, `@supports\n  (display: grid)`).
+const PAREN_DIRECTIVES: &[&str] = &[
+    "if", "else", "while", "return", "debug", "warn", "error", "for", "each", "mixin", "include",
+    "function", "content", "media", "supports", "at-root", "use", "forward", "import",
+];
+
+/// Directives whose header is a comma-separated list (`@each $a\n  , $b in ...`).
+const COMMA_DIRECTIVES: &[&str] = &[
+    "if", "else", "while", "return", "debug", "warn", "error", "for", "each", "mixin", "include",
+    "function", "media", "supports", "use", "forward", "import", "extend",
+];
+
+/// Directives whose header can take a quoted string (`@use\n  "url"`).
+const STRING_DIRECTIVES: &[&str] = &[
+    "if", "else", "while", "return", "debug", "warn", "error", "for", "each", "use", "forward",
+    "import", "charset",
+];
+
+/// Directives whose header contains boolean/query operators (`and`, `or`, `not`).
+const OPERATOR_DIRECTIVES: &[&str] = &[
+    "if", "else", "while", "return", "debug", "warn", "error", "for", "each", "media", "supports",
+];
+
+/// Directives that load a module and accept the `as`/`with`/`show`/`hide` clauses.
+const MODULE_DIRECTIVES: &[&str] = &["use", "forward", "import"];
+
+fn is_directive(directive: &str, names: &[&str]) -> bool {
+    let name = strip_vendor_prefix(directive);
+    names.iter().any(|n| name.eq_ignore_ascii_case(n))
+}
+
+/// `@-webkit-keyframes` behaves exactly like `@keyframes`.
+fn strip_vendor_prefix(name: &str) -> &str {
+    if let Some(rest) = name.strip_prefix('-')
+        && let Some(pos) = rest.find('-')
+    {
+        return &rest[pos + 1..];
+    }
+    name
+}
+
+/// Whether a continuation keyword at the start of an indented line belongs to the
+/// header of `directive` rather than opening its body.
+fn keyword_continues_header(text: &str, directive: &str) -> bool {
+    match text {
+        "from" | "through" | "to" => is_directive(directive, &["for"]),
+        "in" => is_directive(directive, &["each"]),
+        "and" | "or" | "not" => is_directive(directive, OPERATOR_DIRECTIVES),
+        "as" | "with" | "show" | "hide" => is_directive(directive, MODULE_DIRECTIVES),
+        "using" => is_directive(directive, &["include"]),
+        // `@else\n  if $x`, and the `if()` function inside a header expression.
+        "if" => is_directive(directive, EXPR_DIRECTIVES),
+        _ => false,
+    }
+}
+
 /// Whether an indented line continues an at-rule/variable header instead of opening
 /// its body.
 ///
-/// `$` is the one ambiguous starter: `@for\n  $i` continues the header, while
-/// `@function foo($bg)\n  $x: 1` starts the body. Only that case needs the directive
-/// name to be the last significant token. Keywords, commas and parens cannot open a
-/// body statement, so they continue the header unconditionally.
+/// Which starters continue a header depends on *which* directive is being parsed, so
+/// the decision cannot be made from the token alone. `from`/`through`/`to` continue a
+/// header only under `@for`, `in` only under `@each`, `and`/`or`/`not` only under the
+/// condition- and query-taking directives. Under `@keyframes` those very same `from`,
+/// `to` and `0%` tokens are keyframe selectors that open the body, and a leading `:`
+/// under any at-rule is a pseudo-selector starting a nested rule, never a header
+/// continuation.
+///
+/// `$` is additionally ambiguous within one directive: `@for\n  $i` continues the
+/// header while `@function foo($bg)\n  $x: 1` starts the body, so it also requires the
+/// directive name to be the last significant token.
+///
+/// Unrecognised directives continue nothing. Treating a header continuation as a body
+/// opener produces a visible parse error; the reverse silently reparents the block's
+/// contents into the enclosing scope, so ambiguity resolves towards opening the body.
 fn continues_header(
     kind: SyntaxKind,
     text: &str,
     after_at: bool,
     after_dollar: bool,
     at_name_is_last: bool,
+    directive: &str,
 ) -> bool {
     if !is_start_of_line_continuation(kind, text) {
         return false;
@@ -348,10 +439,18 @@ fn continues_header(
     if !after_at {
         return false;
     }
-    if kind == SyntaxKind::DOLLAR {
-        return at_name_is_last;
+    match kind {
+        SyntaxKind::COLON => false,
+        SyntaxKind::DOLLAR => at_name_is_last && is_directive(directive, EXPR_DIRECTIVES),
+        SyntaxKind::LPAREN => is_directive(directive, PAREN_DIRECTIVES),
+        SyntaxKind::COMMA => is_directive(directive, COMMA_DIRECTIVES),
+        SyntaxKind::QUOTED_STRING | SyntaxKind::STRING_START => {
+            is_directive(directive, STRING_DIRECTIVES)
+        }
+        SyntaxKind::NUMBER => is_directive(directive, EXPR_DIRECTIVES),
+        SyntaxKind::IDENT => keyword_continues_header(text, directive),
+        _ => false,
     }
-    true
 }
 
 #[allow(clippy::too_many_arguments)]
