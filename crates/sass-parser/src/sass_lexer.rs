@@ -289,7 +289,7 @@ fn is_end_of_line_continuation(
     // directive can contain arithmetic at this point (any parenthesised `with`
     // config is skipped entirely — newlines inside `()` never reach this function).
     if kind == SyntaxKind::STAR {
-        return !(after_at && matches!(at_directive, "use" | "forward"));
+        return !(after_at && is_directive(at_directive, &["use", "forward"]));
     }
     #[rustfmt::skip]
     let by_kind = matches!(
