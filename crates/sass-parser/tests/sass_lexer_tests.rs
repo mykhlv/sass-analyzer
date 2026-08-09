@@ -1323,3 +1323,145 @@ fn mixin_body_starting_with_continuation_keyword() {
     "#]],
     );
 }
+
+// ── `as *` must not continue the line (real-world corpus regression) ────
+
+#[test]
+fn use_as_star_followed_by_rule() {
+    check_tree(
+        "@use 'a' as *\n.x\n  color: red\n",
+        expect![[r#"
+        SOURCE_FILE@0..30
+          USE_RULE@0..13
+            AT@0..1 "@"
+            IDENT@1..4 "use"
+            WHITESPACE@4..5 " "
+            QUOTED_STRING@5..8 "'a'"
+            WHITESPACE@8..9 " "
+            IDENT@9..11 "as"
+            WHITESPACE@11..12 " "
+            STAR@12..13 "*"
+            SEMICOLON@13..13 ""
+          RULE_SET@13..29
+            SELECTOR_LIST@13..16
+              SELECTOR@13..16
+                SIMPLE_SELECTOR@13..16
+                  WHITESPACE@13..14 "\n"
+                  DOT@14..15 "."
+                  IDENT@15..16 "x"
+            BLOCK@16..29
+              LBRACE@16..16 ""
+              DECLARATION@16..29
+                PROPERTY@16..24
+                  WHITESPACE@16..19 "\n  "
+                  IDENT@19..24 "color"
+                COLON@24..25 ":"
+                VALUE@25..29
+                  VALUE@25..29
+                    WHITESPACE@25..26 " "
+                    IDENT@26..29 "red"
+                SEMICOLON@29..29 ""
+              RBRACE@29..29 ""
+          WHITESPACE@29..30 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn use_as_star_followed_by_another_use() {
+    check_tree(
+        "@use 'a' as *\n@use 'b' as *\n",
+        expect![[r#"
+        SOURCE_FILE@0..28
+          USE_RULE@0..13
+            AT@0..1 "@"
+            IDENT@1..4 "use"
+            WHITESPACE@4..5 " "
+            QUOTED_STRING@5..8 "'a'"
+            WHITESPACE@8..9 " "
+            IDENT@9..11 "as"
+            WHITESPACE@11..12 " "
+            STAR@12..13 "*"
+            SEMICOLON@13..13 ""
+          USE_RULE@13..27
+            WHITESPACE@13..14 "\n"
+            AT@14..15 "@"
+            IDENT@15..18 "use"
+            WHITESPACE@18..19 " "
+            QUOTED_STRING@19..22 "'b'"
+            WHITESPACE@22..23 " "
+            IDENT@23..25 "as"
+            WHITESPACE@25..26 " "
+            STAR@26..27 "*"
+            SEMICOLON@27..27 ""
+          WHITESPACE@27..28 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn forward_as_star_followed_by_rule() {
+    check_tree(
+        "@forward 'a' as *\n.x\n  color: red\n",
+        expect![[r#"
+        SOURCE_FILE@0..34
+          FORWARD_RULE@0..17
+            AT@0..1 "@"
+            IDENT@1..8 "forward"
+            WHITESPACE@8..9 " "
+            QUOTED_STRING@9..12 "'a'"
+            WHITESPACE@12..13 " "
+            IDENT@13..15 "as"
+            WHITESPACE@15..16 " "
+            STAR@16..17 "*"
+            SEMICOLON@17..17 ""
+          RULE_SET@17..33
+            SELECTOR_LIST@17..20
+              SELECTOR@17..20
+                SIMPLE_SELECTOR@17..20
+                  WHITESPACE@17..18 "\n"
+                  DOT@18..19 "."
+                  IDENT@19..20 "x"
+            BLOCK@20..33
+              LBRACE@20..20 ""
+              DECLARATION@20..33
+                PROPERTY@20..28
+                  WHITESPACE@20..23 "\n  "
+                  IDENT@23..28 "color"
+                COLON@28..29 ":"
+                VALUE@29..33
+                  VALUE@29..33
+                    WHITESPACE@29..30 " "
+                    IDENT@30..33 "red"
+                SEMICOLON@33..33 ""
+              RBRACE@33..33 ""
+          WHITESPACE@33..34 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn star_after_number_still_continues_the_expression() {
+    // `*` as a binary operator at end of line is a real continuation.
+    check_tree(
+        "$a: 1 *\n  2\n",
+        expect![[r#"
+        SOURCE_FILE@0..12
+          VARIABLE_DECL@0..11
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "a"
+            COLON@2..3 ":"
+            BINARY_EXPR@3..11
+              NUMBER_LITERAL@3..5
+                WHITESPACE@3..4 " "
+                NUMBER@4..5 "1"
+              WHITESPACE@5..6 " "
+              STAR@6..7 "*"
+              NUMBER_LITERAL@7..11
+                WHITESPACE@7..10 "\n  "
+                NUMBER@10..11 "2"
+            SEMICOLON@11..11 ""
+          WHITESPACE@11..12 "\n"
+    "#]],
+    );
+}

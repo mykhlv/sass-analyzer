@@ -27,6 +27,7 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
     let mut last_sig_kind = SyntaxKind::EOF;
     let mut last_sig_text: &str = "";
     let mut prev_sig_kind = SyntaxKind::EOF;
+    let mut prev_sig_text: &str = "";
     // Combined nesting depth for (), [], and #{}
     let mut nesting: u32 = 0;
     // Pending virtual LBRACE: Some(indent) when we've deferred a block-open decision.
@@ -86,6 +87,7 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
         // Save previous significant kind before the match overwrites last_sig_kind.
         if !kind.is_trivia() {
             prev_sig_kind = last_sig_kind;
+            prev_sig_text = last_sig_text;
         }
 
         match kind {
@@ -131,6 +133,7 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
                     last_sig_kind,
                     last_sig_text,
                     prev_sig_kind,
+                    prev_sig_text,
                     &mut pending_lbrace,
                     &mut after_at,
                     &mut after_dollar,
@@ -276,12 +279,23 @@ fn is_continuation_keyword(text: &str) -> bool {
 }
 
 /// Check if a token at end-of-line indicates the statement continues on the next line.
-fn is_end_of_line_continuation(kind: SyntaxKind, text: &str, at_name_is_last: bool) -> bool {
+fn is_end_of_line_continuation(
+    kind: SyntaxKind,
+    text: &str,
+    at_name_is_last: bool,
+    prev_sig_kind: SyntaxKind,
+    prev_sig_text: &str,
+) -> bool {
+    // `*` continues an expression (`$a: 1 *`) but ends a statement after `as`
+    // (`@use "x" as *`), where it is a wildcard rather than an operator.
+    if kind == SyntaxKind::STAR {
+        return !(prev_sig_kind == SyntaxKind::IDENT && prev_sig_text == "as");
+    }
     #[rustfmt::skip]
     let by_kind = matches!(
         kind,
         SyntaxKind::COMMA   | SyntaxKind::COLON   | SyntaxKind::BANG
-        | SyntaxKind::PLUS  | SyntaxKind::MINUS   | SyntaxKind::STAR
+        | SyntaxKind::PLUS  | SyntaxKind::MINUS
         | SyntaxKind::SLASH | SyntaxKind::PERCENT
         | SyntaxKind::EQ_EQ | SyntaxKind::BANG_EQ
         | SyntaxKind::GT_EQ | SyntaxKind::LT_EQ
@@ -462,6 +476,7 @@ fn process_newline<'src>(
     last_sig_kind: SyntaxKind,
     last_sig_text: &str,
     prev_sig_kind: SyntaxKind,
+    prev_sig_text: &str,
     pending_lbrace: &mut Option<u32>,
     after_at: &mut bool,
     after_dollar: &mut bool,
@@ -474,8 +489,13 @@ fn process_newline<'src>(
     // Continuation token at end of line → statement continues on the next line.
     // Exception: combinator tokens (*, ~, +, >) as the sole content on a line
     // are selectors, not operators — don't treat them as continuation.
-    let mut is_continuation =
-        is_end_of_line_continuation(last_sig_kind, last_sig_text, at_name_is_last);
+    let mut is_continuation = is_end_of_line_continuation(
+        last_sig_kind,
+        last_sig_text,
+        at_name_is_last,
+        prev_sig_kind,
+        prev_sig_text,
+    );
     // `50%` is a unit, not modulo — don't treat PERCENT after NUMBER as continuation.
     if last_sig_kind == SyntaxKind::PERCENT && prev_sig_kind == SyntaxKind::NUMBER {
         is_continuation = false;
