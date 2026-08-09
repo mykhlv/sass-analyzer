@@ -15,7 +15,7 @@ fn corpus_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test-corpus")
 }
 
-fn collect_scss_files(dir: &Path) -> Vec<PathBuf> {
+fn collect_source_files(dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     collect_recursive(dir, &mut files);
     files.sort();
@@ -33,7 +33,10 @@ fn collect_recursive(dir: &Path, out: &mut Vec<PathBuf>) {
 
         if path.is_dir() {
             collect_recursive(&path, out);
-        } else if path.extension().is_some_and(|ext| ext == "scss") {
+        } else if path
+            .extension()
+            .is_some_and(|ext| ext == "scss" || ext == "sass")
+        {
             out.push(path);
         }
     }
@@ -47,10 +50,10 @@ struct FileResult {
 }
 
 fn parse_corpus_dir(dir: &Path) -> Vec<FileResult> {
-    let files = collect_scss_files(dir);
+    let files = collect_source_files(dir);
     assert!(
         !files.is_empty(),
-        "no .scss files found in {}",
+        "no .scss or .sass files found in {}",
         dir.display()
     );
 
@@ -60,7 +63,12 @@ fn parse_corpus_dir(dir: &Path) -> Vec<FileResult> {
             let source = std::fs::read_to_string(&path)
                 .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
 
-            let (green, errors) = sass_parser::parse_scss(&source);
+            let parse_fn = if path.extension().is_some_and(|ext| ext == "sass") {
+                sass_parser::parse_sass
+            } else {
+                sass_parser::parse_scss
+            };
+            let (green, errors) = parse_fn(&source);
             let tree = SyntaxNode::new_root(green);
 
             let round_trip_ok = tree.text().to_string() == source;
@@ -170,7 +178,8 @@ fn bootstrap_scss_zero_panics_and_round_trip() {
     }
 }
 
-/// Run a standard corpus test: parse all .scss files, assert round-trip, report errors.
+/// Run a standard corpus test: parse all .scss and .sass files, assert round-trip,
+/// report errors.
 fn run_corpus_test(name: &str, subdir: &str) {
     let corpus = corpus_root();
     let dir = corpus.join(subdir);
@@ -225,4 +234,197 @@ fn bulma_scss_zero_panics_and_round_trip() {
 #[ignore = "requires downloading test corpus"]
 fn angular_material_scss_zero_panics_and_round_trip() {
     run_corpus_test("Angular Material", "angular-material/scss");
+}
+
+fn sass_corpus_baseline_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test-corpus/sass-corpus-baseline.txt")
+}
+
+/// Sibling of the tracked baseline, written instead of it when a run regresses, so
+/// the tracked reference is never overwritten with a worse result. Not tracked in
+/// git (see `.gitignore`).
+fn sass_corpus_baseline_actual_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test-corpus/sass-corpus-baseline.actual.txt")
+}
+
+/// Parse one indented-Sass corpus. Round-trip failures fail the test outright;
+/// parse errors are recorded in the baseline instead — see
+/// `test-corpus/sass-corpus-baseline.txt` for the current failing-file count and
+/// the point of the baseline: it can only go down.
+///
+/// Returns the failing-file baseline lines together with the total number of files
+/// parsed, so the caller can pin the corpus size alongside the failure count.
+fn run_sass_corpus_test(name: &str, subdir: &str) -> (Vec<String>, usize) {
+    let corpus = corpus_root();
+    let dir = corpus.join(subdir);
+
+    assert!(
+        dir.exists(),
+        "{name} corpus not found at {}. Run: cd test-corpus && bash download.sh",
+        dir.display()
+    );
+
+    let results = parse_corpus_dir(&dir);
+    print_corpus_report(name, &results, &dir);
+
+    let rt_failures: Vec<_> = results
+        .iter()
+        .filter(|r| !r.round_trip_ok)
+        .map(|r| {
+            r.path
+                .strip_prefix(&dir)
+                .unwrap_or(&r.path)
+                .display()
+                .to_string()
+        })
+        .collect();
+    assert!(
+        rt_failures.is_empty(),
+        "round-trip failed for {} files: {:?}",
+        rt_failures.len(),
+        rt_failures,
+    );
+
+    let mut lines: Vec<String> = results
+        .iter()
+        .filter(|r| r.error_count > 0)
+        .map(|r| {
+            let rel = r.path.strip_prefix(&dir).unwrap_or(&r.path);
+            format!("{name}\t{}\t{}", rel.display(), r.error_count)
+        })
+        .collect();
+    lines.sort();
+    (lines, results.len())
+}
+
+/// Read `# total failing files: N` from the committed baseline.
+/// Returns `None` the first time, when no baseline exists yet.
+fn committed_failure_count() -> Option<usize> {
+    let text = std::fs::read_to_string(sass_corpus_baseline_path()).ok()?;
+    text.lines()
+        .find_map(|l| l.strip_prefix("# total failing files: "))
+        .and_then(|n| n.trim().parse().ok())
+}
+
+/// Read `# files parsed: <name> N` for one corpus from the committed baseline.
+/// Returns `None` the first time, when no baseline exists yet, or when `name` has
+/// no recorded count (a corpus added after this line existed).
+fn committed_parsed_count(name: &str) -> Option<usize> {
+    let text = std::fs::read_to_string(sass_corpus_baseline_path()).ok()?;
+    let prefix = format!("# files parsed: {name} ");
+    text.lines()
+        .find_map(|l| l.strip_prefix(prefix.as_str()))
+        .and_then(|n| n.trim().parse().ok())
+}
+
+/// (baseline label, corpus subdirectory) pairs for the indented-Sass gate.
+const SASS_CORPORA: &[(&str, &str)] = &[
+    ("bulma-sass", "bulma-sass/sass"),
+    ("vuetify", "vuetify/src"),
+    ("quasar", "quasar/src"),
+];
+
+#[test]
+#[ignore = "requires downloading test corpus"]
+fn sass_corpora_match_baseline() {
+    let mut lines = Vec::new();
+    let mut parsed_counts = Vec::new();
+    for (name, subdir) in SASS_CORPORA {
+        let (corpus_lines, parsed) = run_sass_corpus_test(name, subdir);
+        lines.extend(corpus_lines);
+        parsed_counts.push((*name, parsed));
+    }
+
+    let mut out = String::from(
+        "# Indented-Sass corpus baseline: files that do not parse cleanly.\n\
+         # Regenerate with:\n\
+         #   cargo test -p sass-parser --test corpus_test -- --ignored sass_corpora_match_baseline\n\
+         # A shrinking failure list is the goal; a growing one is a regression. The\n\
+         # per-corpus parsed counts below must not shrink either — a smaller corpus\n\
+         # (partial download, retagged upstream archive, restored partial cache) can\n\
+         # make failures drop for the wrong reason.\n",
+    );
+    for (name, parsed) in &parsed_counts {
+        let _ = writeln!(out, "# files parsed: {name} {parsed}");
+    }
+    let _ = writeln!(out, "# total failing files: {}", lines.len());
+    for line in &lines {
+        out.push_str(line);
+        out.push('\n');
+    }
+
+    let previous_failures = committed_failure_count();
+    let shrunk_corpora: Vec<String> = parsed_counts
+        .iter()
+        .filter_map(|(name, parsed)| {
+            let prev = committed_parsed_count(name)?;
+            (*parsed < prev).then(|| format!("{name} ({parsed} < {prev})"))
+        })
+        .collect();
+    let more_failures = previous_failures.is_some_and(|prev| lines.len() > prev);
+    let regressed = !shrunk_corpora.is_empty() || more_failures;
+
+    // On a regression, leave the tracked baseline untouched and write the
+    // regenerated content to a sibling `.actual` file instead. Writing the tracked
+    // file unconditionally and asserting afterward — the previous approach — meant
+    // a failing run still overwrote the reference, so a second `cargo test` read
+    // the regressed numbers back as "previous" and passed green: a one-shot
+    // tripwire, not real enforcement.
+    let actual_path = sass_corpus_baseline_actual_path();
+    if regressed {
+        std::fs::write(&actual_path, &out).expect("write baseline");
+    } else {
+        std::fs::write(sass_corpus_baseline_path(), &out).expect("write baseline");
+        let _ = std::fs::remove_file(&actual_path);
+    }
+    eprintln!("\nsass corpus baseline: {} failing files", lines.len());
+
+    assert!(
+        shrunk_corpora.is_empty(),
+        "indented-Sass corpus shrank: {shrunk_corpora:?} parsed fewer files than the \
+         committed baseline. That hides real regressions behind a smaller sample \
+         (check download.sh, the upstream archive, and any restored cache). Diff \
+         against the rewritten {}.",
+        actual_path.display(),
+    );
+
+    // Fail here on a regression rather than relying on CI's diff alone. An
+    // improvement still shows up as a diff, which CI turns into a prompt to
+    // commit the smaller baseline.
+    if let Some(previous) = previous_failures {
+        assert!(
+            lines.len() <= previous,
+            "indented-Sass corpus regressed: {} files now fail, baseline was {}. \
+             Review the rewritten {} before committing it.",
+            lines.len(),
+            previous,
+            actual_path.display(),
+        );
+    }
+}
+
+#[test]
+fn harness_collects_and_parses_indented_sass() {
+    let dir = std::env::temp_dir().join(format!("sass_harness_{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    std::fs::write(dir.join("a.sass"), ".btn\n  color: red\n").unwrap();
+    std::fs::write(dir.join("b.scss"), ".btn { color: red; }\n").unwrap();
+
+    let results = parse_corpus_dir(&dir);
+
+    assert_eq!(results.len(), 2, "both extensions must be collected");
+    for r in &results {
+        assert!(
+            r.round_trip_ok,
+            "round-trip failed for {}",
+            r.path.display()
+        );
+        assert_eq!(
+            r.error_count,
+            0,
+            "{} parsed with errors — the .sass file was parsed as SCSS",
+            r.path.display()
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
 }

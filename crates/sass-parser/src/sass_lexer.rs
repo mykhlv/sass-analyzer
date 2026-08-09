@@ -135,6 +135,7 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
                     &mut after_at,
                     &mut after_dollar,
                     at_name_is_last,
+                    at_directive,
                     had_prior_content,
                 );
             }
@@ -276,12 +277,25 @@ fn is_continuation_keyword(text: &str) -> bool {
 }
 
 /// Check if a token at end-of-line indicates the statement continues on the next line.
-fn is_end_of_line_continuation(kind: SyntaxKind, text: &str, at_name_is_last: bool) -> bool {
+fn is_end_of_line_continuation(
+    kind: SyntaxKind,
+    text: &str,
+    at_name_is_last: bool,
+    after_at: bool,
+    at_directive: &str,
+) -> bool {
+    // `*` continues an expression (`$a: 1 *`) but ends a statement in a `@use` or
+    // `@forward` header, where it is a wildcard: `as *`, `as prefix-*`. Neither
+    // directive can contain arithmetic at this point (any parenthesised `with`
+    // config is skipped entirely — newlines inside `()` never reach this function).
+    if kind == SyntaxKind::STAR {
+        return !(after_at && is_directive(at_directive, &["use", "forward"]));
+    }
     #[rustfmt::skip]
     let by_kind = matches!(
         kind,
         SyntaxKind::COMMA   | SyntaxKind::COLON   | SyntaxKind::BANG
-        | SyntaxKind::PLUS  | SyntaxKind::MINUS   | SyntaxKind::STAR
+        | SyntaxKind::PLUS  | SyntaxKind::MINUS
         | SyntaxKind::SLASH | SyntaxKind::PERCENT
         | SyntaxKind::EQ_EQ | SyntaxKind::BANG_EQ
         | SyntaxKind::GT_EQ | SyntaxKind::LT_EQ
@@ -466,6 +480,7 @@ fn process_newline<'src>(
     after_at: &mut bool,
     after_dollar: &mut bool,
     at_name_is_last: bool,
+    at_directive: &str,
     had_prior_content: bool,
 ) {
     let new_indent = measure_indent_after_last_newline(ws_text);
@@ -474,8 +489,13 @@ fn process_newline<'src>(
     // Continuation token at end of line → statement continues on the next line.
     // Exception: combinator tokens (*, ~, +, >) as the sole content on a line
     // are selectors, not operators — don't treat them as continuation.
-    let mut is_continuation =
-        is_end_of_line_continuation(last_sig_kind, last_sig_text, at_name_is_last);
+    let mut is_continuation = is_end_of_line_continuation(
+        last_sig_kind,
+        last_sig_text,
+        at_name_is_last,
+        *after_at,
+        at_directive,
+    );
     // `50%` is a unit, not modulo — don't treat PERCENT after NUMBER as continuation.
     if last_sig_kind == SyntaxKind::PERCENT && prev_sig_kind == SyntaxKind::NUMBER {
         is_continuation = false;
