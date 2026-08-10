@@ -53,8 +53,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of two, with no diagnostic — and became visible only when the merged result
   could not parse, as in `@if $from` leaving its `@else` without a matching `@if`. These
   keywords now continue only where they can legitimately occur: in the header of a
-  directive that takes them, or, for the boolean operators `and`/`or`/`not`, inside a
-  value as well
+  directive that takes them — including `@container` and `@scope`, whose `and` and `to`
+  the narrowed sets initially missed — or, for the boolean operators `and`/`or`/`not`,
+  inside a value as well
+- Indented Sass: `@container name` followed by an indented `(width > 400px)` query
+  continues the header instead of erroring. `@container` was absent from the set of
+  directives whose header can take a parenthesised query, which predates this release
 - Indented Sass: `@keyframes` frames written as `from`/`to` now open a body of their own.
   They previously produced a flat tree in which each frame's declarations were siblings of
   the frame selector rather than its children, so a `from` frame's properties appeared to
@@ -108,8 +112,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when the swallowed value cannot pass for a pseudo-class (`opacity: 0` errors,
   `color: red` does not). And the pseudo-class need not share a line with the `*`: a
   comma-continued selector list is a single statement, so `.a:focus,` on one line poisons
-  `.b *` on the next. This form occurs zero times across the Bulma, Vuetify and Quasar
-  corpora, which is the only reason it is acceptable to ship
+  `.b *` on the next. The same over-approximation affects the boolean operators, not just
+  `*`: `.a:hover .not` followed by an indented declaration absorbs it the same way, and a
+  declaration value ending in a bare `and`/`or`/`not` (`content: not`) swallows the line
+  below it. All of these forms occur zero times across the Bulma, Vuetify and Quasar
+  corpora, which is the only reason they are acceptable to ship
 
 ## 0.3.4 — 2026-03-31
 

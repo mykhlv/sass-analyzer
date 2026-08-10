@@ -358,7 +358,7 @@ fn is_end_of_line_continuation(
         // The boolean operators are the exception: they are expression operators, so they
         // also continue inside a value, where there is no directive to consult at all
         // (`$a: not\n  b`, `$a: 1 and\n  2`).
-        let continues_a_value = ctx.saw_colon && matches!(text, "and" | "or" | "not");
+        let continues_a_value = ctx.in_expr_position() && matches!(text, "and" | "or" | "not");
         if continues_a_header || continues_a_value {
             return true;
         }
@@ -422,9 +422,11 @@ const EXPR_DIRECTIVES: &[&str] = &[
 
 /// Directives whose header can take a parenthesised parameter, argument or query
 /// list (`@function a\n  ()`, `@supports\n  (display: grid)`).
+#[rustfmt::skip]
 const PAREN_DIRECTIVES: &[&str] = &[
     "if", "else", "while", "return", "debug", "warn", "error", "for", "each", "mixin", "include",
     "function", "content", "media", "supports", "at-root", "use", "forward", "import",
+    "container", "scope",
 ];
 
 /// Directives whose header is a comma-separated list (`@each $a\n  , $b in ...`).
@@ -440,8 +442,10 @@ const STRING_DIRECTIVES: &[&str] = &[
 ];
 
 /// Directives whose header contains boolean/query operators (`and`, `or`, `not`).
+#[rustfmt::skip]
 const OPERATOR_DIRECTIVES: &[&str] = &[
     "if", "else", "while", "return", "debug", "warn", "error", "for", "each", "media", "supports",
+    "container",
 ];
 
 /// Directives that load a module and accept the `as`/`with`/`show`/`hide` clauses.
@@ -466,7 +470,9 @@ fn strip_vendor_prefix(name: &str) -> &str {
 /// header of `directive` rather than opening its body.
 fn keyword_continues_header(text: &str, directive: &str) -> bool {
     match text {
-        "from" | "through" | "to" => is_directive(directive, &["for"]),
+        "from" | "through" => is_directive(directive, &["for"]),
+        // `@scope (.a) to (.b)` — the one use of `to` as a header keyword outside `@for`.
+        "to" => is_directive(directive, &["for", "scope"]),
         "in" => is_directive(directive, &["each"]),
         "and" | "or" | "not" => is_directive(directive, OPERATOR_DIRECTIVES),
         "as" | "with" | "show" | "hide" => is_directive(directive, MODULE_DIRECTIVES),
