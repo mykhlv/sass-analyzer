@@ -40,6 +40,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when a blank line happened to follow, so the failure looked intermittent. Found by
   testing against hundreds of real-world `.sass` files from Bulma, Vuetify and Quasar —
   the indented syntax previously had no real-world test coverage at all
+- Parser: `@layer` accepts an interpolated name — `@layer vuetify-#{$name}`, `@layer #{$n}`,
+  and interpolation combined with the dot-separated and comma-separated forms. Only a bare
+  identifier was accepted, so any interpolated layer name reported "expected SEMICOLON" at
+  the `#{`
 - Indented Sass: an identifier that happens to match a keyword the lexer uses for line
   continuation no longer glues the next line onto the current statement. The check fired
   on the bare token text, with no regard for the directive or for whether a directive was

@@ -1950,6 +1950,121 @@ fn layer_dot_separated() {
 }
 
 #[test]
+fn layer_name_with_interpolation() {
+    // `@layer` only accepted a bare IDENT, so an interpolated name errored with
+    // "expected SEMICOLON" at the `#{`. Vuetify's `_layer.scss` uses this form.
+    check(
+        "@layer vuetify-#{$name} { }",
+        expect![[r##"
+        SOURCE_FILE@0..27
+          LAYER_RULE@0..27
+            AT@0..1 "@"
+            IDENT@1..6 "layer"
+            WHITESPACE@6..7 " "
+            IDENT@7..15 "vuetify-"
+            INTERPOLATION@15..23
+              HASH_LBRACE@15..17 "#{"
+              VARIABLE_REF@17..22
+                DOLLAR@17..18 "$"
+                IDENT@18..22 "name"
+              RBRACE@22..23 "}"
+            BLOCK@23..27
+              WHITESPACE@23..24 " "
+              LBRACE@24..25 "{"
+              WHITESPACE@25..26 " "
+              RBRACE@26..27 "}"
+    "##]],
+    );
+}
+
+#[test]
+fn layer_name_is_only_interpolation() {
+    check(
+        "@layer #{$n} { }",
+        expect![[r##"
+        SOURCE_FILE@0..16
+          LAYER_RULE@0..16
+            AT@0..1 "@"
+            IDENT@1..6 "layer"
+            INTERPOLATION@6..12
+              WHITESPACE@6..7 " "
+              HASH_LBRACE@7..9 "#{"
+              VARIABLE_REF@9..11
+                DOLLAR@9..10 "$"
+                IDENT@10..11 "n"
+              RBRACE@11..12 "}"
+            BLOCK@12..16
+              WHITESPACE@12..13 " "
+              LBRACE@13..14 "{"
+              WHITESPACE@14..15 " "
+              RBRACE@15..16 "}"
+    "##]],
+    );
+}
+
+#[test]
+fn layer_interpolated_names_dotted_and_listed() {
+    // Interpolation composes with both the dot-separated and comma-separated forms.
+    check(
+        "@layer a-#{$n}.b, #{$m}-x { }",
+        expect![[r##"
+        SOURCE_FILE@0..29
+          LAYER_RULE@0..29
+            AT@0..1 "@"
+            IDENT@1..6 "layer"
+            WHITESPACE@6..7 " "
+            IDENT@7..9 "a-"
+            INTERPOLATION@9..14
+              HASH_LBRACE@9..11 "#{"
+              VARIABLE_REF@11..13
+                DOLLAR@11..12 "$"
+                IDENT@12..13 "n"
+              RBRACE@13..14 "}"
+            DOT@14..15 "."
+            IDENT@15..16 "b"
+            COMMA@16..17 ","
+            INTERPOLATION@17..23
+              WHITESPACE@17..18 " "
+              HASH_LBRACE@18..20 "#{"
+              VARIABLE_REF@20..22
+                DOLLAR@20..21 "$"
+                IDENT@21..22 "m"
+              RBRACE@22..23 "}"
+            IDENT@23..25 "-x"
+            BLOCK@25..29
+              WHITESPACE@25..26 " "
+              LBRACE@26..27 "{"
+              WHITESPACE@27..28 " "
+              RBRACE@28..29 "}"
+    "##]],
+    );
+}
+
+#[test]
+fn layer_trailing_dot_is_still_an_error() {
+    // Allowing interpolation must not lose the diagnostic for a name that just stops.
+    check(
+        "@layer a. { }",
+        expect![[r#"
+        SOURCE_FILE@0..13
+          LAYER_RULE@0..13
+            AT@0..1 "@"
+            IDENT@1..6 "layer"
+            WHITESPACE@6..7 " "
+            IDENT@7..8 "a"
+            DOT@8..9 "."
+            BLOCK@9..13
+              WHITESPACE@9..10 " "
+              LBRACE@10..11 "{"
+              WHITESPACE@11..12 " "
+              RBRACE@12..13 "}"
+        errors:
+          10..11: expected IDENT
+    "#]],
+    );
+}
+
+#[test]
 fn container_with_name() {
     check(
         "@container sidebar (min-width: 700px) { }",
