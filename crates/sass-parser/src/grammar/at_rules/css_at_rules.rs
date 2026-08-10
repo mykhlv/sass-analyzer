@@ -12,20 +12,12 @@ pub fn layer_rule(p: &mut Parser<'_>) {
     p.bump(); // layer
 
     // Optional layer name(s)
-    if p.at(IDENT) {
-        p.bump();
-        // Dot-separated: `layer.sublayer`
-        while p.eat(DOT) {
-            p.expect(IDENT);
-        }
-
+    if at_layer_name(p) {
+        layer_name(p);
         // Comma-separated multiple names → statement form
         while p.eat(COMMA) {
-            if p.at(IDENT) {
-                p.bump();
-                while p.eat(DOT) {
-                    p.expect(IDENT);
-                }
+            if at_layer_name(p) {
+                layer_name(p);
             }
         }
     }
@@ -36,6 +28,36 @@ pub fn layer_rule(p: &mut Parser<'_>) {
         p.expect(SEMICOLON);
     }
     let _ = m.complete(p, LAYER_RULE);
+}
+
+fn at_layer_name(p: &Parser<'_>) -> bool {
+    p.at(IDENT) || p.at(HASH_LBRACE)
+}
+
+/// A dot-separated layer name: `a`, `a.b.c`. Each part is an ident, an interpolation, or
+/// a run of both glued together with no whitespace between them — `vuetify-#{$name}`,
+/// `#{$a}-suffix`. Same shape as an at-rule's own name in `generic_at_rule`.
+fn layer_name(p: &mut Parser<'_>) {
+    loop {
+        let mut consumed = false;
+        while (p.at(IDENT) || p.at(MINUS) || p.at(HASH_LBRACE))
+            && (!consumed || !p.has_whitespace_before())
+        {
+            if p.at(HASH_LBRACE) {
+                let _ = super::expressions::interpolation(p);
+            } else {
+                p.bump();
+            }
+            consumed = true;
+        }
+        if !p.eat(DOT) {
+            return;
+        }
+        if !at_layer_name(p) {
+            p.expect(IDENT);
+            return;
+        }
+    }
 }
 
 /// `@container name (width > 400px) { }` or `@container (width > 400px) { }`

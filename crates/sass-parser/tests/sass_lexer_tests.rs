@@ -780,19 +780,45 @@ fn comma_as_last_token_in_file() {
 
 #[test]
 fn colon_continuation_broken_by_blank_line() {
-    // COLON at EOL does NOT continue across blank lines.
-    let src = "$var:\n\n  value\n";
-    check_significant(
-        src,
+    // COLON at EOL does NOT continue across blank lines: the blank line ends the
+    // declaration, so `value` starts a new statement and the `$var:` is left without one.
+    //
+    // Pinned as a tree rather than a token stream on purpose. The token stream looks
+    // plausible here — it was the shape a `check_significant` snapshot could not show that
+    // let `mixin_body_starting_with_continuation_keyword` hide a wrong tree for months.
+    //
+    // Two things this records that are not yet decided. The virtual LBRACE lands in an
+    // ERROR node and `value` becomes a rule set, and the four diagnostics for a single
+    // syntax error exceed the <= 3 proportionality budget in CLAUDE.md. Whether the blank
+    // line should break the continuation at all is a separate question — Dart Sass reads
+    // this as `$var: value` — and changing it means revisiting `is_continuation_keyword`,
+    // whose IDENT arm exists only to serve this path.
+    check_tree(
+        "$var:\n\n  value\n",
         expect![[r#"
-            DOLLAR "$"
-            IDENT "var"
-            COLON ":"
-            LBRACE(virtual)
-            IDENT "value"
-            SEMICOLON(virtual)
-            RBRACE(virtual)
-        "#]],
+        SOURCE_FILE@0..15
+          VARIABLE_DECL@0..5
+            DOLLAR@0..1 "$"
+            IDENT@1..4 "var"
+            COLON@4..5 ":"
+          ERROR@5..9
+            WHITESPACE@5..9 "\n\n  "
+            LBRACE@9..9 ""
+          RULE_SET@9..14
+            SELECTOR_LIST@9..14
+              SELECTOR@9..14
+                SIMPLE_SELECTOR@9..14
+                  IDENT@9..14 "value"
+          SEMICOLON@14..14 ""
+          ERROR@14..14
+            RBRACE@14..14 ""
+          WHITESPACE@14..15 "\n"
+        errors:
+          9..9: expected expression
+          9..9: expected SEMICOLON
+          9..9: expected rule
+          14..14: expected rule
+    "#]],
     );
 }
 
@@ -1677,6 +1703,167 @@ fn boolean_operator_still_continues_inside_a_value() {
                 SEMICOLON@19..19 ""
               RBRACE@19..19 ""
           WHITESPACE@19..20 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn boolean_operator_still_continues_a_container_query() {
+    // `@container` is a condition-taking directive like `@media`. Omitting it from the
+    // operator set turned a valid multi-line query into three diagnostics — a regression
+    // no gate could see, because no corpus and no sass-spec case uses `@container`.
+    check_tree(
+        "@container card (width > 400px) and\n  (height > 100px)\n  .a\n    color: red\n",
+        expect![[r#"
+            SOURCE_FILE@0..75
+              CONTAINER_RULE@0..74
+                AT@0..1 "@"
+                IDENT@1..10 "container"
+                WHITESPACE@10..11 " "
+                IDENT@11..15 "card"
+                WHITESPACE@15..16 " "
+                LPAREN@16..17 "("
+                IDENT@17..22 "width"
+                WHITESPACE@22..23 " "
+                GT@23..24 ">"
+                WHITESPACE@24..25 " "
+                NUMBER@25..28 "400"
+                IDENT@28..30 "px"
+                RPAREN@30..31 ")"
+                WHITESPACE@31..32 " "
+                IDENT@32..35 "and"
+                WHITESPACE@35..38 "\n  "
+                LPAREN@38..39 "("
+                IDENT@39..45 "height"
+                WHITESPACE@45..46 " "
+                GT@46..47 ">"
+                WHITESPACE@47..48 " "
+                NUMBER@48..51 "100"
+                IDENT@51..53 "px"
+                RPAREN@53..54 ")"
+                BLOCK@54..74
+                  WHITESPACE@54..57 "\n  "
+                  LBRACE@57..57 ""
+                  RULE_SET@57..74
+                    SELECTOR_LIST@57..59
+                      SELECTOR@57..59
+                        SIMPLE_SELECTOR@57..59
+                          DOT@57..58 "."
+                          IDENT@58..59 "a"
+                    BLOCK@59..74
+                      LBRACE@59..59 ""
+                      DECLARATION@59..74
+                        PROPERTY@59..69
+                          WHITESPACE@59..64 "\n    "
+                          IDENT@64..69 "color"
+                        COLON@69..70 ":"
+                        VALUE@70..74
+                          VALUE@70..74
+                            WHITESPACE@70..71 " "
+                            IDENT@71..74 "red"
+                        SEMICOLON@74..74 ""
+                      RBRACE@74..74 ""
+                  RBRACE@74..74 ""
+              WHITESPACE@74..75 "\n"
+        "#]],
+    );
+}
+
+#[test]
+fn scope_header_continues_with_to() {
+    // `to` is a header keyword for `@scope` as well as `@for` — `@scope (.a) to (.b)`.
+    check_tree(
+        "@scope (.a) to\n  (.b)\n  .c\n    color: red\n",
+        expect![[r#"
+        SOURCE_FILE@0..42
+          SCOPE_RULE@0..41
+            AT@0..1 "@"
+            IDENT@1..6 "scope"
+            WHITESPACE@6..7 " "
+            LPAREN@7..8 "("
+            DOT@8..9 "."
+            IDENT@9..10 "a"
+            RPAREN@10..11 ")"
+            WHITESPACE@11..12 " "
+            IDENT@12..14 "to"
+            WHITESPACE@14..17 "\n  "
+            LPAREN@17..18 "("
+            DOT@18..19 "."
+            IDENT@19..20 "b"
+            RPAREN@20..21 ")"
+            BLOCK@21..41
+              WHITESPACE@21..24 "\n  "
+              LBRACE@24..24 ""
+              RULE_SET@24..41
+                SELECTOR_LIST@24..26
+                  SELECTOR@24..26
+                    SIMPLE_SELECTOR@24..26
+                      DOT@24..25 "."
+                      IDENT@25..26 "c"
+                BLOCK@26..41
+                  LBRACE@26..26 ""
+                  DECLARATION@26..41
+                    PROPERTY@26..36
+                      WHITESPACE@26..31 "\n    "
+                      IDENT@31..36 "color"
+                    COLON@36..37 ":"
+                    VALUE@37..41
+                      VALUE@37..41
+                        WHITESPACE@37..38 " "
+                        IDENT@38..41 "red"
+                    SEMICOLON@41..41 ""
+                  RBRACE@41..41 ""
+              RBRACE@41..41 ""
+          WHITESPACE@41..42 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn container_header_continues_with_a_parenthesised_query() {
+    // Start-of-line counterpart: `@container` was missing from the paren set too.
+    check_tree(
+        "@container card\n  (width > 400px)\n  .a\n    c: red\n",
+        expect![[r#"
+        SOURCE_FILE@0..50
+          CONTAINER_RULE@0..49
+            AT@0..1 "@"
+            IDENT@1..10 "container"
+            WHITESPACE@10..11 " "
+            IDENT@11..15 "card"
+            WHITESPACE@15..18 "\n  "
+            LPAREN@18..19 "("
+            IDENT@19..24 "width"
+            WHITESPACE@24..25 " "
+            GT@25..26 ">"
+            WHITESPACE@26..27 " "
+            NUMBER@27..30 "400"
+            IDENT@30..32 "px"
+            RPAREN@32..33 ")"
+            BLOCK@33..49
+              WHITESPACE@33..36 "\n  "
+              LBRACE@36..36 ""
+              RULE_SET@36..49
+                SELECTOR_LIST@36..38
+                  SELECTOR@36..38
+                    SIMPLE_SELECTOR@36..38
+                      DOT@36..37 "."
+                      IDENT@37..38 "a"
+                BLOCK@38..49
+                  LBRACE@38..38 ""
+                  DECLARATION@38..49
+                    PROPERTY@38..44
+                      WHITESPACE@38..43 "\n    "
+                      IDENT@43..44 "c"
+                    COLON@44..45 ":"
+                    VALUE@45..49
+                      VALUE@45..49
+                        WHITESPACE@45..46 " "
+                        IDENT@46..49 "red"
+                    SEMICOLON@49..49 ""
+                  RBRACE@49..49 ""
+              RBRACE@49..49 ""
+          WHITESPACE@49..50 "\n"
     "#]],
     );
 }

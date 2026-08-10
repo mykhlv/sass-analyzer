@@ -8,5 +8,4 @@
 # files parsed: bulma-sass 64
 # files parsed: vuetify 263
 # files parsed: quasar 93
-# total failing files: 1
-vuetify	styles/tools/_layer.scss	1
+# total failing files: 0
