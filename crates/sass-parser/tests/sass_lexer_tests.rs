@@ -780,19 +780,45 @@ fn comma_as_last_token_in_file() {
 
 #[test]
 fn colon_continuation_broken_by_blank_line() {
-    // COLON at EOL does NOT continue across blank lines.
-    let src = "$var:\n\n  value\n";
-    check_significant(
-        src,
+    // COLON at EOL does NOT continue across blank lines: the blank line ends the
+    // declaration, so `value` starts a new statement and the `$var:` is left without one.
+    //
+    // Pinned as a tree rather than a token stream on purpose. The token stream looks
+    // plausible here — it was the shape a `check_significant` snapshot could not show that
+    // let `mixin_body_starting_with_continuation_keyword` hide a wrong tree for months.
+    //
+    // Two things this records that are not yet decided. The virtual LBRACE lands in an
+    // ERROR node and `value` becomes a rule set, and the four diagnostics for a single
+    // syntax error exceed the <= 3 proportionality budget in CLAUDE.md. Whether the blank
+    // line should break the continuation at all is a separate question — Dart Sass reads
+    // this as `$var: value` — and changing it means revisiting `is_continuation_keyword`,
+    // whose IDENT arm exists only to serve this path.
+    check_tree(
+        "$var:\n\n  value\n",
         expect![[r#"
-            DOLLAR "$"
-            IDENT "var"
-            COLON ":"
-            LBRACE(virtual)
-            IDENT "value"
-            SEMICOLON(virtual)
-            RBRACE(virtual)
-        "#]],
+        SOURCE_FILE@0..15
+          VARIABLE_DECL@0..5
+            DOLLAR@0..1 "$"
+            IDENT@1..4 "var"
+            COLON@4..5 ":"
+          ERROR@5..9
+            WHITESPACE@5..9 "\n\n  "
+            LBRACE@9..9 ""
+          RULE_SET@9..14
+            SELECTOR_LIST@9..14
+              SELECTOR@9..14
+                SIMPLE_SELECTOR@9..14
+                  IDENT@9..14 "value"
+          SEMICOLON@14..14 ""
+          ERROR@14..14
+            RBRACE@14..14 ""
+          WHITESPACE@14..15 "\n"
+        errors:
+          9..9: expected expression
+          9..9: expected SEMICOLON
+          9..9: expected rule
+          14..14: expected rule
+    "#]],
     );
 }
 

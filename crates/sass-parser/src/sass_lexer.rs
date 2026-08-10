@@ -362,31 +362,10 @@ fn is_end_of_line_continuation(
         if continues_a_header || continues_a_value {
             return true;
         }
-        // Directive name keywords — continue only when the directive name is
-        // at EOL. Covers `@mixin\n name`, `@debug\n expr`, `=\n name`, etc.
-        //
-        // `at-root` is deliberately absent: every one of these forces the next line into
-        // the header, and `@at-root` is the one directive here whose bare form is
-        // meaningful on its own — a bare `@at-root` takes a block, so an indented line
-        // under it is the body. Its one header continuation, `@at-root\n  (without: …)`,
-        // still works, because `continues_header` accepts LPAREN under `at-root` on the
-        // start-of-line path, which is directive-aware where this one is not.
+        // A bare directive name at EOL forces the next line into the header, whatever it
+        // starts with: `@mixin\n  name`, `@debug\n  expr`, `=\n  name`.
         if at_name_is_last {
-            return matches!(
-                text,
-                "mixin"
-                    | "include"
-                    | "function"
-                    | "while"
-                    | "for"
-                    | "each"
-                    | "debug"
-                    | "warn"
-                    | "error"
-                    | "return"
-                    | "extend"
-                    | "="
-            );
+            return NAME_FORCES_CONTINUATION.contains(&text);
         }
     }
     false
@@ -447,6 +426,36 @@ const OPERATOR_DIRECTIVES: &[&str] = &[
     "if", "else", "while", "return", "debug", "warn", "error", "for", "each", "media", "supports",
     "container",
 ];
+
+/// Directive names that force the *next* line into the header whatever it starts with,
+/// because the bare name leaves the header obviously unfinished (`@mixin`, `@debug`).
+///
+/// Must stay disjoint from `COMPLETE_WHEN_BARE` — a directive whose bare name is already a
+/// complete header must never swallow the line under it. Asserted in the tests below.
+#[rustfmt::skip]
+const NAME_FORCES_CONTINUATION: &[&str] = &[
+    "mixin", "include", "function", "while", "for", "each",
+    "debug", "warn", "error", "return", "extend", "=",
+];
+
+/// Directives whose bare name is already a grammatically complete header, so an indented
+/// line under one of them is its *body*, not the rest of its header.
+///
+/// This does not decide continuation on its own — it flips the default from "continue" to
+/// "open the body", and each of the two keeps exactly one real continuation, spelled out
+/// in `bare_directive_continuation`.
+const COMPLETE_WHEN_BARE: &[&str] = &["at-root", "else"];
+
+/// The one continuation each `COMPLETE_WHEN_BARE` directive still accepts.
+fn bare_directive_continuation(kind: SyntaxKind, text: &str, directive: &str) -> bool {
+    match kind {
+        // `@at-root\n  (without: media)`
+        SyntaxKind::LPAREN => is_directive(directive, &["at-root"]),
+        // `@else\n  if $x`
+        SyntaxKind::IDENT => text.eq_ignore_ascii_case("if") && is_directive(directive, &["else"]),
+        _ => false,
+    }
+}
 
 /// Directives that load a module and accept the `as`/`with`/`show`/`hide` clauses.
 const MODULE_DIRECTIVES: &[&str] = &["use", "forward", "import"];
@@ -517,17 +526,15 @@ fn continues_header(
         return false;
     }
     let directive = ctx.directive;
+    // A directive whose bare name is a complete header opens its body here, keeping only
+    // its single real continuation. Without this, `@if …/@else/$x: 1` pulls the variable
+    // declaration into `@else`'s non-existent condition and swallows it.
+    if at_name_is_last && is_directive(directive, COMPLETE_WHEN_BARE) {
+        return bare_directive_continuation(kind, text, directive);
+    }
     match kind {
         SyntaxKind::COLON => false,
-        // A bare `@else` is already a complete header — it takes an optional `if …` and
-        // nothing else — so an indented `$x: 1` under it opens the body. Every other
-        // expression directive is still incomplete after its bare name (`@if`, `@for`,
-        // `@return` … all need what follows), which is what `at_name_is_last` keys on.
-        SyntaxKind::DOLLAR => {
-            at_name_is_last
-                && is_directive(directive, EXPR_DIRECTIVES)
-                && !is_directive(directive, &["else"])
-        }
+        SyntaxKind::DOLLAR => at_name_is_last && is_directive(directive, EXPR_DIRECTIVES),
         SyntaxKind::LPAREN => is_directive(directive, PAREN_DIRECTIVES),
         SyntaxKind::COMMA => is_directive(directive, COMMA_DIRECTIVES),
         SyntaxKind::QUOTED_STRING | SyntaxKind::STRING_START => {
@@ -626,4 +633,22 @@ fn measure_indent_after_last_newline(text: &str) -> u32 {
         }
     }
     indent
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{COMPLETE_WHEN_BARE, NAME_FORCES_CONTINUATION, is_directive};
+
+    /// The two lists express opposite decisions about the same directive: one forces the
+    /// next line into the header, the other opens the body. A directive in both would make
+    /// the outcome depend on which code path ran first.
+    #[test]
+    fn a_complete_header_never_forces_a_continuation() {
+        for name in NAME_FORCES_CONTINUATION {
+            assert!(
+                !is_directive(name, COMPLETE_WHEN_BARE),
+                "`{name}` is in both NAME_FORCES_CONTINUATION and COMPLETE_WHEN_BARE"
+            );
+        }
+    }
 }
