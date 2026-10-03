@@ -3423,11 +3423,10 @@ fn nested_property_with_bare_zero_value_stays_a_property() {
 }
 
 #[test]
-fn nested_property_with_only_bracketed_value_is_read_as_a_selector() {
-    // Known limitation of the depth-0 heuristic: the only value-only evidence here
-    // sits inside `(...)`, so this parses as a rule set rather than a nested
-    // property. Distinguishing it from `p:nth-child(2) { }` needs full selector
-    // lookahead, which is deliberately out of scope.
+fn nested_property_with_only_bracketed_value_is_a_property() {
+    // The only value-only evidence sits inside `(...)`, where selectors have it too
+    // (`p:nth-child(2)`). What decides it is the space after the colon: as in Dart Sass,
+    // a pseudo-class name must follow the colon directly.
     check(
         "p {\n  background: url(\"x.png\") { repeat: no-repeat; }\n}\n",
         expect![[r#"
@@ -3440,19 +3439,18 @@ fn nested_property_with_only_bracketed_value_is_read_as_a_selector() {
                 BLOCK@1..55
                   WHITESPACE@1..2 " "
                   LBRACE@2..3 "{"
-                  RULE_SET@3..53
-                    SELECTOR_LIST@3..30
-                      SELECTOR@3..30
-                        SIMPLE_SELECTOR@3..16
-                          WHITESPACE@3..6 "\n  "
-                          IDENT@6..16 "background"
-                        PSEUDO_SELECTOR@16..30
-                          COLON@16..17 ":"
-                          WHITESPACE@17..18 " "
-                          IDENT@18..21 "url"
-                          LPAREN@21..22 "("
-                          QUOTED_STRING@22..29 "\"x.png\""
-                          RPAREN@29..30 ")"
+                  NESTED_PROPERTY@3..53
+                    PROPERTY@3..16
+                      WHITESPACE@3..6 "\n  "
+                      IDENT@6..16 "background"
+                    COLON@16..17 ":"
+                    VALUE@17..30
+                      SPECIAL_FUNCTION_CALL@17..30
+                        WHITESPACE@17..18 " "
+                        IDENT@18..21 "url"
+                        LPAREN@21..22 "("
+                        QUOTED_STRING@22..29 "\"x.png\""
+                        RPAREN@29..30 ")"
                     BLOCK@30..53
                       WHITESPACE@30..31 " "
                       LBRACE@31..32 "{"
@@ -3472,5 +3470,515 @@ fn nested_property_with_only_bracketed_value_is_read_as_a_selector() {
                   RBRACE@54..55 "}"
               WHITESPACE@55..56 "\n"
         "#]],
+    );
+}
+
+// A colon followed by whitespace, or by anything but an identifier, cannot start a
+// pseudo-class — Dart Sass's rule for telling a nested property from a selector.
+
+#[test]
+fn nested_property_with_identifier_value_is_a_property() {
+    check(
+        ".x { font: bold { family: y; } }",
+        expect![[r#"
+        SOURCE_FILE@0..32
+          RULE_SET@0..32
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "x"
+            BLOCK@2..32
+              WHITESPACE@2..3 " "
+              LBRACE@3..4 "{"
+              NESTED_PROPERTY@4..30
+                PROPERTY@4..9
+                  WHITESPACE@4..5 " "
+                  IDENT@5..9 "font"
+                COLON@9..10 ":"
+                VALUE@10..15
+                  VALUE@10..15
+                    WHITESPACE@10..11 " "
+                    IDENT@11..15 "bold"
+                BLOCK@15..30
+                  WHITESPACE@15..16 " "
+                  LBRACE@16..17 "{"
+                  DECLARATION@17..28
+                    PROPERTY@17..24
+                      WHITESPACE@17..18 " "
+                      IDENT@18..24 "family"
+                    COLON@24..25 ":"
+                    VALUE@25..27
+                      VALUE@25..27
+                        WHITESPACE@25..26 " "
+                        IDENT@26..27 "y"
+                    SEMICOLON@27..28 ";"
+                  WHITESPACE@28..29 " "
+                  RBRACE@29..30 "}"
+              WHITESPACE@30..31 " "
+              RBRACE@31..32 "}"
+    "#]],
+    );
+}
+
+#[test]
+fn nested_property_with_function_value_is_a_property() {
+    check(
+        ".x { color: rgba(0,0,0,.5) { fallback: red; } }",
+        expect![[r#"
+            SOURCE_FILE@0..47
+              RULE_SET@0..47
+                SELECTOR_LIST@0..2
+                  SELECTOR@0..2
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "x"
+                BLOCK@2..47
+                  WHITESPACE@2..3 " "
+                  LBRACE@3..4 "{"
+                  NESTED_PROPERTY@4..45
+                    PROPERTY@4..10
+                      WHITESPACE@4..5 " "
+                      IDENT@5..10 "color"
+                    COLON@10..11 ":"
+                    VALUE@11..26
+                      FUNCTION_CALL@11..26
+                        WHITESPACE@11..12 " "
+                        IDENT@12..16 "rgba"
+                        ARG_LIST@16..26
+                          LPAREN@16..17 "("
+                          ARG@17..18
+                            NUMBER_LITERAL@17..18
+                              NUMBER@17..18 "0"
+                          COMMA@18..19 ","
+                          ARG@19..20
+                            NUMBER_LITERAL@19..20
+                              NUMBER@19..20 "0"
+                          COMMA@20..21 ","
+                          ARG@21..22
+                            NUMBER_LITERAL@21..22
+                              NUMBER@21..22 "0"
+                          COMMA@22..23 ","
+                          ARG@23..25
+                            NUMBER_LITERAL@23..25
+                              NUMBER@23..25 ".5"
+                          RPAREN@25..26 ")"
+                    BLOCK@26..45
+                      WHITESPACE@26..27 " "
+                      LBRACE@27..28 "{"
+                      DECLARATION@28..43
+                        PROPERTY@28..37
+                          WHITESPACE@28..29 " "
+                          IDENT@29..37 "fallback"
+                        COLON@37..38 ":"
+                        VALUE@38..42
+                          VALUE@38..42
+                            WHITESPACE@38..39 " "
+                            IDENT@39..42 "red"
+                        SEMICOLON@42..43 ";"
+                      WHITESPACE@43..44 " "
+                      RBRACE@44..45 "}"
+                  WHITESPACE@45..46 " "
+                  RBRACE@46..47 "}"
+        "#]],
+    );
+}
+
+#[test]
+fn nested_property_with_interpolated_name_and_identifier_value() {
+    check(
+        ".x { #{$p}: bold { family: y; } }",
+        expect![[r##"
+        SOURCE_FILE@0..33
+          RULE_SET@0..33
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "x"
+            BLOCK@2..33
+              WHITESPACE@2..3 " "
+              LBRACE@3..4 "{"
+              NESTED_PROPERTY@4..31
+                PROPERTY@4..10
+                  INTERPOLATION@4..10
+                    WHITESPACE@4..5 " "
+                    HASH_LBRACE@5..7 "#{"
+                    VARIABLE_REF@7..9
+                      DOLLAR@7..8 "$"
+                      IDENT@8..9 "p"
+                    RBRACE@9..10 "}"
+                COLON@10..11 ":"
+                VALUE@11..16
+                  VALUE@11..16
+                    WHITESPACE@11..12 " "
+                    IDENT@12..16 "bold"
+                BLOCK@16..31
+                  WHITESPACE@16..17 " "
+                  LBRACE@17..18 "{"
+                  DECLARATION@18..29
+                    PROPERTY@18..25
+                      WHITESPACE@18..19 " "
+                      IDENT@19..25 "family"
+                    COLON@25..26 ":"
+                    VALUE@26..28
+                      VALUE@26..28
+                        WHITESPACE@26..27 " "
+                        IDENT@27..28 "y"
+                    SEMICOLON@28..29 ";"
+                  WHITESPACE@29..30 " "
+                  RBRACE@30..31 "}"
+              WHITESPACE@31..32 " "
+              RBRACE@32..33 "}"
+    "##]],
+    );
+}
+
+#[test]
+fn nested_property_with_unspaced_number_value_is_a_property() {
+    check(
+        ".x { font:12px { family: y; } }",
+        expect![[r#"
+        SOURCE_FILE@0..31
+          RULE_SET@0..31
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "x"
+            BLOCK@2..31
+              WHITESPACE@2..3 " "
+              LBRACE@3..4 "{"
+              NESTED_PROPERTY@4..29
+                PROPERTY@4..9
+                  WHITESPACE@4..5 " "
+                  IDENT@5..9 "font"
+                COLON@9..10 ":"
+                VALUE@10..14
+                  DIMENSION@10..14
+                    NUMBER@10..12 "12"
+                    IDENT@12..14 "px"
+                BLOCK@14..29
+                  WHITESPACE@14..15 " "
+                  LBRACE@15..16 "{"
+                  DECLARATION@16..27
+                    PROPERTY@16..23
+                      WHITESPACE@16..17 " "
+                      IDENT@17..23 "family"
+                    COLON@23..24 ":"
+                    VALUE@24..26
+                      VALUE@24..26
+                        WHITESPACE@24..25 " "
+                        IDENT@25..26 "y"
+                    SEMICOLON@26..27 ";"
+                  WHITESPACE@27..28 " "
+                  RBRACE@28..29 "}"
+              WHITESPACE@29..30 " "
+              RBRACE@30..31 "}"
+    "#]],
+    );
+}
+
+#[test]
+fn nested_pseudo_class_without_space_is_a_rule() {
+    check(
+        ".x { a:hover { } div:hover{} }",
+        expect![[r#"
+        SOURCE_FILE@0..30
+          RULE_SET@0..30
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "x"
+            BLOCK@2..30
+              WHITESPACE@2..3 " "
+              LBRACE@3..4 "{"
+              RULE_SET@4..16
+                SELECTOR_LIST@4..12
+                  SELECTOR@4..12
+                    SIMPLE_SELECTOR@4..6
+                      WHITESPACE@4..5 " "
+                      IDENT@5..6 "a"
+                    PSEUDO_SELECTOR@6..12
+                      COLON@6..7 ":"
+                      IDENT@7..12 "hover"
+                BLOCK@12..16
+                  WHITESPACE@12..13 " "
+                  LBRACE@13..14 "{"
+                  WHITESPACE@14..15 " "
+                  RBRACE@15..16 "}"
+              RULE_SET@16..28
+                SELECTOR_LIST@16..26
+                  SELECTOR@16..26
+                    SIMPLE_SELECTOR@16..20
+                      WHITESPACE@16..17 " "
+                      IDENT@17..20 "div"
+                    PSEUDO_SELECTOR@20..26
+                      COLON@20..21 ":"
+                      IDENT@21..26 "hover"
+                BLOCK@26..28
+                  LBRACE@26..27 "{"
+                  RBRACE@27..28 "}"
+              WHITESPACE@28..29 " "
+              RBRACE@29..30 "}"
+    "#]],
+    );
+}
+
+#[test]
+fn nested_identifier_after_colon_without_space_is_a_selector() {
+    // Dart Sass compiles this to the selector `.x font:bold`.
+    check(
+        ".x { font:bold { family: y; } }",
+        expect![[r#"
+        SOURCE_FILE@0..31
+          RULE_SET@0..31
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "x"
+            BLOCK@2..31
+              WHITESPACE@2..3 " "
+              LBRACE@3..4 "{"
+              RULE_SET@4..29
+                SELECTOR_LIST@4..14
+                  SELECTOR@4..14
+                    SIMPLE_SELECTOR@4..9
+                      WHITESPACE@4..5 " "
+                      IDENT@5..9 "font"
+                    PSEUDO_SELECTOR@9..14
+                      COLON@9..10 ":"
+                      IDENT@10..14 "bold"
+                BLOCK@14..29
+                  WHITESPACE@14..15 " "
+                  LBRACE@15..16 "{"
+                  DECLARATION@16..27
+                    PROPERTY@16..23
+                      WHITESPACE@16..17 " "
+                      IDENT@17..23 "family"
+                    COLON@23..24 ":"
+                    VALUE@24..26
+                      VALUE@24..26
+                        WHITESPACE@24..25 " "
+                        IDENT@25..26 "y"
+                    SEMICOLON@26..27 ";"
+                  WHITESPACE@27..28 " "
+                  RBRACE@28..29 "}"
+              WHITESPACE@29..30 " "
+              RBRACE@30..31 "}"
+    "#]],
+    );
+}
+
+#[test]
+fn nested_interpolated_pseudo_class_is_a_rule() {
+    check(
+        ".x { a:#{$p} { } }",
+        expect![[r##"
+        SOURCE_FILE@0..18
+          RULE_SET@0..18
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "x"
+            BLOCK@2..18
+              WHITESPACE@2..3 " "
+              LBRACE@3..4 "{"
+              RULE_SET@4..16
+                SELECTOR_LIST@4..12
+                  SELECTOR@4..12
+                    SIMPLE_SELECTOR@4..6
+                      WHITESPACE@4..5 " "
+                      IDENT@5..6 "a"
+                    PSEUDO_SELECTOR@6..12
+                      COLON@6..7 ":"
+                      INTERPOLATION@7..12
+                        HASH_LBRACE@7..9 "#{"
+                        VARIABLE_REF@9..11
+                          DOLLAR@9..10 "$"
+                          IDENT@10..11 "p"
+                        RBRACE@11..12 "}"
+                BLOCK@12..16
+                  WHITESPACE@12..13 " "
+                  LBRACE@13..14 "{"
+                  WHITESPACE@14..15 " "
+                  RBRACE@15..16 "}"
+              WHITESPACE@16..17 " "
+              RBRACE@17..18 "}"
+    "##]],
+    );
+}
+
+#[test]
+fn nested_selectors_not_starting_with_an_identifier_are_unaffected() {
+    check(
+        ".x { &:hover { } a:not(.b) { } .a:hover > * { } a::before { } }",
+        expect![[r#"
+            SOURCE_FILE@0..63
+              RULE_SET@0..63
+                SELECTOR_LIST@0..2
+                  SELECTOR@0..2
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "x"
+                BLOCK@2..63
+                  WHITESPACE@2..3 " "
+                  LBRACE@3..4 "{"
+                  RULE_SET@4..16
+                    SELECTOR_LIST@4..12
+                      SELECTOR@4..12
+                        SIMPLE_SELECTOR@4..6
+                          WHITESPACE@4..5 " "
+                          AMP@5..6 "&"
+                        PSEUDO_SELECTOR@6..12
+                          COLON@6..7 ":"
+                          IDENT@7..12 "hover"
+                    BLOCK@12..16
+                      WHITESPACE@12..13 " "
+                      LBRACE@13..14 "{"
+                      WHITESPACE@14..15 " "
+                      RBRACE@15..16 "}"
+                  RULE_SET@16..30
+                    SELECTOR_LIST@16..26
+                      SELECTOR@16..26
+                        SIMPLE_SELECTOR@16..18
+                          WHITESPACE@16..17 " "
+                          IDENT@17..18 "a"
+                        PSEUDO_SELECTOR@18..26
+                          COLON@18..19 ":"
+                          IDENT@19..22 "not"
+                          LPAREN@22..23 "("
+                          DOT@23..24 "."
+                          IDENT@24..25 "b"
+                          RPAREN@25..26 ")"
+                    BLOCK@26..30
+                      WHITESPACE@26..27 " "
+                      LBRACE@27..28 "{"
+                      WHITESPACE@28..29 " "
+                      RBRACE@29..30 "}"
+                  RULE_SET@30..47
+                    SELECTOR_LIST@30..43
+                      SELECTOR@30..43
+                        SIMPLE_SELECTOR@30..33
+                          WHITESPACE@30..31 " "
+                          DOT@31..32 "."
+                          IDENT@32..33 "a"
+                        PSEUDO_SELECTOR@33..39
+                          COLON@33..34 ":"
+                          IDENT@34..39 "hover"
+                        COMBINATOR@39..41
+                          WHITESPACE@39..40 " "
+                          GT@40..41 ">"
+                        SIMPLE_SELECTOR@41..43
+                          WHITESPACE@41..42 " "
+                          STAR@42..43 "*"
+                    BLOCK@43..47
+                      WHITESPACE@43..44 " "
+                      LBRACE@44..45 "{"
+                      WHITESPACE@45..46 " "
+                      RBRACE@46..47 "}"
+                  RULE_SET@47..61
+                    SELECTOR_LIST@47..57
+                      SELECTOR@47..57
+                        SIMPLE_SELECTOR@47..49
+                          WHITESPACE@47..48 " "
+                          IDENT@48..49 "a"
+                        PSEUDO_SELECTOR@49..57
+                          COLON_COLON@49..51 "::"
+                          IDENT@51..57 "before"
+                    BLOCK@57..61
+                      WHITESPACE@57..58 " "
+                      LBRACE@58..59 "{"
+                      WHITESPACE@59..60 " "
+                      RBRACE@60..61 "}"
+                  WHITESPACE@61..62 " "
+                  RBRACE@62..63 "}"
+        "#]],
+    );
+}
+
+#[test]
+fn custom_property_with_braces_in_value_is_a_declaration() {
+    check(
+        ".x { --c: a {b} }",
+        expect![[r#"
+        SOURCE_FILE@0..17
+          RULE_SET@0..17
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "x"
+            BLOCK@2..17
+              WHITESPACE@2..3 " "
+              LBRACE@3..4 "{"
+              CUSTOM_PROPERTY_DECL@4..15
+                PROPERTY@4..8
+                  WHITESPACE@4..5 " "
+                  IDENT@5..8 "--c"
+                COLON@8..9 ":"
+                VALUE@9..15
+                  WHITESPACE@9..10 " "
+                  IDENT@10..11 "a"
+                  WHITESPACE@11..12 " "
+                  LBRACE@12..13 "{"
+                  IDENT@13..14 "b"
+                  RBRACE@14..15 "}"
+              WHITESPACE@15..16 " "
+              RBRACE@16..17 "}"
+    "#]],
+    );
+}
+
+#[test]
+fn error_in_nested_property_block_stays_local() {
+    check(
+        ".x { font: bold { ) } color: red; }",
+        expect![[r#"
+        SOURCE_FILE@0..35
+          RULE_SET@0..35
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "x"
+            BLOCK@2..35
+              WHITESPACE@2..3 " "
+              LBRACE@3..4 "{"
+              NESTED_PROPERTY@4..21
+                PROPERTY@4..9
+                  WHITESPACE@4..5 " "
+                  IDENT@5..9 "font"
+                COLON@9..10 ":"
+                VALUE@10..15
+                  VALUE@10..15
+                    WHITESPACE@10..11 " "
+                    IDENT@11..15 "bold"
+                BLOCK@15..21
+                  WHITESPACE@15..16 " "
+                  LBRACE@16..17 "{"
+                  ERROR@17..19
+                    WHITESPACE@17..18 " "
+                    RPAREN@18..19 ")"
+                  WHITESPACE@19..20 " "
+                  RBRACE@20..21 "}"
+              DECLARATION@21..33
+                PROPERTY@21..27
+                  WHITESPACE@21..22 " "
+                  IDENT@22..27 "color"
+                COLON@27..28 ":"
+                VALUE@28..32
+                  VALUE@28..32
+                    WHITESPACE@28..29 " "
+                    IDENT@29..32 "red"
+                SEMICOLON@32..33 ";"
+              WHITESPACE@33..34 " "
+              RBRACE@34..35 "}"
+        errors:
+          18..19: expected declaration or nested rule
+    "#]],
     );
 }

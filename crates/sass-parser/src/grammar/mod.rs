@@ -250,13 +250,22 @@ fn scan_past_interpolated_name(p: &Parser<'_>, start: usize) -> Option<usize> {
     Some(offset)
 }
 
-/// Scan tokens from `offset` looking for `{`, `;`, or `}` at depth 0.
-/// Returns `true` if `;`/`}`/EOF found first (declaration), `false` if `{` found (selector).
-/// Also returns `true` for value-and-block: `margin: 10px { top: 20px; }` — when an
-/// unambiguously-value token (`NUMBER`, `QUOTED_STRING`, `DOLLAR`, etc.) precedes `{`.
-/// Scan is bounded to avoid O(n²) behavior on pathological inputs.
+/// Decide whether `name:` followed by the tokens at `start` is a declaration.
+///
+/// Follows Dart Sass: the colon can begin a pseudo-class only when an identifier or
+/// interpolation follows it with no whitespace (`a:hover`, `a:#{$p}`). Anything else —
+/// `font: bold { … }`, `background: url(x) { … }`, `font:12px { … }` — is a declaration,
+/// with nested children if a `{` follows its value.
+///
+/// Otherwise, scan for `{`, `;`, or `}` at depth 0: `;`/`}`/EOF first means a declaration,
+/// `{` first a selector — unless an unambiguously-value token (`NUMBER`, `QUOTED_STRING`,
+/// `DOLLAR`, etc.) precedes the `{`. Scan is bounded to avoid O(n²) behavior on
+/// pathological inputs.
 fn scan_for_declaration_end(p: &Parser<'_>, start: usize) -> bool {
     const MAX_SCAN: usize = 100;
+    if !could_start_pseudo_class(p, start) {
+        return true;
+    }
     let mut depth: u32 = 0;
     let mut brace_depth: u32 = 0;
     let mut offset = start;
@@ -298,6 +307,21 @@ fn scan_for_declaration_end(p: &Parser<'_>, start: usize) -> bool {
             _ => {}
         }
         offset += 1;
+    }
+}
+
+/// Whether the token at `offset`, right after a colon, could be a pseudo-class name.
+fn could_start_pseudo_class(p: &Parser<'_>, offset: usize) -> bool {
+    if p.nth_has_whitespace_before(offset) {
+        return false;
+    }
+    match p.nth(offset) {
+        IDENT | HASH_LBRACE => true,
+        MINUS => {
+            matches!(p.nth(offset + 1), IDENT | HASH_LBRACE)
+                && !p.nth_has_whitespace_before(offset + 1)
+        }
+        _ => false,
     }
 }
 
