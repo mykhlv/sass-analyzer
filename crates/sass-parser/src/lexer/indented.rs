@@ -47,6 +47,23 @@ impl<'src> IndentedLexer<'src> {
         }
     }
 
+    /// Lex `input` from byte `pos`, a line break outside brackets: as at the start of a
+    /// line, outside any string, interpolation or comment.
+    pub(crate) fn resume(input: &'src str, pos: usize) -> Self {
+        let mut lexer = Self::new(input);
+        lexer.lexer.pos = pos;
+        lexer
+    }
+
+    /// Whether lexing from here on goes as from a fresh line break outside brackets: no
+    /// bracket, string or interpolation is open and no comment reaches onto the next line.
+    pub(crate) fn is_clean(&self) -> bool {
+        self.depth == 0
+            && self.silent_comment.is_none()
+            && !self.in_continuation_line
+            && self.lexer.context_stack.is_empty()
+    }
+
     pub fn next_token(&mut self) -> (SyntaxKind, &'src str) {
         self.next_token_where(true)
     }
