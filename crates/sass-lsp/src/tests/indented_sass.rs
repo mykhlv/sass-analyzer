@@ -217,7 +217,6 @@ async fn sass_selection_continued_header() {
             3:4-3:9 "color"
             2:4-3:9 "\n    color"
             2:4-3:14 "\n    color: red"
-            2:2-3:14 ".a\n    color: red"
             1:7-3:14 "\n  .a\n    color: red"
             0:0-3:14 <65 bytes>
             0:0-6:0 <98 bytes>

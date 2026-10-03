@@ -100,8 +100,8 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
     let mut ctx = StmtCtx::default();
     // Combined nesting depth for (), [], and #{}
     let mut nesting: u32 = 0;
-    // Pending virtual LBRACE: Some(indent) when we've deferred a block-open decision.
-    let mut pending_lbrace: Option<u32> = None;
+    // Deferred block-open decision, set when a header line may still continue below.
+    let mut pending_lbrace: Option<PendingLbrace> = None;
     // Indentation of the current line (updated on each newline-containing WHITESPACE).
     let mut current_line_indent: u32 = 0;
 
@@ -118,16 +118,14 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
         };
 
         // Resolve any pending LBRACE before processing a non-trivia token.
-        if let Some(pending_indent) = pending_lbrace
+        if let Some(pending) = pending_lbrace
             && !kind.is_trivia()
         {
             if continues_header(kind, text, &ctx, last.is_at_name) {
                 // Cancel the pending LBRACE — this line continues the header.
                 pending_lbrace = None;
             } else {
-                // Emit the deferred LBRACE.
-                result.push((SyntaxKind::LBRACE, ""));
-                indent_stack.push(pending_indent);
+                pending.open(&mut result, &mut indent_stack);
                 pending_lbrace = None;
                 ctx.end();
             }
@@ -280,9 +278,8 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
     }
 
     // Flush pending LBRACE at EOF
-    if let Some(indent) = pending_lbrace {
-        result.push((SyntaxKind::LBRACE, ""));
-        indent_stack.push(indent);
+    if let Some(pending) = pending_lbrace {
+        pending.open(&mut result, &mut indent_stack);
     }
 
     // Close remaining open blocks at EOF
@@ -571,7 +568,7 @@ fn process_newline<'src>(
     result: &mut Vec<(SyntaxKind, &'src str)>,
     indent_stack: &mut Vec<u32>,
     saw_content: &mut bool,
-    pending_lbrace: &mut Option<u32>,
+    pending_lbrace: &mut Option<PendingLbrace>,
     last: &LastSig<'_>,
     ctx: &mut StmtCtx<'_>,
 ) {
@@ -607,7 +604,10 @@ fn process_newline<'src>(
             // Indentation increase: potentially opening a block.
             // Defer decision for at-rules and variable declarations.
             if ctx.after_at || ctx.after_dollar {
-                *pending_lbrace = Some(new_indent);
+                *pending_lbrace = Some(PendingLbrace {
+                    indent: new_indent,
+                    at: result.len(),
+                });
             } else {
                 result.push((SyntaxKind::LBRACE, ""));
                 indent_stack.push(new_indent);
@@ -629,11 +629,10 @@ fn process_newline<'src>(
         // `from 1 through 3`). A dedent ends that wait: the comments were the whole body,
         // so open it here for the loop below to close. Left pending, it would open at the
         // next statement and swallow everything after it.
-        if let Some(pending_indent) = *pending_lbrace
+        if let Some(pending) = *pending_lbrace
             && new_indent <= current_indent
         {
-            result.push((SyntaxKind::LBRACE, ""));
-            indent_stack.push(pending_indent);
+            pending.open(result, indent_stack);
             *pending_lbrace = None;
             ctx.end();
         }
@@ -645,6 +644,26 @@ fn process_newline<'src>(
 
     result.push((SyntaxKind::WHITESPACE, ws_text));
     *saw_content = false;
+}
+
+/// A block-open decision deferred past the end of a header line, because the next line
+/// may still continue the header.
+#[derive(Clone, Copy)]
+struct PendingLbrace {
+    indent: u32,
+    /// `result` index right after the header, before the newline that deferred the decision.
+    at: usize,
+}
+
+impl PendingLbrace {
+    /// The LBRACE goes in at `at`, not at the end, so it precedes the newline and any
+    /// comment lines read while waiting: the position an immediately opened block gets.
+    /// Only trivia can follow `at`, since any other token resolves the decision first.
+    fn open(self, result: &mut Vec<(SyntaxKind, &str)>, indent_stack: &mut Vec<u32>) {
+        debug_assert!(result[self.at..].iter().all(|(kind, _)| kind.is_trivia()));
+        result.insert(self.at, (SyntaxKind::LBRACE, ""));
+        indent_stack.push(self.indent);
+    }
 }
 
 /// Whether the line so far is exactly `ns.`, so a `$` here starts the namespaced variable
