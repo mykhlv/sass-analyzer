@@ -3,11 +3,11 @@
 //! A comment that starts a statement — the first token on its line, outside brackets —
 //! reaches over the more deeply indented lines below it, as in Dart Sass:
 //!
-//! - `//` continues over each following line that is separated from it by exactly one
-//!   line break and indented deeper than the comment's own line. Every SCSS token on a
-//!   continuation line is retagged `SINGLE_LINE_COMMENT`; a token that would run past
-//!   the end of that line is cut there, so a stray quote in a comment cannot swallow the
-//!   rest of the file.
+//! - `//` continues over each following line that is indented deeper than the comment's
+//!   own line, with no blank line in between. Every SCSS token on a continuation line is
+//!   retagged `SINGLE_LINE_COMMENT`; a token that would run past the end of that line is
+//!   cut there, so a stray quote in a comment cannot swallow the rest of the file. With
+//!   [`IndentedLexer::crossing_blank_lines`], blank lines do not stop it, as in Dart Sass.
 //! - `/*` ends at `*/`, or at the end of the last line before the first non-blank line
 //!   indented no deeper than the comment's own line, whichever comes first. When nothing
 //!   but spaces follows the `/*`, the next non-blank line belongs to the comment whatever
@@ -33,6 +33,8 @@ pub struct IndentedLexer<'src> {
     silent_comment: Option<u32>,
     /// The current line continues that comment, so its tokens are retagged.
     in_continuation_line: bool,
+    /// A `//` comment reaches across blank lines onto the deeper lines after them.
+    across_blank_lines: bool,
 }
 
 impl<'src> IndentedLexer<'src> {
@@ -44,13 +46,24 @@ impl<'src> IndentedLexer<'src> {
             column: 0,
             silent_comment: None,
             in_continuation_line: false,
+            across_blank_lines: false,
         }
     }
 
-    /// Lex `input` from byte `pos`, a line break outside brackets: as at the start of a
-    /// line, outside any string, interpolation or comment.
+    /// Like [`IndentedLexer::new`], except that a `//` comment that starts a statement
+    /// also takes the deeper lines after a blank line, as Dart Sass reads it: blank lines
+    /// do not end a silent comment, only a line indented no deeper than its own.
+    pub fn crossing_blank_lines(input: &'src str) -> Self {
+        Self {
+            across_blank_lines: true,
+            ..Self::new(input)
+        }
+    }
+
+    /// [`IndentedLexer::crossing_blank_lines`] from byte `pos`, a line break outside
+    /// brackets: as at the start of a line, outside any string, interpolation or comment.
     pub(crate) fn resume(input: &'src str, pos: usize) -> Self {
-        let mut lexer = Self::new(input);
+        let mut lexer = Self::crossing_blank_lines(input);
         lexer.lexer.pos = pos;
         lexer
     }
@@ -142,9 +155,9 @@ impl<'src> IndentedLexer<'src> {
             // ends with its line.
             self.lexer.reset_context();
         }
-        self.in_continuation_line = self
-            .silent_comment
-            .is_some_and(|column| continues_silent_comment(whitespace, column));
+        self.in_continuation_line = self.silent_comment.is_some_and(|column| {
+            continues_silent_comment(whitespace, column, self.across_blank_lines)
+        });
         if !self.in_continuation_line {
             self.silent_comment = None;
             if self.depth == 0 {
@@ -206,10 +219,11 @@ pub fn indent_after_last_newline(whitespace: &str) -> u32 {
     }
 }
 
-/// Whether a line break continues a `//` comment begun at `column`: it is a single line
-/// break, not a blank line, and the next line is indented deeper.
-fn continues_silent_comment(whitespace: &str, column: u32) -> bool {
-    line_break_count(whitespace) == 1 && indent_after_last_newline(whitespace) > column
+/// Whether a line break continues a `//` comment begun at `column`: the next line is
+/// indented deeper, and it is a single line break unless `across_blank_lines`.
+fn continues_silent_comment(whitespace: &str, column: u32, across_blank_lines: bool) -> bool {
+    (across_blank_lines || line_break_count(whitespace) == 1)
+        && indent_after_last_newline(whitespace) > column
 }
 
 /// `\r\n` is one line break, as is a lone `\n`, `\r` or `\x0c`.

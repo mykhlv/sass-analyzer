@@ -172,10 +172,11 @@ impl Input {
     /// Lex indented-Sass source and build `Input` with its layout facts.
     ///
     /// The tokens are those of [`Input::from_source`] except where a comment reaches over
-    /// the lines indented beneath it (see [`lexer::IndentedLexer`]). The facts are gathered
-    /// in the same pass, and only here: `from_source` compiles without that code.
+    /// the lines indented beneath it (see [`lexer::IndentedLexer::crossing_blank_lines`]).
+    /// The facts are gathered in the same pass, and only here: `from_source` compiles
+    /// without that code.
     pub fn from_source_indented(source: &str) -> Self {
-        Self::lex::<true>(source, lexer::IndentedLexer::new(source))
+        Self::lex::<true>(source, lexer::IndentedLexer::crossing_blank_lines(source))
     }
 
     #[allow(clippy::cast_possible_truncation)]

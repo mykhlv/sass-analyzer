@@ -57,6 +57,17 @@ fn check_tree_on_a_continued_line(source: &str, expect: Expect) {
     expect.assert_eq(&parse_tree(source));
 }
 
+/// For a silent comment followed by a blank line and a deeper line, which the layout
+/// frontend's lexer takes into the comment, as Dart Sass does, and legacy does not.
+#[allow(clippy::needless_pass_by_value)]
+fn check_tree_across_a_blank_line(source: &str, expect: Expect) {
+    assert!(
+        !line_facts::line_fact_mismatches(source).is_empty(),
+        "the layout lexer already agrees with the legacy lexer on {source:?}"
+    );
+    expect.assert_eq(&parse_tree(source));
+}
+
 // ── Empty input ──────────────────────────────────────────────────────
 
 #[test]
@@ -5499,7 +5510,7 @@ fn silent_comment_continuation_line_with_an_unclosed_url() {
 /// file compiles to `.a { b: c }`.
 #[test]
 fn blank_line_ending_a_silent_comment_is_a_known_limitation() {
-    check_tree(
+    check_tree_across_a_blank_line(
         "// c\n\n  more\n.a\n  b: c\n",
         expect![[r#"
         SOURCE_FILE@0..23
