@@ -3622,3 +3622,87 @@ fn property_colon_at_end_of_line_does_not_glue_the_next_line_on() {
     "#]],
     );
 }
+
+#[test]
+fn nested_property_with_an_identifier_value_opens_a_block() {
+    check_tree(
+        ".funky\n  font: bold\n    family: x\n",
+        expect![[r#"
+        SOURCE_FILE@0..34
+          RULE_SET@0..33
+            SELECTOR_LIST@0..6
+              SELECTOR@0..6
+                SIMPLE_SELECTOR@0..6
+                  DOT@0..1 "."
+                  IDENT@1..6 "funky"
+            BLOCK@6..33
+              LBRACE@6..6 ""
+              NESTED_PROPERTY@6..33
+                PROPERTY@6..13
+                  WHITESPACE@6..9 "\n  "
+                  IDENT@9..13 "font"
+                COLON@13..14 ":"
+                VALUE@14..19
+                  VALUE@14..19
+                    WHITESPACE@14..15 " "
+                    IDENT@15..19 "bold"
+                BLOCK@19..33
+                  LBRACE@19..19 ""
+                  DECLARATION@19..33
+                    PROPERTY@19..30
+                      WHITESPACE@19..24 "\n    "
+                      IDENT@24..30 "family"
+                    COLON@30..31 ":"
+                    VALUE@31..33
+                      VALUE@31..33
+                        WHITESPACE@31..32 " "
+                        IDENT@32..33 "x"
+                    SEMICOLON@33..33 ""
+                  RBRACE@33..33 ""
+              RBRACE@33..33 ""
+          WHITESPACE@33..34 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn pseudo_class_rule_nested_in_the_indented_syntax_is_unaffected() {
+    check_tree(
+        ".x\n  a:hover\n    b: c\n",
+        expect![[r#"
+        SOURCE_FILE@0..22
+          RULE_SET@0..21
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "x"
+            BLOCK@2..21
+              LBRACE@2..2 ""
+              RULE_SET@2..21
+                SELECTOR_LIST@2..12
+                  SELECTOR@2..12
+                    SIMPLE_SELECTOR@2..6
+                      WHITESPACE@2..5 "\n  "
+                      IDENT@5..6 "a"
+                    PSEUDO_SELECTOR@6..12
+                      COLON@6..7 ":"
+                      IDENT@7..12 "hover"
+                BLOCK@12..21
+                  LBRACE@12..12 ""
+                  DECLARATION@12..21
+                    PROPERTY@12..18
+                      WHITESPACE@12..17 "\n    "
+                      IDENT@17..18 "b"
+                    COLON@18..19 ":"
+                    VALUE@19..21
+                      VALUE@19..21
+                        WHITESPACE@19..20 " "
+                        IDENT@20..21 "c"
+                    SEMICOLON@21..21 ""
+                  RBRACE@21..21 ""
+              RBRACE@21..21 ""
+          WHITESPACE@21..22 "\n"
+    "#]],
+    );
+}

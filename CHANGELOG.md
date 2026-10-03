@@ -103,6 +103,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`$a:` or `ns.$a:` with the value on the next line); after a property name it opens the
   nested block. The same change stops `font:` with no value from swallowing the
   declaration on the line below it
+- Parser: a nested property with a value and children is no longer **silently** read as a
+  rule set when the value is an identifier or a function call — `font: bold { family: y; }`,
+  `background: url("x.png") { repeat: no-repeat; }` and
+  `color: rgba(0, 0, 0, .5) { fallback: red; }` all produced a selector such as
+  `font:bold`. As in Dart Sass, a colon followed by a space, or by anything other than an
+  identifier, now always starts a declaration; only `name:ident` with nothing in between
+  (`a:hover`, `font:bold`) can be a selector. This resolves the known issue recorded for
+  the nested-selector fix above, and a custom property whose value contains braces
+  (`--c: a {b}`) is now a custom property rather than a rule set
 
 ### Documentation
 - Corrected the 0.3.3 indented-Sass compliance figure: it reported 100% (346/346), the
@@ -115,10 +124,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `engines.vscode` floor instead of drifting above it on every dependency update
 
 ### Known issues
-- A nested property whose only value evidence sits inside brackets — for example
-  `background: url("x.png") { repeat: no-repeat; }` — is now read as a rule set rather
-  than a nested property. This is an accepted consequence of the selector fix above;
-  telling the two apart needs full selector lookahead
 - In indented Sass, a selector that combines a pseudo-class with a trailing universal
   selector still swallows the block indented under it — `.a:hover > *`, `.a:not(.b) *`.
   A pseudo-class colon is indistinguishable from a declaration colon at the lexer level,
