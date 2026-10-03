@@ -1183,7 +1183,7 @@ fn colon_continuation_broken_by_blank_line() {
     //
     // Two things this records that are not yet decided. The virtual LBRACE lands in an
     // ERROR node and `value` becomes a rule set, and the four diagnostics for a single
-    // syntax error exceed the <= 3 proportionality budget in CLAUDE.md. Whether the blank
+    // syntax error exceed the budget of at most three per syntax error. Whether the blank
     // line should break the continuation at all is a separate question — Dart Sass reads
     // this as `$var: value` — and changing it means revisiting `is_continuation_keyword`,
     // whose IDENT arm exists only to serve this path.
