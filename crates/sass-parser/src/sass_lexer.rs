@@ -1,5 +1,6 @@
 use crate::lexer;
 use crate::syntax_kind::SyntaxKind;
+use crate::text_range::TextSize;
 
 /// What the newline logic knows about the last significant (non-trivia) token.
 ///
@@ -92,6 +93,31 @@ impl StmtCtx<'_> {
 /// - `=name` → `@mixin name` (virtual `AT` + re-tagged IDENT)
 /// - `+name` → `@include name` (virtual `AT` + re-tagged IDENT, only when no space before name)
 pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
+    tokenize_observing_newlines(source, |_, _| {})
+}
+
+/// Every newline-bearing WHITESPACE that [`sass_tokenize`] hands to its indentation logic
+/// (outside brackets and `//` comment continuations), as the whitespace's start offset and
+/// the indentation measured there.
+///
+/// Reports what the lexer decides through its own code path, so that layout facts
+/// computed elsewhere can be checked against it without re-deriving which newlines it
+/// skips. Not part of the supported API.
+#[doc(hidden)]
+pub fn newline_indents(source: &str) -> Vec<(TextSize, u32)> {
+    let mut seen = Vec::new();
+    tokenize_observing_newlines(source, |ws, indent| {
+        let offset = ws.as_ptr().addr() - source.as_ptr().addr();
+        #[allow(clippy::cast_possible_truncation)]
+        seen.push((TextSize::from(offset as u32), indent));
+    });
+    seen
+}
+
+fn tokenize_observing_newlines<'src>(
+    source: &'src str,
+    mut on_newline: impl FnMut(&'src str, u32),
+) -> Vec<(SyntaxKind, &'src str)> {
     let raw = lexer::tokenize(source);
     let mut result = Vec::with_capacity(raw.len() + raw.len() / 4);
     let mut indent_stack: Vec<u32> = vec![0];
@@ -163,6 +189,7 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
             }
             SyntaxKind::WHITESPACE if nesting == 0 && contains_newline(text) => {
                 current_line_indent = measure_indent_after_last_newline(text);
+                on_newline(text, current_line_indent);
                 process_newline(
                     text,
                     &mut result,

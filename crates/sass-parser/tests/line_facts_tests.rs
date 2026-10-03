@@ -3,6 +3,9 @@ use std::fmt::Write;
 use expect_test::{Expect, expect};
 use sass_parser::input::{IndentKind, Input, LineBreak};
 
+#[path = "common/line_facts.rs"]
+mod line_facts;
+
 // ── Helpers ──────────────────────────────────────────────────────────
 
 fn describe(line_break: LineBreak) -> String {
@@ -49,6 +52,8 @@ fn render(source: &str) -> String {
 #[track_caller]
 fn check(source: &str, expect: Expect) {
     expect.assert_eq(&render(source));
+    let mismatches = line_facts::line_fact_mismatches(source);
+    assert!(mismatches.is_empty(), "{source:?}: {mismatches:#?}");
 }
 
 // ── Facts ────────────────────────────────────────────────────────────
@@ -268,4 +273,70 @@ fn measure_rejects_whitespace_without_a_newline() {
 #[should_panic(expected = "layout facts exist only for indented input")]
 fn braced_input_has_no_layout_facts() {
     let _ = Input::from_source(".a { b: c; }").line_breaks_before(0);
+}
+
+// ── Cross-check against the legacy lexer ─────────────────────────────
+
+/// Inputs chosen for layout, beyond those of `sass_lexer_tests.rs` and
+/// `parse_sass_legacy_tests.rs`, whose helpers run the same cross-check on every
+/// input: the known indented-Sass defects (silent misparses, tabs and spaces,
+/// inconsistent indentation, unclosed brackets), the Dart-valid continuation forms,
+/// and the `.sass` documents of the language-server tests.
+const LAYOUT_INPUTS: &[&str] = &[
+    ".a:hover > *\n  color: red\n",
+    ".a:focus,\n.b *\n  c: d\n",
+    ".a:hover .not\n  b: c\n",
+    ".a\n  content: not\n  b: c\n",
+    ".a\n  font:\n    family: fantasy\n",
+    ".a\n  font: bold\n    family: x\n",
+    "@mixin foo\n  // c\n.a\n  b: c\n",
+    "@media screen\n  /* c */\n.a\n  b: c\n",
+    "/* loud\n  still comment\n.a\n  b: c\n.d\n  e: f\n",
+    ".a\n\tcolor: red\n        b: c\n",
+    ".a\n  \tcolor: red\n  \tb: c\n",
+    ".a\n    .b\n      c: d\n  .e\n    f: g\n",
+    ".a\n  color:red\n",
+    ".a\n  b: fn(1\n.c\n  d: e\n.f\n  g: h\n",
+    "@namespace svg\n  \"http://www.w3.org/2000/svg\"\n",
+    "$a: 1 +\n  2\n",
+    "@each $a\n  , $b in (1 2)\n  c: $a\n",
+    "@function f\n  ($a)\n  @return $a +\n    1\n",
+    "@if\n  $a\n  b: c\n",
+    "$m: (\na: 1\n)\n",
+    ".a\n  b: fn(1,\n2)\n",
+    "// c\n  continued\n    deeper\n.a\n  // body\n\n  b: c\n",
+    "// c\r\n  crlf continuation\r\n.a\r\n  b: c\r\n",
+    "\u{feff}.a\n  b: c\n",
+    ".a\n  b: c\n    \n",
+    "@mixin m\n  b: c\n// dedented comment\n  d: e\n",
+    "=m\n  b: c\n.a\n  +m\n",
+    ".nav\n  color: red\n  .item\n    margin: 0\n    &:hover\n      color: blue\n.footer\n  padding: 0\n",
+    "@media screen and (min-width: 100px),\n  print\n  .a\n    color: red\n@include button($bg,\n  $border)\n",
+    "// leading comment\n// second line\n.a\n  // only a comment\n  color: red\n@mixin empty\n  // comment-only body\n.b\n  /* loud */\n  margin: 0\n",
+];
+
+/// The cross-check is only as strong as the set of newlines legacy reports: it must
+/// skip those inside brackets and `//` continuations, and report every other one,
+/// trailing whitespace included.
+#[test]
+fn legacy_reports_the_newlines_it_measures() {
+    let source = "// c\n  more\n.a\n  b: fn(1,\n2)\n    ";
+    let seen: Vec<String> = sass_parser::sass_lexer::newline_indents(source)
+        .into_iter()
+        .map(|(offset, column)| format!("{offset:?}={column}"))
+        .collect();
+    expect![[r#"["11=0", "14=2", "28=4"]"#]].assert_eq(&format!("{seen:?}"));
+}
+
+#[test]
+fn facts_match_legacy_on_layout_inputs() {
+    let failures: Vec<String> = LAYOUT_INPUTS
+        .iter()
+        .flat_map(|source| {
+            line_facts::line_fact_mismatches(source)
+                .into_iter()
+                .map(move |m| format!("{source:?} {m}"))
+        })
+        .collect();
+    assert!(failures.is_empty(), "{failures:#?}");
 }

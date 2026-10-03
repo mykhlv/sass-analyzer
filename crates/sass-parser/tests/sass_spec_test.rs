@@ -16,6 +16,9 @@ use std::path::{Path, PathBuf};
 
 use sass_parser::syntax::SyntaxNode;
 
+#[path = "common/line_facts.rs"]
+mod line_facts;
+
 // ── HRX parser ──────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -361,9 +364,8 @@ fn print_compatibility_report(label: &str, results: &[CaseResult], dump_filename
 
 // ── Main test ───────────────────────────────────────────────────────
 
-#[test]
-#[ignore = "requires downloading sass-spec corpus"]
-fn sass_spec_compatibility() {
+/// Every case of the suite, from HRX files and standalone inputs alike.
+fn collect_all_cases() -> Vec<TestCase> {
     let spec_dir = spec_root();
 
     assert!(
@@ -400,6 +402,46 @@ fn sass_spec_compatibility() {
     // Collect standalone input.scss tests.
     let standalone = collect_standalone_tests(&spec_dir, &spec_dir);
     all_cases.extend(standalone);
+    all_cases
+}
+
+/// Every indented case has layout facts that reproduce the indentation the legacy
+/// indented lexer measures at each newline.
+#[test]
+#[ignore = "requires downloading sass-spec corpus"]
+fn sass_spec_line_facts_match_legacy() {
+    let cases: Vec<TestCase> = collect_all_cases()
+        .into_iter()
+        .filter(|c| c.syntax == Syntax::Sass)
+        .collect();
+    let newlines: usize = cases
+        .iter()
+        .map(|c| sass_parser::sass_lexer::newline_indents(&c.input).len())
+        .sum();
+    let mismatches: Vec<String> = cases
+        .iter()
+        .flat_map(|c| {
+            line_facts::line_fact_mismatches(&c.input)
+                .into_iter()
+                .map(|m| format!("{} {m}", c.display_path))
+        })
+        .collect();
+    eprintln!(
+        "\nline facts vs legacy: {} indented cases, {newlines} newlines checked, {} mismatches",
+        cases.len(),
+        mismatches.len(),
+    );
+    assert!(
+        mismatches.is_empty(),
+        "layout facts disagree with the legacy lexer: {:#?}",
+        &mismatches[..mismatches.len().min(20)],
+    );
+}
+
+#[test]
+#[ignore = "requires downloading sass-spec corpus"]
+fn sass_spec_compatibility() {
+    let all_cases = collect_all_cases();
 
     // Split into SCSS and Sass test cases.
     let (scss_cases, sass_cases): (Vec<_>, Vec<_>) = all_cases
