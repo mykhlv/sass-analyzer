@@ -16,6 +16,10 @@ use std::path::{Path, PathBuf};
 
 use sass_parser::syntax::SyntaxNode;
 
+#[path = "common/layout_allow_list.rs"]
+mod layout_allow_list;
+#[path = "common/layout_differential.rs"]
+mod layout_differential;
 #[path = "common/line_facts.rs"]
 mod line_facts;
 #[path = "common/virtual_tokens.rs"]
@@ -465,6 +469,44 @@ fn sass_spec_virtual_tokens_match_legacy() {
         mismatches.is_empty(),
         "Event::Virtual disagrees with the legacy lexer: {:#?}",
         &mismatches[..mismatches.len().min(3)],
+    );
+}
+
+/// Every indented case parses to the same tree and errors with the layout frontend as
+/// with legacy, unless it is on the allow-list.
+#[test]
+#[ignore = "requires downloading sass-spec corpus"]
+fn sass_spec_layout_matches_legacy() {
+    let cases: Vec<TestCase> = collect_all_cases()
+        .into_iter()
+        .filter(|c| c.syntax == Syntax::Sass)
+        .collect();
+    let mut allowed = 0;
+    let mut mismatches = Vec::new();
+    for case in &cases {
+        let Some((legacy, layout)) = layout_differential::layout_mismatch(&case.input) else {
+            continue;
+        };
+        if layout_allow_list::allowed(&case.input).is_some() {
+            allowed += 1;
+        } else {
+            mismatches.push(format!(
+                "{}\n{}",
+                case.display_path,
+                layout_differential::first_difference(&legacy, &layout)
+            ));
+        }
+    }
+    eprintln!(
+        "\nparse_sass_layout vs parse_sass_legacy: {} indented cases, {allowed} \
+         allow-listed differences, {} other",
+        cases.len(),
+        mismatches.len(),
+    );
+    assert!(
+        mismatches.is_empty(),
+        "parse_sass_layout disagrees with parse_sass_legacy:\n{}",
+        mismatches[..mismatches.len().min(3)].join("\n"),
     );
 }
 
