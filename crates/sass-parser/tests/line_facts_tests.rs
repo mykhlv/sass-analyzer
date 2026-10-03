@@ -5,6 +5,8 @@ use sass_parser::input::{IndentKind, Input, LineBreak};
 
 #[path = "common/line_facts.rs"]
 mod line_facts;
+#[path = "common/virtual_tokens.rs"]
+mod virtual_tokens;
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -384,6 +386,17 @@ fn facts_match_legacy_on_layout_inputs() {
             line_facts::line_fact_mismatches(source)
                 .into_iter()
                 .map(move |m| format!("{source:?} {m}"))
+        })
+        .collect();
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+fn virtual_tokens_match_legacy_on_layout_inputs() {
+    let failures: Vec<String> = LAYOUT_INPUTS
+        .iter()
+        .filter_map(|source| {
+            virtual_tokens::virtual_token_mismatch(source).map(|m| format!("{source:?} {m}"))
         })
         .collect();
     assert!(failures.is_empty(), "{failures:#?}");

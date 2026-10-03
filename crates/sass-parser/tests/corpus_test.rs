@@ -15,6 +15,8 @@ use sass_parser::syntax_kind::SyntaxKind;
 
 #[path = "common/line_facts.rs"]
 mod line_facts;
+#[path = "common/virtual_tokens.rs"]
+mod virtual_tokens;
 
 fn corpus_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test-corpus")
@@ -490,6 +492,41 @@ fn sass_corpora_line_facts_match_legacy() {
         mismatches.is_empty(),
         "layout facts disagree with the legacy lexer: {:#?}",
         &mismatches[..mismatches.len().min(20)],
+    );
+}
+
+/// Every file of the indented corpora, `.scss` ones included, parses to the same tree
+/// when the legacy lexer's zero-width tokens are emitted as `Event::Virtual` instead.
+#[test]
+#[ignore = "requires downloading test corpus"]
+fn sass_corpora_virtual_tokens_match_legacy() {
+    let mut files = 0;
+    let mut mismatches = Vec::new();
+    for (name, subdir) in SASS_GATE.corpora {
+        let dir = corpus_root().join(subdir);
+        assert!(
+            dir.exists(),
+            "{name} corpus not found at {}. Run: cd test-corpus && bash download.sh",
+            dir.display()
+        );
+        for path in collect_source_files(&dir) {
+            let source = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+            files += 1;
+            if let Some(m) = virtual_tokens::virtual_token_mismatch(&source) {
+                let rel = path.strip_prefix(&dir).unwrap_or(&path).display();
+                mismatches.push(format!("{name}/{rel} {m}"));
+            }
+        }
+    }
+    eprintln!(
+        "\nEvent::Virtual vs legacy: {files} files, {} mismatches",
+        mismatches.len(),
+    );
+    assert!(
+        mismatches.is_empty(),
+        "Event::Virtual disagrees with the legacy lexer: {:#?}",
+        &mismatches[..mismatches.len().min(3)],
     );
 }
 

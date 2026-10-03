@@ -1,10 +1,30 @@
 use crate::event::Event;
 use crate::input::Input;
 use crate::syntax_kind::SyntaxKind;
-use crate::text_range::TextRange;
+use crate::text_range::{TextRange, TextSize};
 use crate::token_set::TokenSet;
 
 const MAX_DEPTH: u32 = 256;
+
+/// How blocks and statements are delimited in the source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Layout {
+    /// By real `{`, `}` and `;` tokens. The only fence is the end of input.
+    Braced,
+}
+
+/// The first position at or after the cursor where the token stream stops being the
+/// input's: from `index` on, lookahead reads `kind`, a token with no source text.
+///
+/// End of input is a fence of kind `EOF`. Any other fence stands for a zero-width
+/// token that the layout implies, which `bump` emits as `Event::Virtual` without
+/// advancing the cursor, at `trivia` in the trivia before `index`.
+#[derive(Debug, Clone, Copy)]
+struct Fence {
+    index: usize,
+    kind: SyntaxKind,
+    trivia: u32,
+}
 
 pub struct Parser<'src> {
     input: Input,
@@ -18,11 +38,21 @@ pub struct Parser<'src> {
     /// errors only occur on malformed input where parsing speed is not critical.
     error_messages: Vec<String>,
     depth: u32,
+    layout: Layout,
+    fence: Fence,
+    /// Brackets (`()`, `[]`, `#{}`) the cursor is inside, counted by
+    /// [`TransparentGuard`]. Line breaks there are plain trivia.
+    transparent: u32,
+    /// The last virtual token emitted: the cursor position and the trivia index it
+    /// went at. Trivia before that index lies in front of it, not in front of the
+    /// token at the cursor, which `has_whitespace_before` must not see.
+    last_virtual: (usize, u32),
 }
 
 impl<'src> Parser<'src> {
     pub fn new(input: Input, source: &'src str) -> Self {
         let estimated_events = input.len().saturating_mul(2);
+        let fence = eof_fence(&input);
         Self {
             input,
             source,
@@ -30,10 +60,16 @@ impl<'src> Parser<'src> {
             events: Vec::with_capacity(estimated_events),
             error_messages: Vec::new(),
             depth: 0,
+            layout: Layout::Braced,
+            fence,
+            transparent: 0,
+            last_virtual: (usize::MAX, 0),
         }
     }
 
     pub fn finish(self) -> (Vec<Event>, Vec<String>, Input, &'src str) {
+        debug_assert_eq!(self.depth, 0, "depth guard leaked");
+        debug_assert_eq!(self.transparent, 0, "transparent guard leaked");
         (self.events, self.error_messages, self.input, self.source)
     }
 
@@ -44,9 +80,16 @@ impl<'src> Parser<'src> {
         self.nth(0)
     }
 
+    /// The kind `offset` tokens ahead. Lookahead does not cross a fence: every offset
+    /// that reaches it reads the fence's kind.
     #[inline]
     pub fn nth(&self, offset: usize) -> SyntaxKind {
-        self.input.kind(self.pos.saturating_add(offset))
+        let target = self.pos.saturating_add(offset);
+        if target < self.fence.index {
+            self.input.kind(target)
+        } else {
+            self.fence.kind
+        }
     }
 
     #[inline]
@@ -61,53 +104,84 @@ impl<'src> Parser<'src> {
 
     #[inline]
     pub fn at_end(&self) -> bool {
-        self.pos >= self.input.len()
+        self.pos >= self.fence.index && self.fence.kind == SyntaxKind::EOF
     }
 
     /// Returns `false` for pos 0 (no preceding significant token) or at EOF.
     pub fn has_whitespace_before(&self) -> bool {
-        if self.pos == 0 || self.at_end() {
-            return false;
-        }
-        self.input.has_whitespace_before(self.pos)
+        self.nth_has_whitespace_before(0)
     }
 
     /// Returns the source text of the current token.
     pub fn current_text(&self) -> &'src str {
-        if self.at_end() {
-            return "";
-        }
-        let range = self.input.range(self.pos);
-        &self.source[range]
+        self.nth_text(0)
     }
 
-    /// Returns the source text of the token at `pos + offset`.
+    /// Returns the source text of the token at `pos + offset`; empty at or past a fence.
     pub fn nth_text(&self, offset: usize) -> &'src str {
         let target = self.pos.saturating_add(offset);
-        if target >= self.input.len() {
+        if target >= self.fence.index {
             return "";
         }
         let range = self.input.range(target);
         &self.source[range]
     }
 
-    /// Whether any whitespace trivia exists before the token at `pos + offset`.
+    /// Whether any whitespace trivia exists before the token at `pos + offset`, counting
+    /// only the trivia after the token before it, virtual ones included. False for the
+    /// first token of the input, at EOF, and past the first token of a fence.
     pub fn nth_has_whitespace_before(&self, offset: usize) -> bool {
         let target = self.pos.saturating_add(offset);
-        if target == 0 || target >= self.input.len() {
+        let end = match target.cmp(&self.fence.index) {
+            std::cmp::Ordering::Less => self.input.trivia_end_index(target),
+            std::cmp::Ordering::Equal if self.fence.kind != SyntaxKind::EOF => {
+                self.fence.trivia as usize
+            }
+            _ => return false,
+        };
+        let start = if self.last_virtual.0 == target {
+            self.last_virtual.1 as usize
+        } else if target == 0 {
             return false;
-        }
-        self.input.has_whitespace_before(target)
+        } else {
+            self.input.trivia_start_index(target)
+        };
+        self.input.has_whitespace_in(start, end)
     }
 
     // ── Consuming tokens ─────────────────────────────────────────────
 
     pub fn bump(&mut self) {
-        debug_assert!(!self.at_end(), "bump at end of input");
+        if self.pos >= self.fence.index {
+            self.bump_virtual();
+            return;
+        }
         let kind = self.input.kind(self.pos);
         let range = self.input.range(self.pos);
         self.events.push(Event::Token { kind, range });
         self.pos += 1;
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn bump_virtual(&mut self) {
+        let Fence {
+            index,
+            kind,
+            trivia,
+        } = self.fence;
+        assert!(kind != SyntaxKind::EOF, "bump at end of input");
+        debug_assert_eq!(index, self.pos);
+        self.events.push(Event::Virtual { kind, trivia });
+        self.last_virtual = (index, trivia);
+        self.fence = self.locate_fence();
+    }
+
+    /// The fence ahead of the cursor, from the layout's state.
+    fn locate_fence(&self) -> Fence {
+        match self.layout {
+            Layout::Braced => eof_fence(&self.input),
+        }
     }
 
     pub fn eat(&mut self, kind: SyntaxKind) -> bool {
@@ -144,11 +218,12 @@ impl<'src> Parser<'src> {
     // ── Errors ───────────────────────────────────────────────────────
 
     pub fn error(&mut self, msg: impl Into<String>) {
-        let range = if self.at_end() {
-            let end = crate::text_range::TextSize::of(self.source);
-            TextRange::empty(end)
-        } else {
+        let range = if self.pos < self.fence.index {
             self.input.range(self.pos)
+        } else if self.fence.kind == SyntaxKind::EOF {
+            TextRange::empty(TextSize::of(self.source))
+        } else {
+            TextRange::empty(self.virtual_offset())
         };
         let msg_len = self.error_messages.len();
         debug_assert!(
@@ -168,6 +243,19 @@ impl<'src> Parser<'src> {
         let _ = m.complete(self, SyntaxKind::ERROR);
     }
 
+    /// Where the virtual token at the fence sits in the source: at the start of the
+    /// trivia token it goes in front of, or of the token after all of them.
+    fn virtual_offset(&self) -> TextSize {
+        let trivia = self.fence.trivia as usize;
+        if trivia < self.input.trivia_end_index(self.fence.index) {
+            self.input.all_trivia()[trivia].1.start()
+        } else if self.fence.index < self.input.len() {
+            self.input.range(self.fence.index).start()
+        } else {
+            TextSize::of(self.source)
+        }
+    }
+
     // ── Recursion depth ──────────────────────────────────────────────
 
     #[allow(clippy::result_unit_err)]
@@ -178,6 +266,27 @@ impl<'src> Parser<'src> {
         }
         self.depth += 1;
         Ok(DepthGuard { parser: self })
+    }
+
+    // ── Layout scopes ────────────────────────────────────────────────
+
+    /// Enter a bracketed construct (`()`, `[]`, `#{}`), where line breaks are plain
+    /// trivia whatever the layout. The scope ends when the guard drops, so a bracket
+    /// left unclosed by an error does not outlive the function that opened it.
+    pub fn transparent_guard(&mut self) -> TransparentGuard<'_, 'src> {
+        self.transparent += 1;
+        self.fence = self.locate_fence();
+        TransparentGuard { parser: self }
+    }
+}
+
+fn eof_fence(input: &Input) -> Fence {
+    #[allow(clippy::cast_possible_truncation)]
+    let trivia = input.all_trivia().len() as u32;
+    Fence {
+        index: input.len(),
+        kind: SyntaxKind::EOF,
+        trivia,
     }
 }
 
@@ -299,5 +408,260 @@ impl<'src> std::ops::DerefMut for DepthGuard<'_, 'src> {
 impl Drop for DepthGuard<'_, '_> {
     fn drop(&mut self) {
         self.parser.depth -= 1;
+    }
+}
+
+// ── TransparentGuard ─────────────────────────────────────────────────
+
+pub struct TransparentGuard<'p, 'src> {
+    parser: &'p mut Parser<'src>,
+}
+
+impl<'src> std::ops::Deref for TransparentGuard<'_, 'src> {
+    type Target = Parser<'src>;
+
+    fn deref(&self) -> &Parser<'src> {
+        self.parser
+    }
+}
+
+impl<'src> std::ops::DerefMut for TransparentGuard<'_, 'src> {
+    fn deref_mut(&mut self) -> &mut Parser<'src> {
+        self.parser
+    }
+}
+
+impl Drop for TransparentGuard<'_, '_> {
+    fn drop(&mut self) {
+        self.parser.transparent -= 1;
+        self.parser.fence = self.parser.locate_fence();
+    }
+}
+
+#[cfg(test)]
+impl Parser<'_> {
+    /// Puts a fence where no layout would yet: the unit tests below drive the virtual-token
+    /// machinery with it. The braced layout puts the fence back at EOF after one bump.
+    fn set_fence(&mut self, index: usize, kind: SyntaxKind, trivia: u32) {
+        debug_assert!(index >= self.pos && index <= self.input.len());
+        self.fence = Fence {
+            index,
+            kind,
+            trivia,
+        };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::VecDeque;
+
+    use super::Parser;
+    use crate::event::Event;
+    use crate::input::Input;
+    use crate::syntax_kind::SyntaxKind::{self, DOT, EOF, IDENT, LBRACE, SOURCE_FILE};
+
+    #[test]
+    fn lookahead_reads_the_fence_kind_from_the_fence_on() {
+        let source = ".a\n  b";
+        let mut p = Parser::new(Input::from_source(source), source);
+        // After the line break, as a shorthand's `@` goes.
+        p.set_fence(2, LBRACE, 1);
+        assert_eq!(
+            [p.nth(0), p.nth(1), p.nth(2), p.nth(3), p.nth(9)],
+            [DOT, IDENT, LBRACE, LBRACE, LBRACE]
+        );
+        assert_eq!(p.nth_text(1), "a");
+        assert_eq!(p.nth_text(2), "");
+        p.bump();
+        p.bump();
+        assert!(p.at(LBRACE));
+        assert!(!p.at_end());
+        assert!(p.has_whitespace_before());
+        assert_eq!(p.current_text(), "");
+
+        p.bump();
+        assert_eq!(
+            p.events.last(),
+            Some(&Event::Virtual {
+                kind: LBRACE,
+                trivia: 1
+            })
+        );
+        assert_eq!(p.pos, 2, "a virtual token consumes no input");
+        assert_eq!([p.nth(0), p.nth(1)], [IDENT, EOF]);
+        assert_eq!(p.current_text(), "b");
+        assert!(
+            !p.has_whitespace_before(),
+            "the whitespace is the virtual token's"
+        );
+        p.bump();
+        assert!(p.at_end());
+    }
+
+    #[test]
+    fn an_error_at_a_virtual_token_is_empty_where_the_token_goes() {
+        let source = ".a // c\n  b";
+        let mut p = Parser::new(Input::from_source(source), source);
+        // Trivia: " ", "// c", "\n  " — the block opens in front of the line break.
+        p.set_fence(2, LBRACE, 2);
+        p.bump();
+        p.bump();
+        p.error("here");
+        assert_eq!(
+            p.events.last(),
+            Some(&Event::Error {
+                msg_index: 0,
+                range: crate::text_range::TextRange::empty(7.into()),
+            })
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "bump at end of input")]
+    fn bump_at_end_of_input_panics() {
+        let mut p = Parser::new(Input::from_source(""), "");
+        p.bump();
+    }
+
+    #[test]
+    fn transparent_guard_is_balanced() {
+        let source = "(a)";
+        let mut p = Parser::new(Input::from_source(source), source);
+        {
+            let mut g = p.transparent_guard();
+            assert_eq!(g.transparent, 1);
+            g.bump();
+        }
+        assert_eq!(p.transparent, 0);
+        assert!(p.at(IDENT));
+    }
+
+    /// Replays the legacy indented token stream through two parsers in lockstep: one
+    /// over legacy's input, zero-width tokens and all, and one over the same input without
+    /// them, where each becomes a fence. Everything the grammar can observe must agree:
+    /// kinds, text and whitespace adjacency at and before each token, error ranges, and
+    /// the final tree.
+    #[track_caller]
+    fn replay(source: &str) {
+        let tokens = crate::sass_lexer::sass_tokenize(source);
+        let legacy_input = Input::from_tokens(&tokens);
+        let real: Vec<_> = tokens
+            .iter()
+            .copied()
+            .filter(|(_, t)| !t.is_empty())
+            .collect();
+        let input = Input::from_tokens(&real);
+
+        let is_virtual: Vec<bool> = (0..legacy_input.len())
+            .map(|i| legacy_input.range(i).is_empty())
+            .collect();
+        let mut fences = VecDeque::new();
+        let mut real_pos = 0;
+        for (i, &virt) in is_virtual.iter().enumerate() {
+            if virt {
+                #[allow(clippy::cast_possible_truncation)]
+                let trivia = legacy_input.trivia_start_index(i + 1) as u32;
+                fences.push_back((real_pos, legacy_input.kind(i), trivia));
+            } else {
+                real_pos += 1;
+            }
+        }
+        assert!(!fences.is_empty(), "{source:?} has no zero-width tokens");
+
+        let mut legacy = Parser::new(legacy_input, source);
+        let mut p = Parser::new(input, source);
+        let legacy_file = legacy.start();
+        let file = p.start();
+        let set_next_fence = |p: &mut Parser<'_>, fences: &VecDeque<(usize, SyntaxKind, u32)>| {
+            if let Some(&(index, kind, trivia)) = fences.front() {
+                p.set_fence(index, kind, trivia);
+            }
+        };
+        set_next_fence(&mut p, &fences);
+
+        let mut at = 0;
+        while !legacy.at_end() {
+            let here = format!("{source:?} at legacy token {at}");
+            assert_eq!(p.current(), legacy.current(), "{here}");
+            assert_eq!(p.current_text(), legacy.current_text(), "{here}");
+            assert!(!p.at_end(), "{here}");
+            assert_eq!(
+                p.has_whitespace_before(),
+                legacy.has_whitespace_before(),
+                "{here}: has_whitespace_before"
+            );
+            // Lookahead agrees up to and including the first virtual token ahead.
+            for k in 1..4 {
+                if is_virtual[at..(at + k).min(is_virtual.len())].contains(&true) {
+                    break;
+                }
+                assert_eq!(p.nth(k), legacy.nth(k), "{here}: nth({k})");
+                assert_eq!(p.nth_text(k), legacy.nth_text(k), "{here}: nth_text({k})");
+                assert_eq!(
+                    p.nth_has_whitespace_before(k),
+                    legacy.nth_has_whitespace_before(k),
+                    "{here}: nth_has_whitespace_before({k})"
+                );
+            }
+            legacy.error("here");
+            p.error("here");
+
+            legacy.bump();
+            p.bump();
+            if is_virtual[at] {
+                fences.pop_front();
+                set_next_fence(&mut p, &fences);
+            }
+            at += 1;
+        }
+        assert!(p.at_end());
+        assert!(!p.has_whitespace_before());
+        legacy.error("end");
+        p.error("end");
+        let _ = legacy_file.complete(&mut legacy, SOURCE_FILE);
+        let _ = file.complete(&mut p, SOURCE_FILE);
+
+        // The same events, error ranges included, with legacy's zero-width tokens in
+        // the form the bridge is shown to place identically.
+        let (events, _, _, _) = p.finish();
+        let (legacy_events, _, legacy_input, _) = legacy.finish();
+        let mut legacy_pos = 0;
+        let expected: Vec<Event> = legacy_events
+            .into_iter()
+            .map(|event| match event {
+                Event::Token { kind, range } => {
+                    legacy_pos += 1;
+                    if range.is_empty() {
+                        #[allow(clippy::cast_possible_truncation)]
+                        let trivia = legacy_input.trivia_start_index(legacy_pos) as u32;
+                        Event::Virtual { kind, trivia }
+                    } else {
+                        event
+                    }
+                }
+                other => other,
+            })
+            .collect();
+        assert_eq!(events, expected, "{source:?}");
+    }
+
+    #[test]
+    fn virtual_tokens_replay_legacy() {
+        for source in [
+            ".a\n  b: c\n",
+            ".a // c\n  b: c\n",
+            ".a\n  b: c // d",
+            ".a\n  .b\n    c: d\n.e\n  f: g",
+            "@mixin m\n  // c\n.a\n  b: c\n",
+            "@if $a\n  // c\n\n  b: c\n",
+            "@media screen\n  /* c */\n.a\n  b: c\n",
+            ".a\n  @extend .b\n    .c\n",
+            "=m\n  b: c\n.a\n  +m\n",
+            ".a\r\n  b: c\r\n\r\n.d\r\n  e: f\r\n",
+            "  \n.a\n  b: c\n    \n",
+        ] {
+            replay(source);
+        }
     }
 }

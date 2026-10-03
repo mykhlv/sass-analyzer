@@ -3,17 +3,22 @@ use sass_parser::syntax::SassLanguage;
 
 #[path = "common/line_facts.rs"]
 mod line_facts;
+#[path = "common/virtual_tokens.rs"]
+mod virtual_tokens;
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
-/// Also cross-checks the input's layout facts against the legacy lexer, so that every
-/// input here is covered by that check too.
+/// Also cross-checks the input's layout facts and the placement of `Event::Virtual`
+/// against the legacy lexer, so that every input here is covered by those checks too.
 fn check_parse(source: &str) -> String {
     let mismatches = line_facts::line_fact_mismatches(source);
     assert!(
         mismatches.is_empty(),
         "layout facts disagree with the legacy lexer: {mismatches:#?}"
     );
+    if let Some(mismatch) = virtual_tokens::virtual_token_mismatch(source) {
+        panic!("Event::Virtual disagrees with the legacy lexer: {mismatch}");
+    }
     parse_tree(source)
 }
 
