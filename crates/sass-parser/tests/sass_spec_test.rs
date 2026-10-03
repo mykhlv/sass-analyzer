@@ -18,6 +18,8 @@ use sass_parser::syntax::SyntaxNode;
 
 #[path = "common/line_facts.rs"]
 mod line_facts;
+#[path = "common/virtual_tokens.rs"]
+mod virtual_tokens;
 
 // ── HRX parser ──────────────────────────────────────────────────────
 
@@ -435,6 +437,34 @@ fn sass_spec_line_facts_match_legacy() {
         mismatches.is_empty(),
         "layout facts disagree with the legacy lexer: {:#?}",
         &mismatches[..mismatches.len().min(20)],
+    );
+}
+
+/// Every indented case parses to the same tree when the legacy lexer's zero-width
+/// tokens are emitted as `Event::Virtual` instead.
+#[test]
+#[ignore = "requires downloading sass-spec corpus"]
+fn sass_spec_virtual_tokens_match_legacy() {
+    let cases: Vec<TestCase> = collect_all_cases()
+        .into_iter()
+        .filter(|c| c.syntax == Syntax::Sass)
+        .collect();
+    let mismatches: Vec<String> = cases
+        .iter()
+        .filter_map(|c| {
+            virtual_tokens::virtual_token_mismatch(&c.input)
+                .map(|m| format!("{} {m}", c.display_path))
+        })
+        .collect();
+    eprintln!(
+        "\nEvent::Virtual vs legacy: {} indented cases, {} mismatches",
+        cases.len(),
+        mismatches.len(),
+    );
+    assert!(
+        mismatches.is_empty(),
+        "Event::Virtual disagrees with the legacy lexer: {:#?}",
+        &mismatches[..mismatches.len().min(3)],
     );
 }
 

@@ -344,6 +344,17 @@ impl Input {
             .any(|(kind, _)| *kind == SyntaxKind::WHITESPACE)
     }
 
+    /// End (exclusive) in [`Input::all_trivia`] of the trivia before the token at `pos`;
+    /// `pos == len()` gives the end of the trailing trivia.
+    #[inline]
+    pub fn trivia_end_index(&self, pos: usize) -> usize {
+        if pos < self.len() {
+            self.trivia_starts[pos + 1] as usize
+        } else {
+            self.all_trivia.len()
+        }
+    }
+
     /// Line breaks in the trivia before the token at `pos`, in order; `pos == len()`
     /// gives those in the trailing trivia, before EOF. A comment-only line in between
     /// contributes a break of its own, and its column bears on layout as much as the
