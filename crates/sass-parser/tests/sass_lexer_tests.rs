@@ -2847,3 +2847,433 @@ fn use_with_multiplication_in_config_still_parses() {
     "#]],
     );
 }
+
+// ── Comment-only at-rule bodies ──────────────────────────────────────
+//
+// An at-rule header defers its block-open decision until the next line's first token,
+// because that token may continue the header instead (`@for $i` / `from 1 through 3`).
+// Comments must not decide it: Dart Sass skips them, so a comment line between a header
+// and its continuation is fine. But when the comment lines are the whole body, the
+// decision has to be made at the dedent — otherwise the block opens at the next
+// statement and silently swallows everything after it.
+
+#[test]
+fn mixin_body_of_only_a_comment_closes_at_the_dedent() {
+    check_tree(
+        "@mixin foo\n  // c\n.a\n  b: c\n",
+        expect![[r#"
+        SOURCE_FILE@0..28
+          MIXIN_RULE@0..17
+            AT@0..1 "@"
+            IDENT@1..6 "mixin"
+            WHITESPACE@6..7 " "
+            IDENT@7..10 "foo"
+            BLOCK@10..17
+              WHITESPACE@10..13 "\n  "
+              SINGLE_LINE_COMMENT@13..17 "// c"
+              LBRACE@17..17 ""
+              RBRACE@17..17 ""
+          RULE_SET@17..27
+            SELECTOR_LIST@17..20
+              SELECTOR@17..20
+                SIMPLE_SELECTOR@17..20
+                  WHITESPACE@17..18 "\n"
+                  DOT@18..19 "."
+                  IDENT@19..20 "a"
+            BLOCK@20..27
+              LBRACE@20..20 ""
+              DECLARATION@20..27
+                PROPERTY@20..24
+                  WHITESPACE@20..23 "\n  "
+                  IDENT@23..24 "b"
+                COLON@24..25 ":"
+                VALUE@25..27
+                  VALUE@25..27
+                    WHITESPACE@25..26 " "
+                    IDENT@26..27 "c"
+                SEMICOLON@27..27 ""
+              RBRACE@27..27 ""
+          WHITESPACE@27..28 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn media_body_of_only_a_block_comment_closes_at_the_dedent() {
+    check_tree(
+        "@media print\n  /* c */\n.a\n  b: c\n",
+        expect![[r#"
+        SOURCE_FILE@0..33
+          MEDIA_RULE@0..22
+            AT@0..1 "@"
+            IDENT@1..6 "media"
+            MEDIA_QUERY@6..12
+              WHITESPACE@6..7 " "
+              IDENT@7..12 "print"
+            BLOCK@12..22
+              WHITESPACE@12..15 "\n  "
+              MULTI_LINE_COMMENT@15..22 "/* c */"
+              LBRACE@22..22 ""
+              RBRACE@22..22 ""
+          RULE_SET@22..32
+            SELECTOR_LIST@22..25
+              SELECTOR@22..25
+                SIMPLE_SELECTOR@22..25
+                  WHITESPACE@22..23 "\n"
+                  DOT@23..24 "."
+                  IDENT@24..25 "a"
+            BLOCK@25..32
+              LBRACE@25..25 ""
+              DECLARATION@25..32
+                PROPERTY@25..29
+                  WHITESPACE@25..28 "\n  "
+                  IDENT@28..29 "b"
+                COLON@29..30 ":"
+                VALUE@30..32
+                  VALUE@30..32
+                    WHITESPACE@30..31 " "
+                    IDENT@31..32 "c"
+                SEMICOLON@32..32 ""
+              RBRACE@32..32 ""
+          WHITESPACE@32..33 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn include_content_block_of_only_a_comment_closes_at_the_dedent() {
+    check_tree(
+        "@include foo\n  // c\n.a\n  b: c\n",
+        expect![[r#"
+        SOURCE_FILE@0..30
+          INCLUDE_RULE@0..19
+            AT@0..1 "@"
+            IDENT@1..8 "include"
+            WHITESPACE@8..9 " "
+            IDENT@9..12 "foo"
+            BLOCK@12..19
+              WHITESPACE@12..15 "\n  "
+              SINGLE_LINE_COMMENT@15..19 "// c"
+              LBRACE@19..19 ""
+              RBRACE@19..19 ""
+          RULE_SET@19..29
+            SELECTOR_LIST@19..22
+              SELECTOR@19..22
+                SIMPLE_SELECTOR@19..22
+                  WHITESPACE@19..20 "\n"
+                  DOT@20..21 "."
+                  IDENT@21..22 "a"
+            BLOCK@22..29
+              LBRACE@22..22 ""
+              DECLARATION@22..29
+                PROPERTY@22..26
+                  WHITESPACE@22..25 "\n  "
+                  IDENT@25..26 "b"
+                COLON@26..27 ":"
+                VALUE@27..29
+                  VALUE@27..29
+                    WHITESPACE@27..28 " "
+                    IDENT@28..29 "c"
+                SEMICOLON@29..29 ""
+              RBRACE@29..29 ""
+          WHITESPACE@29..30 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn comment_only_body_closes_at_a_dedent_after_a_blank_line() {
+    check_tree(
+        "@mixin foo\n  // c\n\n.a\n  b: c\n",
+        expect![[r#"
+        SOURCE_FILE@0..29
+          MIXIN_RULE@0..17
+            AT@0..1 "@"
+            IDENT@1..6 "mixin"
+            WHITESPACE@6..7 " "
+            IDENT@7..10 "foo"
+            BLOCK@10..17
+              WHITESPACE@10..13 "\n  "
+              SINGLE_LINE_COMMENT@13..17 "// c"
+              LBRACE@17..17 ""
+              RBRACE@17..17 ""
+          RULE_SET@17..28
+            SELECTOR_LIST@17..21
+              SELECTOR@17..21
+                SIMPLE_SELECTOR@17..21
+                  WHITESPACE@17..19 "\n\n"
+                  DOT@19..20 "."
+                  IDENT@20..21 "a"
+            BLOCK@21..28
+              LBRACE@21..21 ""
+              DECLARATION@21..28
+                PROPERTY@21..25
+                  WHITESPACE@21..24 "\n  "
+                  IDENT@24..25 "b"
+                COLON@25..26 ":"
+                VALUE@26..28
+                  VALUE@26..28
+                    WHITESPACE@26..27 " "
+                    IDENT@27..28 "c"
+                SEMICOLON@28..28 ""
+              RBRACE@28..28 ""
+          WHITESPACE@28..29 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn if_with_a_comment_only_body_still_pairs_with_else() {
+    check_tree(
+        "@if $x\n  // c\n@else\n  a: b\n",
+        expect![[r#"
+        SOURCE_FILE@0..27
+          IF_RULE@0..26
+            AT@0..1 "@"
+            IDENT@1..3 "if"
+            VARIABLE_REF@3..6
+              WHITESPACE@3..4 " "
+              DOLLAR@4..5 "$"
+              IDENT@5..6 "x"
+            BLOCK@6..13
+              WHITESPACE@6..9 "\n  "
+              SINGLE_LINE_COMMENT@9..13 "// c"
+              LBRACE@13..13 ""
+              RBRACE@13..13 ""
+            ELSE_CLAUSE@13..26
+              WHITESPACE@13..14 "\n"
+              AT@14..15 "@"
+              IDENT@15..19 "else"
+              BLOCK@19..26
+                WHITESPACE@19..22 "\n  "
+                LBRACE@22..22 ""
+                DECLARATION@22..26
+                  PROPERTY@22..23
+                    IDENT@22..23 "a"
+                  COLON@23..24 ":"
+                  VALUE@24..26
+                    VALUE@24..26
+                      WHITESPACE@24..25 " "
+                      IDENT@25..26 "b"
+                  SEMICOLON@26..26 ""
+                RBRACE@26..26 ""
+          WHITESPACE@26..27 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn comment_only_body_at_end_of_file() {
+    check_tree(
+        "@mixin foo\n  // c\n",
+        expect![[r#"
+        SOURCE_FILE@0..18
+          MIXIN_RULE@0..17
+            AT@0..1 "@"
+            IDENT@1..6 "mixin"
+            WHITESPACE@6..7 " "
+            IDENT@7..10 "foo"
+            BLOCK@10..17
+              WHITESPACE@10..13 "\n  "
+              SINGLE_LINE_COMMENT@13..17 "// c"
+              LBRACE@17..17 ""
+              RBRACE@17..17 ""
+          WHITESPACE@17..18 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn comment_before_body_content_stays_in_the_body() {
+    check_tree(
+        "@mixin foo\n  // c\n  b: c\n.d\n  e: f\n",
+        expect![[r#"
+        SOURCE_FILE@0..35
+          MIXIN_RULE@0..24
+            AT@0..1 "@"
+            IDENT@1..6 "mixin"
+            WHITESPACE@6..7 " "
+            IDENT@7..10 "foo"
+            BLOCK@10..24
+              WHITESPACE@10..13 "\n  "
+              SINGLE_LINE_COMMENT@13..17 "// c"
+              WHITESPACE@17..20 "\n  "
+              LBRACE@20..20 ""
+              DECLARATION@20..24
+                PROPERTY@20..21
+                  IDENT@20..21 "b"
+                COLON@21..22 ":"
+                VALUE@22..24
+                  VALUE@22..24
+                    WHITESPACE@22..23 " "
+                    IDENT@23..24 "c"
+                SEMICOLON@24..24 ""
+              RBRACE@24..24 ""
+          RULE_SET@24..34
+            SELECTOR_LIST@24..27
+              SELECTOR@24..27
+                SIMPLE_SELECTOR@24..27
+                  WHITESPACE@24..25 "\n"
+                  DOT@25..26 "."
+                  IDENT@26..27 "d"
+            BLOCK@27..34
+              LBRACE@27..27 ""
+              DECLARATION@27..34
+                PROPERTY@27..31
+                  WHITESPACE@27..30 "\n  "
+                  IDENT@30..31 "e"
+                COLON@31..32 ":"
+                VALUE@32..34
+                  VALUE@32..34
+                    WHITESPACE@32..33 " "
+                    IDENT@33..34 "f"
+                SEMICOLON@34..34 ""
+              RBRACE@34..34 ""
+          WHITESPACE@34..35 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn comment_between_a_header_and_its_continuation_is_skipped() {
+    // Dart Sass accepts this and loops `$i` over 1..3.
+    check_tree(
+        "@for $i\n  // c\n  from 1 through 3\n  .a\n    b: $i\n",
+        expect![[r#"
+        SOURCE_FILE@0..49
+          FOR_RULE@0..48
+            AT@0..1 "@"
+            IDENT@1..4 "for"
+            WHITESPACE@4..5 " "
+            DOLLAR@5..6 "$"
+            IDENT@6..7 "i"
+            WHITESPACE@7..10 "\n  "
+            SINGLE_LINE_COMMENT@10..14 "// c"
+            WHITESPACE@14..17 "\n  "
+            IDENT@17..21 "from"
+            NUMBER_LITERAL@21..23
+              WHITESPACE@21..22 " "
+              NUMBER@22..23 "1"
+            WHITESPACE@23..24 " "
+            IDENT@24..31 "through"
+            NUMBER_LITERAL@31..33
+              WHITESPACE@31..32 " "
+              NUMBER@32..33 "3"
+            BLOCK@33..48
+              WHITESPACE@33..36 "\n  "
+              LBRACE@36..36 ""
+              RULE_SET@36..48
+                SELECTOR_LIST@36..38
+                  SELECTOR@36..38
+                    SIMPLE_SELECTOR@36..38
+                      DOT@36..37 "."
+                      IDENT@37..38 "a"
+                BLOCK@38..48
+                  LBRACE@38..38 ""
+                  DECLARATION@38..48
+                    PROPERTY@38..44
+                      WHITESPACE@38..43 "\n    "
+                      IDENT@43..44 "b"
+                    COLON@44..45 ":"
+                    VALUE@45..48
+                      VARIABLE_REF@45..48
+                        WHITESPACE@45..46 " "
+                        DOLLAR@46..47 "$"
+                        IDENT@47..48 "i"
+                    SEMICOLON@48..48 ""
+                  RBRACE@48..48 ""
+              RBRACE@48..48 ""
+          WHITESPACE@48..49 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn error_after_a_comment_in_a_body_stays_local() {
+    check_tree(
+        "@mixin foo\n  // c\n  )\n.e\n  f: g\n",
+        expect![[r#"
+        SOURCE_FILE@0..32
+          MIXIN_RULE@0..21
+            AT@0..1 "@"
+            IDENT@1..6 "mixin"
+            WHITESPACE@6..7 " "
+            IDENT@7..10 "foo"
+            BLOCK@10..21
+              WHITESPACE@10..13 "\n  "
+              SINGLE_LINE_COMMENT@13..17 "// c"
+              WHITESPACE@17..20 "\n  "
+              LBRACE@20..20 ""
+              ERROR@20..21
+                RPAREN@20..21 ")"
+              SEMICOLON@21..21 ""
+              RBRACE@21..21 ""
+          RULE_SET@21..31
+            SELECTOR_LIST@21..24
+              SELECTOR@21..24
+                SIMPLE_SELECTOR@21..24
+                  WHITESPACE@21..22 "\n"
+                  DOT@22..23 "."
+                  IDENT@23..24 "e"
+            BLOCK@24..31
+              LBRACE@24..24 ""
+              DECLARATION@24..31
+                PROPERTY@24..28
+                  WHITESPACE@24..27 "\n  "
+                  IDENT@27..28 "f"
+                COLON@28..29 ":"
+                VALUE@29..31
+                  VALUE@29..31
+                    WHITESPACE@29..30 " "
+                    IDENT@30..31 "g"
+                SEMICOLON@31..31 ""
+              RBRACE@31..31 ""
+          WHITESPACE@31..32 "\n"
+        errors:
+          20..21: expected declaration or nested rule
+    "#]],
+    );
+}
+
+#[test]
+fn nested_include_with_comment_only_content_block_keeps_its_siblings() {
+    check_tree(
+        ".a\n  @include foo\n    // c\n    // d\n  b: c\n",
+        expect![[r#"
+        SOURCE_FILE@0..43
+          RULE_SET@0..42
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            BLOCK@2..42
+              LBRACE@2..2 ""
+              INCLUDE_RULE@2..35
+                WHITESPACE@2..5 "\n  "
+                AT@5..6 "@"
+                IDENT@6..13 "include"
+                WHITESPACE@13..14 " "
+                IDENT@14..17 "foo"
+                BLOCK@17..35
+                  WHITESPACE@17..22 "\n    "
+                  SINGLE_LINE_COMMENT@22..26 "// c"
+                  WHITESPACE@26..31 "\n    "
+                  SINGLE_LINE_COMMENT@31..35 "// d"
+                  LBRACE@35..35 ""
+                  RBRACE@35..35 ""
+              DECLARATION@35..42
+                PROPERTY@35..39
+                  WHITESPACE@35..38 "\n  "
+                  IDENT@38..39 "b"
+                COLON@39..40 ":"
+                VALUE@40..42
+                  VALUE@40..42
+                    WHITESPACE@40..41 " "
+                    IDENT@41..42 "c"
+                SEMICOLON@42..42 ""
+              RBRACE@42..42 ""
+          WHITESPACE@42..43 "\n"
+    "#]],
+    );
+}

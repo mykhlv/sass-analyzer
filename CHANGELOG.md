@@ -87,6 +87,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and produced a cascade of errors. It is now treated as an operator only inside a value
   or an expression-taking directive header. This was the largest source of failures in the
   real-world indented-Sass corpus: 63 errors across 12 files, in Vuetify and Quasar
+- Indented Sass: an at-rule whose indented body holds only comments — a `@mixin`,
+  `@include`, `@media` or `@if` with a `//` or `/* */` line under it and nothing else — no
+  longer swallows the statements that follow it. The body stayed open past the dedent, so
+  the next rule and everything after it were **silently** moved inside the at-rule, and the
+  rule itself lost its block. It surfaced only as a misleading "`@else` without preceding
+  `@if`" when an `@else` followed. A comment line between a header and its indented
+  continuation (`@for $i`, then a comment, then `from 1 through 3`) is still skipped, as
+  Dart Sass does
 
 ### Documentation
 - Corrected the 0.3.3 indented-Sass compliance figure: it reported 100% (346/346), the

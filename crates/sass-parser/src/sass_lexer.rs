@@ -604,7 +604,19 @@ fn process_newline<'src>(
             }
         }
     } else {
-        // No content on this line (blank or comment-only) — still handle dedent
+        // No content on this line (blank or comment-only). A deferred block-open survives
+        // comment lines, since a header may continue after one (`@for $i` / `// c` /
+        // `from 1 through 3`). A dedent ends that wait: the comments were the whole body,
+        // so open it here for the loop below to close. Left pending, it would open at the
+        // next statement and swallow everything after it.
+        if let Some(pending_indent) = *pending_lbrace
+            && new_indent <= current_indent
+        {
+            result.push((SyntaxKind::LBRACE, ""));
+            indent_stack.push(pending_indent);
+            *pending_lbrace = None;
+            ctx.end();
+        }
         while indent_stack.len() > 1 && *indent_stack.last().unwrap() > new_indent {
             indent_stack.pop();
             result.push((SyntaxKind::RBRACE, ""));
