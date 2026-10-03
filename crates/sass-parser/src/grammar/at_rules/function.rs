@@ -7,6 +7,7 @@ pub fn function_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // function
+    p.continue_header(&super::lines::FUNCTION);
     p.expect(IDENT); // name
     if p.at(LPAREN) {
         super::param_list(p);
@@ -28,6 +29,7 @@ pub fn css_function_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // function/FUNCTION
+    p.continue_header(&super::lines::FUNCTION);
 
     // Consume function name: `--name`, `--#{interp}`, `--foo#{bar}`, etc.
     let mut consumed_name = false;
@@ -68,6 +70,7 @@ pub fn return_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // return
+    p.continue_header(&super::lines::EXPRESSION);
     super::expressions::sass_value_list(p, super::ParseContext::SassScript);
     if !p.at(RBRACE) && !p.at_end() {
         p.expect(SEMICOLON);

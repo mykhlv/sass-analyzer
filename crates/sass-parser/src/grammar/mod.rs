@@ -1,9 +1,10 @@
 pub(crate) mod at_rules;
 mod declarations;
 pub(crate) mod expressions;
+mod lines;
 pub(crate) mod selectors;
 
-use crate::parser::Parser;
+use crate::parser::{Joined, Parser};
 #[allow(clippy::wildcard_imports)]
 use crate::syntax_kind::*;
 
@@ -35,7 +36,7 @@ pub fn source_file(p: &mut Parser<'_>) {
 
 /// Parse a single top-level item with error recovery.
 fn top_level_item(p: &mut Parser<'_>) {
-    if p.at(AT) {
+    if p.at(AT) || p.at_shorthand() {
         at_rules::at_rule(p);
     } else if p.at(DOLLAR) {
         expressions::variable_declaration(p);
@@ -48,15 +49,16 @@ fn top_level_item(p: &mut Parser<'_>) {
     } else {
         let m = p.start();
         p.error("expected rule");
-        p.bump();
+        lines::bump_in_run(p);
         while !p.at_end()
             && !p.at(AT)
+            && !p.at_shorthand()
             && !p.at_ts(selectors::SELECTOR_START)
             && !p.at_ts(selectors::COMBINATOR_TOKEN)
             && !p.at(SEMICOLON)
             && !p.at(DOLLAR)
         {
-            p.bump();
+            lines::bump_in_run(p);
         }
         let _ = m.complete(p, SyntaxKind::ERROR);
     }
@@ -90,11 +92,18 @@ fn at_namespace_var_assignment(p: &Parser<'_>) -> bool {
 /// Parse `ns.$var: value;` namespace variable assignment.
 fn namespace_variable_assignment(p: &mut Parser<'_>) {
     let m = p.start();
+    // Only a declaration that starts a statement goes on across lines.
+    let statement = p.at_statement_start();
+    if statement {
+        p.continue_header(&lines::VARIABLE);
+    }
     p.bump(); // IDENT (namespace)
     p.bump(); // DOT
     p.bump(); // DOLLAR
     p.expect(IDENT); // variable name
-    p.expect(COLON);
+    if p.expect(COLON) && statement {
+        p.continue_line();
+    }
     if !p.at(SEMICOLON) && !p.at(RBRACE) && !p.at_end() {
         expressions::sass_value_list(p, ParseContext::SassScript);
     }
@@ -107,7 +116,7 @@ fn namespace_variable_assignment(p: &mut Parser<'_>) {
 /// Parse a single item inside a block.
 /// Disambiguates between rule sets and declarations.
 fn block_item(p: &mut Parser<'_>) {
-    if p.at(AT) {
+    if p.at(AT) || p.at_shorthand() {
         at_rules::at_rule(p);
     } else if p.at(DOLLAR) {
         expressions::variable_declaration(p);
@@ -118,7 +127,7 @@ fn block_item(p: &mut Parser<'_>) {
     } else if p.at_ts(selectors::SELECTOR_START) || p.at_ts(selectors::COMBINATOR_TOKEN) {
         rule_set(p);
     } else {
-        p.err_and_bump("expected declaration or nested rule");
+        lines::err_and_bump(p, "expected declaration or nested rule");
     }
 }
 
@@ -129,68 +138,72 @@ fn block_item(p: &mut Parser<'_>) {
 /// - `IDENT COLON LBRACE` — nested property
 /// - `HASH_LBRACE ... RBRACE [fragments] COLON` — interpolated property name
 /// - `IDENT("--") HASH_LBRACE ... RBRACE [fragments] COLON` — custom property with interpolation
+///
+/// The scan reads on across the line breaks the grammar will absorb (after a comma or an
+/// operator), so that it sees the whole statement in the indented syntax too.
 fn looks_like_declaration(p: &Parser<'_>) -> bool {
+    let j = p.joined(lines::LINE_JOINS);
     if p.at(HASH_LBRACE) {
-        return looks_like_interpolated_declaration(p);
+        return looks_like_interpolated_declaration(p, j);
     }
     // `-#{"foo"}-bar: b` — property name starting with hyphen then interpolation
-    if p.at(MINUS) && p.nth(1) == HASH_LBRACE {
-        return scan_past_interpolated_name(p, 1).is_some_and(|offset| {
-            if p.nth(offset) != COLON {
+    if p.at(MINUS) && p.nth_joined(j, 1) == HASH_LBRACE {
+        return scan_past_interpolated_name(p, j, 1).is_some_and(|offset| {
+            if p.nth_joined(j, offset) != COLON {
                 return false;
             }
-            if p.nth(offset + 1) == LBRACE {
+            if p.nth_joined(j, offset + 1) == LBRACE {
                 return true;
             }
-            scan_for_declaration_end(p, offset + 1)
+            scan_for_declaration_end(p, j, offset + 1)
         });
     }
     // IE star-hack: `*width: 100px`
-    if p.at(STAR) && p.nth(1) == IDENT && p.nth(2) == COLON {
-        return scan_for_declaration_end(p, 3);
+    if p.at(STAR) && p.nth_joined(j, 1) == IDENT && p.nth_joined(j, 2) == COLON {
+        return scan_for_declaration_end(p, j, 3);
     }
     if !p.at(IDENT) {
         return false;
     }
     // Property with interpolation in name: `margin-#{$side}: val`, `--#{$prefix}name: val`
-    if p.nth(1) == HASH_LBRACE {
-        return scan_past_interpolated_name(p, 1).is_some_and(|offset| {
-            if p.nth(offset) != COLON {
+    if p.nth_joined(j, 1) == HASH_LBRACE {
+        return scan_past_interpolated_name(p, j, 1).is_some_and(|offset| {
+            if p.nth_joined(j, offset) != COLON {
                 return false;
             }
-            if p.nth(offset + 1) == LBRACE {
+            if p.nth_joined(j, offset + 1) == LBRACE {
                 return true; // nested property: #{$prop}: { sub: val }
             }
-            scan_for_declaration_end(p, offset + 1)
+            scan_for_declaration_end(p, j, offset + 1)
         });
     }
-    if p.nth(1) != COLON {
+    if p.nth_joined(j, 1) != COLON {
         return false;
     }
     // 2.10: IDENT COLON LBRACE → nested property
-    if p.nth(2) == LBRACE {
+    if p.nth_joined(j, 2) == LBRACE {
         return true;
     }
-    scan_for_declaration_end(p, 2)
+    scan_for_declaration_end(p, j, 2)
 }
 
 /// Check if `#{...}[fragments]COLON` looks like a declaration with interpolated property.
-fn looks_like_interpolated_declaration(p: &Parser<'_>) -> bool {
-    scan_past_interpolated_name(p, 0).is_some_and(|offset| {
-        if p.nth(offset) != COLON {
+fn looks_like_interpolated_declaration(p: &Parser<'_>, j: Joined) -> bool {
+    scan_past_interpolated_name(p, j, 0).is_some_and(|offset| {
+        if p.nth_joined(j, offset) != COLON {
             return false;
         }
-        if p.nth(offset + 1) == LBRACE {
+        if p.nth_joined(j, offset + 1) == LBRACE {
             return true; // nested property: #{$prop}: { sub: val }
         }
-        scan_for_declaration_end(p, offset + 1)
+        scan_for_declaration_end(p, j, offset + 1)
     })
 }
 
 /// Scan past `HASH_LBRACE ... RBRACE [IDENT|MINUS|HASH_LBRACE...]` starting at `start`
 /// (which must point at a `HASH_LBRACE`).
 /// Returns the offset after the property name fragments, or `None` if scan exceeds budget.
-fn scan_past_interpolated_name(p: &Parser<'_>, start: usize) -> Option<usize> {
+fn scan_past_interpolated_name(p: &Parser<'_>, j: Joined, start: usize) -> Option<usize> {
     const MAX_SCAN: usize = 100;
     let limit = start + MAX_SCAN;
     let mut offset = start + 1; // past HASH_LBRACE
@@ -200,7 +213,7 @@ fn scan_past_interpolated_name(p: &Parser<'_>, start: usize) -> Option<usize> {
         if offset >= limit {
             return None;
         }
-        match p.nth(offset) {
+        match p.nth_joined(j, offset) {
             EOF => return None,
             LBRACE | HASH_LBRACE => depth += 1,
             RBRACE => {
@@ -219,7 +232,7 @@ fn scan_past_interpolated_name(p: &Parser<'_>, start: usize) -> Option<usize> {
         if offset >= limit {
             return None;
         }
-        match p.nth(offset) {
+        match p.nth_joined(j, offset) {
             IDENT | MINUS => offset += 1,
             HASH_LBRACE => {
                 // Skip another interpolation
@@ -229,7 +242,7 @@ fn scan_past_interpolated_name(p: &Parser<'_>, start: usize) -> Option<usize> {
                     if offset >= limit {
                         return None;
                     }
-                    match p.nth(offset) {
+                    match p.nth_joined(j, offset) {
                         EOF => return None,
                         LBRACE | HASH_LBRACE => d += 1,
                         RBRACE => {
@@ -261,9 +274,9 @@ fn scan_past_interpolated_name(p: &Parser<'_>, start: usize) -> Option<usize> {
 /// `{` first a selector — unless an unambiguously-value token (`NUMBER`, `QUOTED_STRING`,
 /// `DOLLAR`, etc.) precedes the `{`. Scan is bounded to avoid O(n²) behavior on
 /// pathological inputs.
-fn scan_for_declaration_end(p: &Parser<'_>, start: usize) -> bool {
+fn scan_for_declaration_end(p: &Parser<'_>, j: Joined, start: usize) -> bool {
     const MAX_SCAN: usize = 100;
-    if !could_start_pseudo_class(p, start) {
+    if !could_start_pseudo_class(p, j, start) {
         return true;
     }
     let mut depth: u32 = 0;
@@ -281,7 +294,7 @@ fn scan_for_declaration_end(p: &Parser<'_>, start: usize) -> bool {
         }
         // Inside interpolation #{...} — skip until matching RBRACE
         if brace_depth > 0 {
-            match p.nth(offset) {
+            match p.nth_joined(j, offset) {
                 EOF => return true,
                 HASH_LBRACE | LBRACE => brace_depth += 1,
                 RBRACE => brace_depth -= 1,
@@ -290,7 +303,7 @@ fn scan_for_declaration_end(p: &Parser<'_>, start: usize) -> bool {
             offset += 1;
             continue;
         }
-        match p.nth(offset) {
+        match p.nth_joined(j, offset) {
             EOF => return true,
             HASH_LBRACE => brace_depth += 1,
             LBRACE if depth == 0 => return has_value_only_token,
@@ -311,15 +324,15 @@ fn scan_for_declaration_end(p: &Parser<'_>, start: usize) -> bool {
 }
 
 /// Whether the token at `offset`, right after a colon, could be a pseudo-class name.
-fn could_start_pseudo_class(p: &Parser<'_>, offset: usize) -> bool {
-    if p.nth_has_whitespace_before(offset) {
+fn could_start_pseudo_class(p: &Parser<'_>, j: Joined, offset: usize) -> bool {
+    if p.nth_has_whitespace_before_joined(j, offset) {
         return false;
     }
-    match p.nth(offset) {
+    match p.nth_joined(j, offset) {
         IDENT | HASH_LBRACE => true,
         MINUS => {
-            matches!(p.nth(offset + 1), IDENT | HASH_LBRACE)
-                && !p.nth_has_whitespace_before(offset + 1)
+            matches!(p.nth_joined(j, offset + 1), IDENT | HASH_LBRACE)
+                && !p.nth_has_whitespace_before_joined(j, offset + 1)
         }
         _ => false,
     }
@@ -391,10 +404,11 @@ pub(crate) fn block(p: &mut Parser<'_>) {
             || g.at(MINUS)
             || g.at_ts(selectors::SELECTOR_START)
             || g.at_ts(selectors::COMBINATOR_TOKEN)
+            || g.at_shorthand()
         {
             block_item(&mut g);
         } else {
-            g.err_and_bump("expected declaration or nested rule");
+            lines::err_and_bump(&mut g, "expected declaration or nested rule");
         }
     }
     g.expect(RBRACE);
@@ -421,13 +435,14 @@ pub(crate) fn generic_at_rule_block(p: &mut Parser<'_>) {
             || g.at(MINUS)
             || g.at_ts(selectors::SELECTOR_START)
             || g.at_ts(selectors::COMBINATOR_TOKEN)
+            || g.at_shorthand()
         {
             block_item(&mut g);
         } else if g.at(NUMBER) {
             // Keyframe selector: `10% { ... }`, `from { ... }`
             generic_keyframe_block(&mut g);
         } else {
-            g.err_and_bump("expected declaration or nested rule");
+            lines::err_and_bump(&mut g, "expected declaration or nested rule");
         }
     }
     g.expect(RBRACE);
@@ -476,12 +491,12 @@ pub(crate) fn css_function_block(p: &mut Parser<'_>) {
     while !g.at(RBRACE) && !g.at_end() {
         if g.at(SEMICOLON) {
             g.bump();
-        } else if g.at(AT) {
+        } else if g.at(AT) || g.at_shorthand() {
             at_rules::at_rule(&mut g);
         } else if g.at(IDENT) || g.at(HASH_LBRACE) || g.at(MINUS) || g.at(STAR) {
             declarations::css_function_body_declaration(&mut g);
         } else {
-            g.err_and_bump("expected declaration");
+            lines::err_and_bump(&mut g, "expected declaration");
         }
     }
     g.expect(RBRACE);

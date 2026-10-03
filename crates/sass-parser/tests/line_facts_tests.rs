@@ -3,6 +3,10 @@ use std::fmt::Write;
 use expect_test::{Expect, expect};
 use sass_parser::input::{IndentKind, Input, LineBreak};
 
+#[path = "common/layout_allow_list.rs"]
+mod layout_allow_list;
+#[path = "common/layout_differential.rs"]
+mod layout_differential;
 #[path = "common/line_facts.rs"]
 mod line_facts;
 #[path = "common/virtual_tokens.rs"]
@@ -59,6 +63,19 @@ fn check(source: &str, expect: Expect) {
     expect.assert_eq(&render(source));
     let mismatches = line_facts::line_fact_mismatches(source);
     assert!(mismatches.is_empty(), "{source:?}: {mismatches:#?}");
+    assert_layout_matches_legacy(source);
+}
+
+/// `parse_sass_layout` gives legacy's tree, or the input is on the allow-list.
+#[track_caller]
+fn assert_layout_matches_legacy(source: &str) {
+    if let Some((legacy, layout)) = layout_differential::layout_mismatch(source) {
+        assert!(
+            layout_allow_list::allowed(source).is_some(),
+            "parse_sass_layout disagrees with parse_sass_legacy on {source:?}:\n{}",
+            layout_differential::first_difference(&legacy, &layout),
+        );
+    }
 }
 
 // ── Facts ────────────────────────────────────────────────────────────
@@ -419,6 +436,13 @@ fn facts_match_legacy_on_layout_inputs() {
         })
         .collect();
     assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+fn layout_frontend_matches_legacy_on_layout_inputs() {
+    for source in LAYOUT_INPUTS {
+        assert_layout_matches_legacy(source);
+    }
 }
 
 #[test]

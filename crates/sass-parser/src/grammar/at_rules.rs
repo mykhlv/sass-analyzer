@@ -20,6 +20,7 @@ use super::block;
 use super::declarations;
 use super::expressions;
 use super::expressions::interpolation;
+use super::lines;
 use super::selectors;
 
 /// Check whether `@function` names a CSS function (custom property or interpolated name).
@@ -31,6 +32,14 @@ fn is_css_function_rule(p: &Parser<'_>) -> bool {
 
 /// Dispatch `@keyword` — called when parser is at `AT`.
 pub fn at_rule(p: &mut Parser<'_>) {
+    if p.at_shorthand() {
+        if p.at(EQ) {
+            mixin::mixin_rule(p);
+        } else {
+            mixin::include_rule(p);
+        }
+        return;
+    }
     assert!(p.at(AT));
 
     // Interpolated at-rule name: `@#{...}`, `@foo#{...}bar`
@@ -106,7 +115,7 @@ fn generic_at_rule(p: &mut Parser<'_>) {
         if p.at(HASH_LBRACE) {
             let _ = interpolation(p);
         } else {
-            p.bump();
+            lines::bump_in_run(p);
         }
         consumed_name = true;
     }
@@ -117,7 +126,7 @@ fn generic_at_rule(p: &mut Parser<'_>) {
         } else if p.at(HASH_LBRACE) {
             let _ = interpolation(p);
         } else {
-            p.bump();
+            lines::bump_in_run(p);
         }
     }
     if p.at(LBRACE) {
@@ -164,7 +173,7 @@ pub(super) fn eat_opaque_condition(p: &mut Parser<'_>, stop: TokenSet) {
             HASH_LBRACE => {
                 let _ = interpolation(p);
             }
-            _ => p.bump(),
+            _ => lines::bump_in_run(p),
         }
     }
 }

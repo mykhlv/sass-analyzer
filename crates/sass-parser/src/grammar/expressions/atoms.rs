@@ -23,7 +23,7 @@ pub(super) fn atom(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMar
         SLASH => {
             // Bare `/` as value atom (e.g., `(1, / 2)` or `$path: /images;`)
             let m = p.start();
-            p.bump();
+            super::super::lines::bump_operator(p);
             Some(m.complete(p, VALUE))
         }
         AMP => {
@@ -185,14 +185,14 @@ fn ident_or_call(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarke
 
 fn standalone_percent(p: &mut Parser<'_>) -> CompletedMarker {
     let m = p.start();
-    p.bump(); // %
+    super::super::lines::bump_operator(p); // %
     m.complete(p, STANDALONE_PERCENT)
 }
 
 fn bang_dispatch(p: &mut Parser<'_>) -> CompletedMarker {
     // !important, !default, !global, !optional
     let m = p.start();
-    p.bump(); // !
+    super::super::lines::bump_operator(p); // !
     if p.at(IDENT) {
         let text = p.current_text();
         if text == "important" {

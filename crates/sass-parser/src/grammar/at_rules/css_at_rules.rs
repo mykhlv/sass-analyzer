@@ -16,6 +16,7 @@ pub fn layer_rule(p: &mut Parser<'_>) {
         layer_name(p);
         // Comma-separated multiple names → statement form
         while p.eat(COMMA) {
+            p.continue_line_across_blank();
             if at_layer_name(p) {
                 layer_name(p);
             }
@@ -65,6 +66,7 @@ pub fn container_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // container
+    p.continue_header(&super::lines::CONTAINER);
 
     // Optional container name (ident before parenthesized condition)
     if p.at(IDENT) {
@@ -84,6 +86,7 @@ pub fn scope_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // scope
+    p.continue_header(&super::lines::SCOPE);
 
     super::eat_opaque_condition(p, BLOCK_STOP);
 
@@ -152,6 +155,7 @@ pub fn charset_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // charset
+    p.continue_header(&super::lines::CHARSET);
     p.expect(QUOTED_STRING);
     if !p.at(RBRACE) && !p.at_end() {
         p.expect(SEMICOLON);

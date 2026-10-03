@@ -76,6 +76,7 @@ pub(crate) fn sass_value(p: &mut Parser<'_>, ctx: ParseContext) -> Option<Comple
         if p.at(SLASH) {
             // CSS separator: `11px/1.5`, `font: 12px/1.4 sans-serif`
             p.bump();
+            p.continue_line();
         } else if p.at_ts(EXPR_START) {
             expr(p, ctx);
         } else {
@@ -95,6 +96,7 @@ pub(crate) fn sass_value_list(p: &mut Parser<'_>, ctx: ParseContext) -> Option<C
     }
     let m = first.precede(p);
     while p.eat(COMMA) {
+        p.continue_line_across_blank();
         if !at_value_end(p) {
             sass_value(p, ctx);
         }
@@ -126,7 +128,9 @@ fn expr_bp(p: &mut Parser<'_>, min_bp: u8, ctx: ParseContext) -> Option<Complete
             // In that case, `-` is unary prefix of the next token, not infix.
             // We peek: if next-next token has no whitespace before it relative to `-`,
             // then it's a unary operator binding to the next token.
-            let next_has_ws = g.nth_has_whitespace_before(1);
+            // A line break after the operator counts, where the line goes on.
+            let joined = g.joined(super::lines::LINE_JOINS);
+            let next_has_ws = g.nth_has_whitespace_before_joined(joined, 1);
             if !next_has_ws {
                 break;
             }
@@ -140,7 +144,7 @@ fn expr_bp(p: &mut Parser<'_>, min_bp: u8, ctx: ParseContext) -> Option<Complete
         }
 
         let m = lhs.precede(&mut g);
-        g.bump(); // operator
+        super::lines::bump_operator(&mut g);
         expr_bp(&mut g, r_bp, ctx);
         lhs = m.complete(&mut g, BINARY_EXPR);
     }
@@ -157,6 +161,7 @@ fn lhs(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarker> {
     if let Some(r_bp) = prefix_bp(kind, text, ctx) {
         let m = p.start();
         p.bump(); // operator
+        p.continue_line();
         expr_bp(p, r_bp, ctx);
         return Some(m.complete(p, UNARY_EXPR));
     }
@@ -169,18 +174,31 @@ fn lhs(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarker> {
 /// Parse `$var: expr !default? !global?;`
 pub fn variable_declaration(p: &mut Parser<'_>) {
     let m = p.start();
+    // Only a declaration that starts a statement goes on across lines.
+    let statement = p.at_statement_start();
+    if statement {
+        p.continue_header(&super::lines::VARIABLE);
+    }
     p.bump(); // $
     p.expect(IDENT);
-    p.expect(COLON);
+    if p.expect(COLON) && statement {
+        p.continue_line();
+    }
 
     sass_value_list(p, ParseContext::SassScript);
 
     // Parse flags: !default, !global (can co-occur)
     while p.at(BANG) {
-        let flag_text = if p.nth(1) == IDENT { p.nth_text(1) } else { "" };
+        let joined = p.joined(super::lines::LINE_JOINS);
+        let flag_text = if p.nth_joined(joined, 1) == IDENT {
+            p.nth_text_joined(joined, 1)
+        } else {
+            ""
+        };
         if flag_text == "default" || flag_text == "global" {
             let fm = p.start();
             p.bump(); // !
+            p.continue_line();
             p.bump(); // default/global
             let _ = fm.complete(p, SASS_FLAG);
         } else {

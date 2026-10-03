@@ -7,6 +7,7 @@ pub fn use_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // use
+    p.continue_header(&super::lines::MODULE);
 
     // Path — must be a non-interpolated string
     if p.at(STRING_START) {
@@ -46,6 +47,7 @@ pub fn forward_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // forward
+    p.continue_header(&super::lines::MODULE);
 
     // Path
     if p.at(STRING_START) {
@@ -84,6 +86,7 @@ pub fn forward_rule(p: &mut Parser<'_>) {
                 if p.at(IDENT) || p.at(DOLLAR) {
                     visibility_member(p);
                     while p.eat(COMMA) {
+                        p.continue_line_across_blank();
                         visibility_member(p);
                     }
                 } else {
@@ -160,10 +163,12 @@ pub fn import_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // import
+    p.continue_header(&super::lines::MODULE);
 
     // Parse one or more import paths (comma-separated)
     import_argument(p);
     while p.eat(COMMA) {
+        p.continue_line_across_blank();
         import_argument(p);
     }
 
@@ -230,7 +235,7 @@ fn import_conditions(p: &mut Parser<'_>) {
             }
             _ => {
                 has_conditions = true;
-                p.bump();
+                super::lines::bump_in_run(p);
             }
         }
     }
