@@ -44,7 +44,7 @@ impl<'src> LastSig<'src> {
 /// Facts about the statement currently being lexed.
 ///
 /// These are independent rather than exclusive — `$a: 1` sets `after_dollar` and
-/// `saw_colon` at once, `@page :first` sets `after_at` and `saw_colon` — so this is a set
+/// `saw_colon` at once, `@foo a: b` sets `after_at` and `saw_colon` — so this is a set
 /// of flags, not a state machine. What they share is a lifetime: all of them are cleared
 /// together, by `end`, at every point where a statement finishes or a block opens.
 #[derive(Default)]
@@ -53,10 +53,9 @@ struct StmtCtx<'src> {
     after_at: bool,
     /// DOLLAR has been seen at statement start (for `$var\n  : value` continuation).
     after_dollar: bool,
-    /// A top-level COLON has been seen. An approximation of "we are in a value", used to
-    /// decide whether a trailing `*` is arithmetic or a universal selector. Deliberately
-    /// over-approximates: a pseudo-class colon sets it too, which is the `.a:hover > *`
-    /// limitation pinned in the tests.
+    /// A top-level COLON that is not directly followed by an identifier has been seen. An
+    /// approximation of "we are in a value", used to decide whether a trailing `*` (or
+    /// `and`/`or`/`not`) is an operator or part of a selector.
     saw_colon: bool,
     /// The directive keyword (first IDENT after AT). Meaningless unless `after_at`, and
     /// every read is guarded by it.
@@ -257,10 +256,11 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
             _ => {
                 result.push((kind, text));
                 saw_content = true;
-                // `::` lexes as a single COLON_COLON, so pseudo-elements never land here
-                // — splitting it into two COLON tokens would widen the pseudo-class
-                // limitation to every `::before > *`.
-                if kind == SyntaxKind::COLON && nesting == 0 {
+                // A colon directly followed by an identifier is a pseudo-class, as Dart
+                // Sass reads `foo:bar` in the indented syntax: setting the flag there
+                // turns the `*` of `.a:hover > *` into multiplication and swallows the
+                // block below. `::` lexes as a single COLON_COLON and never lands here.
+                if kind == SyntaxKind::COLON && nesting == 0 && !starts_identifier(&raw[i + 1..]) {
                     ctx.saw_colon = true;
                 }
                 // Track when this IDENT is the directive keyword name (first IDENT after AT).
@@ -295,6 +295,18 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
     }
 
     result
+}
+
+/// Whether `tokens` begins with something that can start an identifier, with no whitespace
+/// before it. Mirrors the parser's pseudo-class check.
+fn starts_identifier(tokens: &[(SyntaxKind, &str)]) -> bool {
+    match tokens {
+        [(SyntaxKind::IDENT | SyntaxKind::HASH_LBRACE, _), ..] => true,
+        [(SyntaxKind::MINUS, _), (next, _), ..] => {
+            matches!(next, SyntaxKind::IDENT | SyntaxKind::HASH_LBRACE)
+        }
+        _ => false,
+    }
 }
 
 fn is_continuation_keyword(text: &str) -> bool {
