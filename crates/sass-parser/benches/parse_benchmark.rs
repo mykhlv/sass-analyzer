@@ -196,6 +196,20 @@ fn parse_vuetify_sass(bencher: Bencher<'_, '_>) {
         .bench_values(sass_parser::parse_sass);
 }
 
+/// The same corpus through the frontend in which the parser, not the lexer, decides
+/// where statements end; it must keep up with `parse_vuetify_sass`.
+#[divan::bench]
+fn parse_layout_vuetify_sass(bencher: Bencher<'_, '_>) {
+    let source = &*VUETIFY_SASS;
+    if source.is_empty() {
+        return;
+    }
+    bencher
+        .counter(divan::counter::BytesCount::of_str(source))
+        .with_inputs(|| source.as_str())
+        .bench_values(sass_parser::parse_sass_layout);
+}
+
 // ── Incremental reparse benchmarks ──────────────────────────────────────
 
 /// Prepare an incremental edit scenario: parse old source, apply a single-char
