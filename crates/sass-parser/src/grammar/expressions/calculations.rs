@@ -18,6 +18,15 @@ const CALC_VALUE_START: TokenSet = TokenSet::new(&[
 pub(super) fn calculation(p: &mut Parser<'_>) -> CompletedMarker {
     let m = p.start();
     p.bump(); // function name (calc, min, max, etc.)
+    if p.at(LPAREN) {
+        calculation_args(&mut p.transparent_guard());
+    } else {
+        calculation_args(p);
+    }
+    m.complete(p, CALCULATION)
+}
+
+fn calculation_args(p: &mut Parser<'_>) {
     p.expect(LPAREN);
 
     if !p.at(RPAREN) && !p.at_end() {
@@ -30,7 +39,6 @@ pub(super) fn calculation(p: &mut Parser<'_>) -> CompletedMarker {
     }
 
     p.expect(RPAREN);
-    m.complete(p, CALCULATION)
 }
 
 /// Parse calc sum: `a + b` or `a - b` (lowest precedence inside calc).
@@ -114,6 +122,7 @@ fn calc_value(p: &mut Parser<'_>) {
             let _ = interpolation(&mut g);
         }
         LPAREN => {
+            let mut g = g.transparent_guard();
             g.bump(); // (
             calc_sum(&mut g);
             g.expect(RPAREN);

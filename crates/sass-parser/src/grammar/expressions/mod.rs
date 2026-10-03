@@ -219,12 +219,15 @@ pub fn variable_declaration(p: &mut Parser<'_>) {
 pub fn interpolation(p: &mut Parser<'_>) -> CompletedMarker {
     assert!(p.at(HASH_LBRACE));
     let m = p.start();
-    p.bump(); // #{
-    if p.at(RBRACE) {
-        p.error("expected expression");
-    } else if !p.at_end() {
-        sass_value_list(p, ParseContext::SassScript);
+    {
+        let mut g = p.transparent_guard();
+        g.bump(); // #{
+        if g.at(RBRACE) {
+            g.error("expected expression");
+        } else if !g.at_end() {
+            sass_value_list(&mut g, ParseContext::SassScript);
+        }
+        g.expect(RBRACE);
     }
-    p.expect(RBRACE);
     m.complete(p, INTERPOLATION)
 }

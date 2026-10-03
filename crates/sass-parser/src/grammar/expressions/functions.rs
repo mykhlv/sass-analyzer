@@ -199,6 +199,7 @@ pub(super) fn function_call(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedM
 /// Parse argument list `(...)` for function calls and `@include`.
 pub(crate) fn arg_list(p: &mut Parser<'_>, ctx: ParseContext) {
     assert!(p.at(LPAREN));
+    let p = &mut *p.transparent_guard();
     let m = p.start();
     p.bump(); // (
 
@@ -296,6 +297,8 @@ fn special_function_call(p: &mut Parser<'_>) -> CompletedMarker {
         return m.complete(p, VALUE);
     }
 
+    let mut g = p.transparent_guard();
+    let p = &mut *g;
     p.bump(); // (
 
     // Consume everything inside as opaque tokens until matching `)`

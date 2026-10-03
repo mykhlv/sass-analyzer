@@ -140,6 +140,7 @@ fn generic_at_rule(p: &mut Parser<'_>) {
 /// Consume balanced delimiters (parens, brackets) including outer pair.
 pub(super) fn eat_balanced(p: &mut Parser<'_>, open: SyntaxKind, close: SyntaxKind) {
     assert!(p.at(open));
+    let p = &mut *p.transparent_guard();
     p.bump();
     let mut depth: u32 = 1;
     while !p.at_end() && depth > 0 {
@@ -181,6 +182,7 @@ pub(super) fn eat_opaque_condition(p: &mut Parser<'_>, stop: TokenSet) {
 /// Parse a parameter list for @mixin/@function: `($name, $name: default, $rest...)`.
 pub fn param_list(p: &mut Parser<'_>) {
     assert!(p.at(LPAREN));
+    let p = &mut *p.transparent_guard();
     let m = p.start();
     p.bump(); // (
 

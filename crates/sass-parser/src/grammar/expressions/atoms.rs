@@ -211,6 +211,10 @@ fn bang_dispatch(p: &mut Parser<'_>) -> CompletedMarker {
 // ── Parenthesized expr / map ───────────────────────────────────────
 
 fn paren_or_map(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
+    paren_or_map_in_brackets(&mut p.transparent_guard(), ctx)
+}
+
+fn paren_or_map_in_brackets(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
     assert!(p.at(LPAREN));
     let m = p.start();
     p.bump(); // (
@@ -300,6 +304,7 @@ fn finish_map(
 
 fn bracketed_list(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
     assert!(p.at(LBRACKET));
+    let p = &mut *p.transparent_guard();
     let m = p.start();
     p.bump(); // [
     if !p.at(RBRACKET) && !p.at_end() {

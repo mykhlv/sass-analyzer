@@ -70,6 +70,12 @@ fn allow_listed_defects_report_what_they_should() {
     assert_eq!(error_count(".a\n    .b\n      c: d\n  .e\n    f: g\n"), 1);
     assert_eq!(error_count(".a\n\tcolor: red\n        b: c\n"), 1);
     assert_eq!(error_count(".a\n  \tcolor: red\n  \tb: c\n"), 1);
+    // An unclosed bracket: one error, and the rules after it parse.
+    let source = ".a\n  b: fn(1\n.c\n  d: e\n.f\n  g: h\n";
+    assert_eq!(error_count(source), 1);
+    let tree = render(parse_sass_layout, source);
+    assert_eq!(tree.matches("RULE_SET@").count(), 3, "{tree}");
+    assert_eq!(tree.matches("DECLARATION@").count(), 3, "{tree}");
     // The loud comments of sass-spec's `loud.hrx`.
     let loud = layout_allow_list::allow_list()
         .into_iter()
@@ -394,4 +400,88 @@ fn shorthands_read_as_at_rules() {
 #[test]
 fn a_combinator_alone_on_its_line_does_not_continue_it() {
     check_same(".a\n  >\n    b: c\n");
+}
+
+// ── Brackets ─────────────────────────────────────────────────────────
+
+#[test]
+fn line_breaks_inside_brackets_are_whitespace() {
+    check_same("$m: (\n  a: 1,\n    b: 2\n)\n.x\n  c: map-get($m,\n'a')\n");
+}
+
+#[test]
+fn an_unclosed_bracket_without_an_error_runs_to_the_end_of_the_input() {
+    // No error inside the bracket, so nothing recovers early.
+    check_same(".a:not(.b\n  c: d\n");
+}
+
+#[test]
+fn an_error_inside_a_bracket_that_closes_changes_nothing() {
+    // The error makes the bracket stop at a line no deeper than the one it opened on, but
+    // it closes before any such line.
+    check_same(".a\n  b: fn(1, !\n    2)\n  c: d\n");
+}
+
+#[test]
+fn unclosed_brackets_inside_a_closed_one_unwind_with_it() {
+    check(
+        ".a\n  b: f(g(1 ]\n.c\n  d: e\n",
+        expect![[r#"
+            SOURCE_FILE@0..26
+              RULE_SET@0..15
+                SELECTOR_LIST@0..2
+                  SELECTOR@0..2
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "a"
+                BLOCK@2..15
+                  LBRACE@2..2 ""
+                  DECLARATION@2..15
+                    PROPERTY@2..6
+                      WHITESPACE@2..5 "\n  "
+                      IDENT@5..6 "b"
+                    COLON@6..7 ":"
+                    VALUE@7..15
+                      FUNCTION_CALL@7..13
+                        WHITESPACE@7..8 " "
+                        IDENT@8..9 "f"
+                        ARG_LIST@9..13
+                          LPAREN@9..10 "("
+                          ARG@10..13
+                            FUNCTION_CALL@10..13
+                              IDENT@10..11 "g"
+                              ARG_LIST@11..13
+                                LPAREN@11..12 "("
+                                ARG@12..13
+                                  NUMBER_LITERAL@12..13
+                                    NUMBER@12..13 "1"
+                      WHITESPACE@13..14 " "
+                      RBRACKET@14..15 "]"
+                    SEMICOLON@15..15 ""
+                  RBRACE@15..15 ""
+              RULE_SET@15..25
+                SELECTOR_LIST@15..18
+                  SELECTOR@15..18
+                    SIMPLE_SELECTOR@15..18
+                      WHITESPACE@15..16 "\n"
+                      DOT@16..17 "."
+                      IDENT@17..18 "c"
+                BLOCK@18..25
+                  LBRACE@18..18 ""
+                  DECLARATION@18..25
+                    PROPERTY@18..22
+                      WHITESPACE@18..21 "\n  "
+                      IDENT@21..22 "d"
+                    COLON@22..23 ":"
+                    VALUE@23..25
+                      VALUE@23..25
+                        WHITESPACE@23..24 " "
+                        IDENT@24..25 "e"
+                    SEMICOLON@25..25 ""
+                  RBRACE@25..25 ""
+              WHITESPACE@25..26 "\n"
+            error 14..15: expected RPAREN
+            error 14..15: expected RPAREN
+        "#]],
+    );
 }

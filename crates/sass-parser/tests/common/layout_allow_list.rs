@@ -707,5 +707,134 @@ pub fn allow_list() -> Vec<Allowed> {
                 error 9..14: unterminated comment
             "#]],
         },
+        Allowed {
+            input: ".a\n  b: fn(1\n.c\n  d: e\n.f\n  g: h\n",
+            change: "an unclosed bracket made every later line break plain whitespace, so \
+                     the rest of the file joined the declaration; once its error is \
+                     reported, the bracket ends at the next line no deeper than the one it \
+                     opened on (Dart: one error, `Expected digit.`)",
+            expected: expect![[r#"
+                SOURCE_FILE@0..33
+                  RULE_SET@0..12
+                    SELECTOR_LIST@0..2
+                      SELECTOR@0..2
+                        SIMPLE_SELECTOR@0..2
+                          DOT@0..1 "."
+                          IDENT@1..2 "a"
+                    BLOCK@2..12
+                      LBRACE@2..2 ""
+                      DECLARATION@2..12
+                        PROPERTY@2..6
+                          WHITESPACE@2..5 "\n  "
+                          IDENT@5..6 "b"
+                        COLON@6..7 ":"
+                        VALUE@7..12
+                          FUNCTION_CALL@7..12
+                            WHITESPACE@7..8 " "
+                            IDENT@8..10 "fn"
+                            ARG_LIST@10..12
+                              LPAREN@10..11 "("
+                              ARG@11..12
+                                NUMBER_LITERAL@11..12
+                                  NUMBER@11..12 "1"
+                        SEMICOLON@12..12 ""
+                      RBRACE@12..12 ""
+                  RULE_SET@12..22
+                    SELECTOR_LIST@12..15
+                      SELECTOR@12..15
+                        SIMPLE_SELECTOR@12..15
+                          WHITESPACE@12..13 "\n"
+                          DOT@13..14 "."
+                          IDENT@14..15 "c"
+                    BLOCK@15..22
+                      LBRACE@15..15 ""
+                      DECLARATION@15..22
+                        PROPERTY@15..19
+                          WHITESPACE@15..18 "\n  "
+                          IDENT@18..19 "d"
+                        COLON@19..20 ":"
+                        VALUE@20..22
+                          VALUE@20..22
+                            WHITESPACE@20..21 " "
+                            IDENT@21..22 "e"
+                        SEMICOLON@22..22 ""
+                      RBRACE@22..22 ""
+                  RULE_SET@22..32
+                    SELECTOR_LIST@22..25
+                      SELECTOR@22..25
+                        SIMPLE_SELECTOR@22..25
+                          WHITESPACE@22..23 "\n"
+                          DOT@23..24 "."
+                          IDENT@24..25 "f"
+                    BLOCK@25..32
+                      LBRACE@25..25 ""
+                      DECLARATION@25..32
+                        PROPERTY@25..29
+                          WHITESPACE@25..28 "\n  "
+                          IDENT@28..29 "g"
+                        COLON@29..30 ":"
+                        VALUE@30..32
+                          VALUE@30..32
+                            WHITESPACE@30..31 " "
+                            IDENT@31..32 "h"
+                        SEMICOLON@32..32 ""
+                      RBRACE@32..32 ""
+                  WHITESPACE@32..33 "\n"
+                error 13..14: expected RPAREN
+            "#]],
+        },
+        Allowed {
+            input: ".a\n  b: fn(1\n.c\n  d: e\n",
+            change: "an unclosed bracket, as above, from the `parse_sass_legacy` tests",
+            expected: expect![[r#"
+                SOURCE_FILE@0..23
+                  RULE_SET@0..12
+                    SELECTOR_LIST@0..2
+                      SELECTOR@0..2
+                        SIMPLE_SELECTOR@0..2
+                          DOT@0..1 "."
+                          IDENT@1..2 "a"
+                    BLOCK@2..12
+                      LBRACE@2..2 ""
+                      DECLARATION@2..12
+                        PROPERTY@2..6
+                          WHITESPACE@2..5 "\n  "
+                          IDENT@5..6 "b"
+                        COLON@6..7 ":"
+                        VALUE@7..12
+                          FUNCTION_CALL@7..12
+                            WHITESPACE@7..8 " "
+                            IDENT@8..10 "fn"
+                            ARG_LIST@10..12
+                              LPAREN@10..11 "("
+                              ARG@11..12
+                                NUMBER_LITERAL@11..12
+                                  NUMBER@11..12 "1"
+                        SEMICOLON@12..12 ""
+                      RBRACE@12..12 ""
+                  RULE_SET@12..22
+                    SELECTOR_LIST@12..15
+                      SELECTOR@12..15
+                        SIMPLE_SELECTOR@12..15
+                          WHITESPACE@12..13 "\n"
+                          DOT@13..14 "."
+                          IDENT@14..15 "c"
+                    BLOCK@15..22
+                      LBRACE@15..15 ""
+                      DECLARATION@15..22
+                        PROPERTY@15..19
+                          WHITESPACE@15..18 "\n  "
+                          IDENT@18..19 "d"
+                        COLON@19..20 ":"
+                        VALUE@20..22
+                          VALUE@20..22
+                            WHITESPACE@20..21 " "
+                            IDENT@21..22 "e"
+                        SEMICOLON@22..22 ""
+                      RBRACE@22..22 ""
+                  WHITESPACE@22..23 "\n"
+                error 13..14: expected RPAREN
+            "#]],
+        },
     ]
 }

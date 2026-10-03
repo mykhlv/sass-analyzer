@@ -126,6 +126,7 @@ fn with_config(p: &mut Parser<'_>) {
         p.error("expected `(`");
         return;
     }
+    let p = &mut *p.transparent_guard();
     p.bump(); // (
 
     if p.at(RPAREN) {

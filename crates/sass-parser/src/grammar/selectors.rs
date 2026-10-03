@@ -220,6 +220,7 @@ pub fn interpolation(p: &mut Parser<'_>) -> CompletedMarker {
 /// Consume `(...)` balanced parentheses, treating content as opaque.
 fn eat_balanced_parens(p: &mut Parser<'_>) {
     assert!(p.at(LPAREN));
+    let p = &mut *p.transparent_guard();
     p.bump(); // (
     let mut depth: u32 = 1;
     while !p.at_end() && depth > 0 {
@@ -240,6 +241,7 @@ fn eat_balanced_parens(p: &mut Parser<'_>) {
 /// Consume `[...]` balanced brackets, treating content as opaque.
 fn eat_balanced_brackets(p: &mut Parser<'_>) {
     assert!(p.at(LBRACKET));
+    let p = &mut *p.transparent_guard();
     p.bump(); // [
     let mut depth: u32 = 1;
     while !p.at_end() && depth > 0 {

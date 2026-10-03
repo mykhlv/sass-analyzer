@@ -31,6 +31,7 @@ pub fn at_root_rule(p: &mut Parser<'_>) {
 /// Parse `(with: media supports)` or `(without: rule all)`
 fn at_root_query(p: &mut Parser<'_>) {
     assert!(p.at(LPAREN));
+    let p = &mut *p.transparent_guard();
     let m = p.start();
     p.bump(); // (
 
