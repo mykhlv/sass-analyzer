@@ -1,8 +1,13 @@
+mod indented;
+
 use crate::event::Event;
 use crate::input::Input;
 use crate::syntax_kind::SyntaxKind;
 use crate::text_range::{TextRange, TextSize};
 use crate::token_set::TokenSet;
+
+use indented::IndentedState;
+pub use indented::{HeaderLines, Joined};
 
 const MAX_DEPTH: u32 = 256;
 
@@ -11,6 +16,10 @@ const MAX_DEPTH: u32 = 256;
 pub enum Layout {
     /// By real `{`, `}` and `;` tokens. The only fence is the end of input.
     Braced,
+    /// By line breaks and indentation, as in indented Sass. A line break the grammar
+    /// does not absorb ends the statement before it, and its indentation opens or
+    /// closes blocks: the parser reads those as zero-width `;`, `{` and `}`.
+    Indented,
 }
 
 /// The first position at or after the cursor where the token stream stops being the
@@ -41,35 +50,55 @@ pub struct Parser<'src> {
     layout: Layout,
     fence: Fence,
     /// Brackets (`()`, `[]`, `#{}`) the cursor is inside, counted by
-    /// [`TransparentGuard`]. Line breaks there are plain trivia.
+    /// [`TransparentGuard`]. Line breaks there are plain trivia: the input records how
+    /// deep in brackets each one lies, and the guards end a bracket that an error left
+    /// unclosed.
     transparent: u32,
     /// The last virtual token emitted: the cursor position and the trivia index it
     /// went at. Trivia before that index lies in front of it, not in front of the
     /// token at the cursor, which `has_whitespace_before` must not see.
     last_virtual: (usize, u32),
+    /// Layout state of [`Layout::Indented`]; unused when braced.
+    indented: IndentedState,
 }
 
 impl<'src> Parser<'src> {
     pub fn new(input: Input, source: &'src str) -> Self {
+        Self::with_layout(input, source, Layout::Braced)
+    }
+
+    /// A parser for `layout`. [`Layout::Indented`] needs the input's layout facts, so its
+    /// input must come from [`Input::from_source_indented`].
+    pub fn with_layout(input: Input, source: &'src str, layout: Layout) -> Self {
         let estimated_events = input.len().saturating_mul(2);
         let fence = eof_fence(&input);
-        Self {
+        let mut parser = Self {
             input,
             source,
             pos: 0,
             events: Vec::with_capacity(estimated_events),
             error_messages: Vec::new(),
             depth: 0,
-            layout: Layout::Braced,
+            layout,
             fence,
             transparent: 0,
             last_virtual: (usize::MAX, 0),
+            indented: IndentedState::new(),
+        };
+        if layout == Layout::Indented {
+            parser.find_line_start(0);
+            parser.fence = parser.locate_indented();
         }
+        parser
     }
 
-    pub fn finish(self) -> (Vec<Event>, Vec<String>, Input, &'src str) {
+    pub fn finish(mut self) -> (Vec<Event>, Vec<String>, Input, &'src str) {
         debug_assert_eq!(self.depth, 0, "depth guard leaked");
         debug_assert_eq!(self.transparent, 0, "transparent guard leaked");
+        self.indented.debug_assert_finished();
+        if self.layout == Layout::Indented {
+            self.report_unterminated_comment();
+        }
         (self.events, self.error_messages, self.input, self.source)
     }
 
@@ -105,6 +134,15 @@ impl<'src> Parser<'src> {
     #[inline]
     pub fn at_end(&self) -> bool {
         self.pos >= self.fence.index && self.fence.kind == SyntaxKind::EOF
+    }
+
+    /// The kind of the input token before the cursor, zero-width tokens aside; `EOF` at
+    /// the start of the input.
+    pub fn prev_kind(&self) -> SyntaxKind {
+        match self.pos.checked_sub(1) {
+            Some(prev) => self.input.kind(prev),
+            None => SyntaxKind::EOF,
+        }
     }
 
     /// Returns `false` for pos 0 (no preceding significant token) or at EOF.
@@ -162,6 +200,14 @@ impl<'src> Parser<'src> {
         self.pos += 1;
     }
 
+    /// Bump the current token as `kind` rather than the kind it was lexed as.
+    pub fn bump_remap(&mut self, kind: SyntaxKind) {
+        debug_assert!(self.pos < self.fence.index, "bump_remap at a fence");
+        let range = self.input.range(self.pos);
+        self.events.push(Event::Token { kind, range });
+        self.pos += 1;
+    }
+
     #[cold]
     #[inline(never)]
     fn bump_virtual(&mut self) {
@@ -174,13 +220,17 @@ impl<'src> Parser<'src> {
         debug_assert_eq!(index, self.pos);
         self.events.push(Event::Virtual { kind, trivia });
         self.last_virtual = (index, trivia);
+        if self.layout == Layout::Indented {
+            self.virtual_bumped(kind);
+        }
         self.fence = self.locate_fence();
     }
 
     /// The fence ahead of the cursor, from the layout's state.
-    fn locate_fence(&self) -> Fence {
+    fn locate_fence(&mut self) -> Fence {
         match self.layout {
             Layout::Braced => eof_fence(&self.input),
+            Layout::Indented => self.locate_indented(),
         }
     }
 
@@ -220,11 +270,21 @@ impl<'src> Parser<'src> {
     pub fn error(&mut self, msg: impl Into<String>) {
         let range = if self.pos < self.fence.index {
             self.input.range(self.pos)
-        } else if self.fence.kind == SyntaxKind::EOF {
-            TextRange::empty(TextSize::of(self.source))
-        } else {
+        } else if self.fence.kind != SyntaxKind::EOF {
             TextRange::empty(self.virtual_offset())
+        } else if self.fence.index < self.input.len() {
+            // A bracket's recovery point, which reads as the end of input.
+            self.input.range(self.fence.index)
+        } else {
+            TextRange::empty(TextSize::of(self.source))
         };
+        self.error_at(range, msg);
+        if self.layout == Layout::Indented {
+            self.error_reported();
+        }
+    }
+
+    fn error_at(&mut self, range: TextRange, msg: impl Into<String>) {
         let msg_len = self.error_messages.len();
         debug_assert!(
             u32::try_from(msg_len).is_ok(),
@@ -270,12 +330,15 @@ impl<'src> Parser<'src> {
 
     // ── Layout scopes ────────────────────────────────────────────────
 
-    /// Enter a bracketed construct (`()`, `[]`, `#{}`), where line breaks are plain
-    /// trivia whatever the layout. The scope ends when the guard drops, so a bracket
-    /// left unclosed by an error does not outlive the function that opened it.
+    /// Enter a bracketed construct (`()`, `[]`, `#{}`) at its opening token, where line
+    /// breaks are plain trivia whatever the layout. The scope ends when the guard drops,
+    /// so a bracket left unclosed by an error does not outlive the function that opened
+    /// it: in the indented layout, the line breaks after it count again.
     pub fn transparent_guard(&mut self) -> TransparentGuard<'_, 'src> {
         self.transparent += 1;
-        self.fence = self.locate_fence();
+        if self.layout == Layout::Indented {
+            self.enter_bracket();
+        }
         TransparentGuard { parser: self }
     }
 }
@@ -434,7 +497,9 @@ impl<'src> std::ops::DerefMut for TransparentGuard<'_, 'src> {
 impl Drop for TransparentGuard<'_, '_> {
     fn drop(&mut self) {
         self.parser.transparent -= 1;
-        self.parser.fence = self.parser.locate_fence();
+        if self.parser.layout == Layout::Indented {
+            self.parser.exit_bracket();
+        }
     }
 }
 
@@ -515,6 +580,58 @@ mod tests {
                 range: crate::text_range::TextRange::empty(7.into()),
             })
         );
+    }
+
+    /// Bump every token the indented layout presents, real or zero-width, and list
+    /// them: `{}` and `;` for the zero-width ones, the source text for the others.
+    fn indented_stream(source: &str) -> (String, Vec<String>) {
+        let input = Input::from_source_indented(source);
+        let mut p = Parser::with_layout(input, source, super::Layout::Indented);
+        let mut out = Vec::new();
+        while !p.at_end() {
+            let text = p.current_text();
+            out.push(if text.is_empty() {
+                format!("<{:?}>", p.current())
+            } else {
+                text.to_owned()
+            });
+            p.bump();
+        }
+        let (_, errors, _, _) = p.finish();
+        (out.join(" "), errors)
+    }
+
+    #[test]
+    fn indentation_opens_and_closes_blocks_and_ends_statements() {
+        let (stream, errors) = indented_stream(".a\n  b: c\n  .d\n    e: f\n.g\n");
+        assert_eq!(
+            stream,
+            ". a <LBRACE> b : c <SEMICOLON> . d <LBRACE> e : f <SEMICOLON> <RBRACE> <RBRACE> . g \
+             <SEMICOLON>",
+        );
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn brackets_and_comment_lines_do_not_end_statements() {
+        let (stream, _) = indented_stream("$a: f(1,\n2)\n  // c\n$b: 3\n");
+        assert_eq!(
+            stream, "$ a : f ( 1 , 2 ) <LBRACE> <RBRACE> $ b : 3 <SEMICOLON>",
+            "the comment line deeper than the statement opens a block that it closes",
+        );
+    }
+
+    #[test]
+    fn indentation_whitespace_at_the_end_opens_no_block() {
+        let (stream, _) = indented_stream(".a\n  b: c\n    ");
+        assert_eq!(stream, ". a <LBRACE> b : c <SEMICOLON> <RBRACE>");
+    }
+
+    #[test]
+    fn a_dedent_to_no_open_column_is_reported_once_per_line() {
+        let (stream, errors) = indented_stream(".a\n    .b\n      c: d\n  .e\n    f: g\n");
+        assert!(stream.contains("<RBRACE> <RBRACE> . e"), "{stream}");
+        assert_eq!(errors, ["inconsistent indentation, expected 4 spaces"]);
     }
 
     #[test]
