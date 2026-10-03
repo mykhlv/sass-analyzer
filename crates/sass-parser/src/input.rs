@@ -339,6 +339,12 @@ impl Input {
         );
         let start = self.trivia_starts[pos] as usize;
         let end = self.trivia_starts[pos + 1] as usize;
+        self.has_whitespace_in(start, end)
+    }
+
+    /// Whether any of the trivia tokens `start..end` of [`Input::all_trivia`] is whitespace.
+    #[inline]
+    pub fn has_whitespace_in(&self, start: usize, end: usize) -> bool {
         self.all_trivia[start..end]
             .iter()
             .any(|(kind, _)| *kind == SyntaxKind::WHITESPACE)
