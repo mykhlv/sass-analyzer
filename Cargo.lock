@@ -776,6 +776,7 @@ name = "sass-lsp"
 version = "0.3.4"
 dependencies = [
  "dashmap 6.2.1",
+ "expect-test",
  "sass-parser",
  "serde",
  "serde_json",

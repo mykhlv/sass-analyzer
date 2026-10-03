@@ -26,6 +26,7 @@ mod folding_ranges;
 mod goto_definition;
 mod highlights;
 mod hover;
+mod indented_sass;
 mod inlay_hints;
 mod references_rename;
 mod sassdoc;
@@ -40,6 +41,17 @@ fn file_uri(path: &Path) -> String {
     tower_lsp_server::ls_types::Uri::from_file_path(path)
         .expect("failed to convert path to URI")
         .to_string()
+}
+
+/// `languageId` for a `didOpen`, matching the URI's extension. The server picks
+/// the parser from the extension, so this only keeps the request realistic.
+fn language_id(uri: &str) -> &'static str {
+    let uri: tower_lsp_server::ls_types::Uri = uri.parse().expect("valid test URI");
+    if crate::worker::is_sass_file(&uri) {
+        "sass"
+    } else {
+        "scss"
+    }
 }
 
 /// Send a JSON-RPC message with Content-Length framing.
