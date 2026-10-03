@@ -95,6 +95,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `@if`" when an `@else` followed. A comment line between a header and its indented
   continuation (`@for $i`, then a comment, then `from 1 through 3`) is still skipped, as
   Dart Sass does
+- Indented Sass: nested properties written as `font:` with `family: fantasy` and
+  `size: 30em` indented under it now parse as a nested property. A colon at the end of a
+  line always glued the next line on, so the block **silently** became a rule set with the
+  selector `font:family:fantasy`, and only the last child stayed a declaration. As in Dart
+  Sass, a colon at the end of a line now continues only a variable declaration
+  (`$a:` or `ns.$a:` with the value on the next line); after a property name it opens the
+  nested block. The same change stops `font:` with no value from swallowing the
+  declaration on the line below it
 
 ### Documentation
 - Corrected the 0.3.3 indented-Sass compliance figure: it reported 100% (346/346), the

@@ -3277,3 +3277,348 @@ fn nested_include_with_comment_only_content_block_keeps_its_siblings() {
     "#]],
     );
 }
+
+// ── Colon at end of line ─────────────────────────────────────────────
+//
+// Dart Sass consumes the newline after the colon only in a variable declaration. After a
+// property name the colon at end of line opens the property's nested children.
+
+#[test]
+fn nested_property_without_a_value_opens_a_block() {
+    check_tree(
+        ".funky\n  font:\n    family: fantasy\n    size: 30em\n",
+        expect![[r#"
+            SOURCE_FILE@0..50
+              RULE_SET@0..49
+                SELECTOR_LIST@0..6
+                  SELECTOR@0..6
+                    SIMPLE_SELECTOR@0..6
+                      DOT@0..1 "."
+                      IDENT@1..6 "funky"
+                BLOCK@6..49
+                  LBRACE@6..6 ""
+                  NESTED_PROPERTY@6..49
+                    PROPERTY@6..13
+                      WHITESPACE@6..9 "\n  "
+                      IDENT@9..13 "font"
+                    COLON@13..14 ":"
+                    BLOCK@14..49
+                      LBRACE@14..14 ""
+                      DECLARATION@14..34
+                        PROPERTY@14..25
+                          WHITESPACE@14..19 "\n    "
+                          IDENT@19..25 "family"
+                        COLON@25..26 ":"
+                        VALUE@26..34
+                          VALUE@26..34
+                            WHITESPACE@26..27 " "
+                            IDENT@27..34 "fantasy"
+                        SEMICOLON@34..34 ""
+                      DECLARATION@34..49
+                        PROPERTY@34..43
+                          WHITESPACE@34..39 "\n    "
+                          IDENT@39..43 "size"
+                        COLON@43..44 ":"
+                        VALUE@44..49
+                          DIMENSION@44..49
+                            WHITESPACE@44..45 " "
+                            NUMBER@45..47 "30"
+                            IDENT@47..49 "em"
+                        SEMICOLON@49..49 ""
+                      RBRACE@49..49 ""
+                  RBRACE@49..49 ""
+              WHITESPACE@49..50 "\n"
+        "#]],
+    );
+}
+
+#[test]
+fn nested_property_with_a_value_opens_a_block() {
+    check_tree(
+        ".funky\n  font: 12px\n    family: x\n",
+        expect![[r#"
+        SOURCE_FILE@0..34
+          RULE_SET@0..33
+            SELECTOR_LIST@0..6
+              SELECTOR@0..6
+                SIMPLE_SELECTOR@0..6
+                  DOT@0..1 "."
+                  IDENT@1..6 "funky"
+            BLOCK@6..33
+              LBRACE@6..6 ""
+              NESTED_PROPERTY@6..33
+                PROPERTY@6..13
+                  WHITESPACE@6..9 "\n  "
+                  IDENT@9..13 "font"
+                COLON@13..14 ":"
+                VALUE@14..19
+                  DIMENSION@14..19
+                    WHITESPACE@14..15 " "
+                    NUMBER@15..17 "12"
+                    IDENT@17..19 "px"
+                BLOCK@19..33
+                  LBRACE@19..19 ""
+                  DECLARATION@19..33
+                    PROPERTY@19..30
+                      WHITESPACE@19..24 "\n    "
+                      IDENT@24..30 "family"
+                    COLON@30..31 ":"
+                    VALUE@31..33
+                      VALUE@31..33
+                        WHITESPACE@31..32 " "
+                        IDENT@32..33 "x"
+                    SEMICOLON@33..33 ""
+                  RBRACE@33..33 ""
+              RBRACE@33..33 ""
+          WHITESPACE@33..34 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn variable_colon_at_end_of_line_still_continues() {
+    check_tree(
+        "$a:\n  1px\n.x\n  b: $a\n",
+        expect![[r#"
+        SOURCE_FILE@0..21
+          VARIABLE_DECL@0..9
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "a"
+            COLON@2..3 ":"
+            DIMENSION@3..9
+              WHITESPACE@3..6 "\n  "
+              NUMBER@6..7 "1"
+              IDENT@7..9 "px"
+            SEMICOLON@9..9 ""
+          RULE_SET@9..20
+            SELECTOR_LIST@9..12
+              SELECTOR@9..12
+                SIMPLE_SELECTOR@9..12
+                  WHITESPACE@9..10 "\n"
+                  DOT@10..11 "."
+                  IDENT@11..12 "x"
+            BLOCK@12..20
+              LBRACE@12..12 ""
+              DECLARATION@12..20
+                PROPERTY@12..16
+                  WHITESPACE@12..15 "\n  "
+                  IDENT@15..16 "b"
+                COLON@16..17 ":"
+                VALUE@17..20
+                  VARIABLE_REF@17..20
+                    WHITESPACE@17..18 " "
+                    DOLLAR@18..19 "$"
+                    IDENT@19..20 "a"
+                SEMICOLON@20..20 ""
+              RBRACE@20..20 ""
+          WHITESPACE@20..21 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn namespaced_variable_colon_at_end_of_line_still_continues() {
+    check_tree(
+        "math.$pi:\n  1\n.x\n  b: c\n",
+        expect![[r#"
+        SOURCE_FILE@0..24
+          VARIABLE_DECL@0..13
+            IDENT@0..4 "math"
+            DOT@4..5 "."
+            DOLLAR@5..6 "$"
+            IDENT@6..8 "pi"
+            COLON@8..9 ":"
+            NUMBER_LITERAL@9..13
+              WHITESPACE@9..12 "\n  "
+              NUMBER@12..13 "1"
+            SEMICOLON@13..13 ""
+          RULE_SET@13..23
+            SELECTOR_LIST@13..16
+              SELECTOR@13..16
+                SIMPLE_SELECTOR@13..16
+                  WHITESPACE@13..14 "\n"
+                  DOT@14..15 "."
+                  IDENT@15..16 "x"
+            BLOCK@16..23
+              LBRACE@16..16 ""
+              DECLARATION@16..23
+                PROPERTY@16..20
+                  WHITESPACE@16..19 "\n  "
+                  IDENT@19..20 "b"
+                COLON@20..21 ":"
+                VALUE@21..23
+                  VALUE@21..23
+                    WHITESPACE@21..22 " "
+                    IDENT@22..23 "c"
+                SEMICOLON@23..23 ""
+              RBRACE@23..23 ""
+          WHITESPACE@23..24 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn nested_variable_colon_at_end_of_line_still_continues() {
+    check_tree(
+        ".x\n  $c:\n    2\n  d: $c\n",
+        expect![[r#"
+        SOURCE_FILE@0..23
+          RULE_SET@0..22
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "x"
+            BLOCK@2..22
+              LBRACE@2..2 ""
+              VARIABLE_DECL@2..14
+                WHITESPACE@2..5 "\n  "
+                DOLLAR@5..6 "$"
+                IDENT@6..7 "c"
+                COLON@7..8 ":"
+                NUMBER_LITERAL@8..14
+                  WHITESPACE@8..13 "\n    "
+                  NUMBER@13..14 "2"
+                SEMICOLON@14..14 ""
+              DECLARATION@14..22
+                PROPERTY@14..18
+                  WHITESPACE@14..17 "\n  "
+                  IDENT@17..18 "d"
+                COLON@18..19 ":"
+                VALUE@19..22
+                  VARIABLE_REF@19..22
+                    WHITESPACE@19..20 " "
+                    DOLLAR@20..21 "$"
+                    IDENT@21..22 "c"
+                SEMICOLON@22..22 ""
+              RBRACE@22..22 ""
+          WHITESPACE@22..23 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn keyword_argument_colon_at_end_of_line_inside_parens_is_unaffected() {
+    check_tree(
+        ".x\n  +foo($a:\n    1)\n  d: e\n",
+        expect![[r#"
+        SOURCE_FILE@0..28
+          RULE_SET@0..27
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "x"
+            BLOCK@2..27
+              LBRACE@2..2 ""
+              INCLUDE_RULE@2..20
+                WHITESPACE@2..5 "\n  "
+                AT@5..5 ""
+                IDENT@5..6 "+"
+                IDENT@6..9 "foo"
+                ARG_LIST@9..20
+                  LPAREN@9..10 "("
+                  ARG@10..19
+                    DOLLAR@10..11 "$"
+                    IDENT@11..12 "a"
+                    COLON@12..13 ":"
+                    NUMBER_LITERAL@13..19
+                      WHITESPACE@13..18 "\n    "
+                      NUMBER@18..19 "1"
+                  RPAREN@19..20 ")"
+                SEMICOLON@20..20 ""
+              DECLARATION@20..27
+                PROPERTY@20..24
+                  WHITESPACE@20..23 "\n  "
+                  IDENT@23..24 "d"
+                COLON@24..25 ":"
+                VALUE@25..27
+                  VALUE@25..27
+                    WHITESPACE@25..26 " "
+                    IDENT@26..27 "e"
+                SEMICOLON@27..27 ""
+              RBRACE@27..27 ""
+          WHITESPACE@27..28 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn nested_property_with_a_bare_value_under_it_is_an_error() {
+    // Dart Sass: "Expected identifier." — the indented line is read as children.
+    check_tree(
+        ".x\n  b:\n    1px\n",
+        expect![[r#"
+        SOURCE_FILE@0..16
+          RULE_SET@0..15
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "x"
+            BLOCK@2..15
+              LBRACE@2..2 ""
+              NESTED_PROPERTY@2..15
+                PROPERTY@2..6
+                  WHITESPACE@2..5 "\n  "
+                  IDENT@5..6 "b"
+                COLON@6..7 ":"
+                BLOCK@7..15
+                  LBRACE@7..7 ""
+                  ERROR@7..13
+                    WHITESPACE@7..12 "\n    "
+                    NUMBER@12..13 "1"
+                  RULE_SET@13..15
+                    SELECTOR_LIST@13..15
+                      SELECTOR@13..15
+                        SIMPLE_SELECTOR@13..15
+                          IDENT@13..15 "px"
+                  SEMICOLON@15..15 ""
+                  RBRACE@15..15 ""
+              RBRACE@15..15 ""
+          WHITESPACE@15..16 "\n"
+        errors:
+          12..13: expected declaration or nested rule
+    "#]],
+    );
+}
+
+#[test]
+fn property_colon_at_end_of_line_does_not_glue_the_next_line_on() {
+    // The next line is a sibling declaration, not the value of `font`. Dart Sass rejects
+    // the empty value ("Expected expression."); the parser accepts an empty value in SCSS
+    // too (`color: ;`), so this pins the split rather than a diagnostic.
+    check_tree(
+        ".x\n  font:\n  size: 1px\n",
+        expect![[r#"
+        SOURCE_FILE@0..23
+          RULE_SET@0..22
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "x"
+            BLOCK@2..22
+              LBRACE@2..2 ""
+              DECLARATION@2..10
+                PROPERTY@2..9
+                  WHITESPACE@2..5 "\n  "
+                  IDENT@5..9 "font"
+                COLON@9..10 ":"
+                SEMICOLON@10..10 ""
+              DECLARATION@10..22
+                PROPERTY@10..17
+                  WHITESPACE@10..13 "\n  "
+                  IDENT@13..17 "size"
+                COLON@17..18 ":"
+                VALUE@18..22
+                  DIMENSION@18..22
+                    WHITESPACE@18..19 " "
+                    NUMBER@19..20 "1"
+                    IDENT@20..22 "px"
+                SEMICOLON@22..22 ""
+              RBRACE@22..22 ""
+          WHITESPACE@22..23 "\n"
+    "#]],
+    );
+}
