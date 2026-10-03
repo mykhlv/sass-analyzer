@@ -428,10 +428,10 @@ fn mixin_and_include() {
                 WHITESPACE@6..7 " "
                 IDENT@7..10 "foo"
                 BLOCK@10..23
-                  WHITESPACE@10..13 "\n  "
-                  LBRACE@13..13 ""
-                  DECLARATION@13..23
-                    PROPERTY@13..18
+                  LBRACE@10..10 ""
+                  DECLARATION@10..23
+                    PROPERTY@10..18
+                      WHITESPACE@10..13 "\n  "
                       IDENT@13..18 "color"
                     COLON@18..19 ":"
                     VALUE@19..23
@@ -477,10 +477,10 @@ fn if_else() {
                   DOLLAR@4..5 "$"
                   IDENT@5..9 "cond"
                 BLOCK@9..22
-                  WHITESPACE@9..12 "\n  "
-                  LBRACE@12..12 ""
-                  DECLARATION@12..22
-                    PROPERTY@12..17
+                  LBRACE@9..9 ""
+                  DECLARATION@9..22
+                    PROPERTY@9..17
+                      WHITESPACE@9..12 "\n  "
                       IDENT@12..17 "color"
                     COLON@17..18 ":"
                     VALUE@18..22
@@ -494,10 +494,10 @@ fn if_else() {
                   AT@23..24 "@"
                   IDENT@24..28 "else"
                   BLOCK@28..42
-                    WHITESPACE@28..31 "\n  "
-                    LBRACE@31..31 ""
-                    DECLARATION@31..42
-                      PROPERTY@31..36
+                    LBRACE@28..28 ""
+                    DECLARATION@28..42
+                      PROPERTY@28..36
+                        WHITESPACE@28..31 "\n  "
                         IDENT@31..36 "color"
                       COLON@36..37 ":"
                       VALUE@37..42
@@ -531,9 +531,9 @@ fn nested_if_else_in_function_tree() {
                     IDENT@15..17 "bg"
                   RPAREN@17..18 ")"
                 BLOCK@18..88
-                  WHITESPACE@18..21 "\n  "
-                  LBRACE@21..21 ""
-                  VARIABLE_DECL@21..28
+                  LBRACE@18..18 ""
+                  VARIABLE_DECL@18..28
+                    WHITESPACE@18..21 "\n  "
                     DOLLAR@21..22 "$"
                     IDENT@22..23 "x"
                     COLON@23..24 ":"
@@ -556,9 +556,9 @@ fn nested_if_else_in_function_tree() {
                         WHITESPACE@39..40 " "
                         NUMBER@40..43 "128"
                     BLOCK@43..61
-                      WHITESPACE@43..48 "\n    "
-                      LBRACE@48..48 ""
-                      RETURN_RULE@48..61
+                      LBRACE@43..43 ""
+                      RETURN_RULE@43..61
+                        WHITESPACE@43..48 "\n    "
                         AT@48..49 "@"
                         IDENT@49..55 "return"
                         VARIABLE_REF@55..61
@@ -572,9 +572,9 @@ fn nested_if_else_in_function_tree() {
                       AT@64..65 "@"
                       IDENT@65..69 "else"
                       BLOCK@69..88
-                        WHITESPACE@69..74 "\n    "
-                        LBRACE@74..74 ""
-                        RETURN_RULE@74..88
+                        LBRACE@69..69 ""
+                        RETURN_RULE@69..88
+                          WHITESPACE@69..74 "\n    "
                           AT@74..75 "@"
                           IDENT@75..81 "return"
                           VARIABLE_REF@81..88
@@ -609,9 +609,9 @@ fn nested_if_no_else_in_function_tree() {
                     IDENT@15..16 "s"
                   RPAREN@16..17 ")"
                 BLOCK@17..62
-                  WHITESPACE@17..20 "\n  "
-                  LBRACE@20..20 ""
-                  VARIABLE_DECL@20..25
+                  LBRACE@17..17 ""
+                  VARIABLE_DECL@17..25
+                    WHITESPACE@17..20 "\n  "
                     DOLLAR@20..21 "$"
                     IDENT@21..22 "i"
                     COLON@22..23 ":"
@@ -628,9 +628,9 @@ fn nested_if_no_else_in_function_tree() {
                       DOLLAR@32..33 "$"
                       IDENT@33..34 "i"
                     BLOCK@34..49
-                      WHITESPACE@34..39 "\n    "
-                      LBRACE@39..39 ""
-                      RETURN_RULE@39..49
+                      LBRACE@34..34 ""
+                      RETURN_RULE@34..49
+                        WHITESPACE@34..39 "\n    "
                         AT@39..40 "@"
                         IDENT@40..46 "return"
                         VARIABLE_REF@46..49
@@ -1190,29 +1190,29 @@ fn colon_continuation_broken_by_blank_line() {
     check_tree(
         "$var:\n\n  value\n",
         expect![[r#"
-        SOURCE_FILE@0..15
-          VARIABLE_DECL@0..5
-            DOLLAR@0..1 "$"
-            IDENT@1..4 "var"
-            COLON@4..5 ":"
-          ERROR@5..9
-            WHITESPACE@5..9 "\n\n  "
-            LBRACE@9..9 ""
-          RULE_SET@9..14
-            SELECTOR_LIST@9..14
-              SELECTOR@9..14
-                SIMPLE_SELECTOR@9..14
-                  IDENT@9..14 "value"
-          SEMICOLON@14..14 ""
-          ERROR@14..14
-            RBRACE@14..14 ""
-          WHITESPACE@14..15 "\n"
-        errors:
-          9..9: expected expression
-          9..9: expected SEMICOLON
-          9..9: expected rule
-          14..14: expected rule
-    "#]],
+            SOURCE_FILE@0..15
+              VARIABLE_DECL@0..5
+                DOLLAR@0..1 "$"
+                IDENT@1..4 "var"
+                COLON@4..5 ":"
+              ERROR@5..5
+                LBRACE@5..5 ""
+              RULE_SET@5..14
+                SELECTOR_LIST@5..14
+                  SELECTOR@5..14
+                    SIMPLE_SELECTOR@5..14
+                      WHITESPACE@5..9 "\n\n  "
+                      IDENT@9..14 "value"
+              SEMICOLON@14..14 ""
+              ERROR@14..14
+                RBRACE@14..14 ""
+              WHITESPACE@14..15 "\n"
+            errors:
+              5..5: expected expression
+              5..5: expected SEMICOLON
+              5..5: expected rule
+              14..14: expected rule
+        "#]],
     );
 }
 
@@ -1594,32 +1594,32 @@ fn function_body_starts_after_params() {
     check_tree(
         "@function foo($bg)\n  $x: 100\n",
         expect![[r#"
-        SOURCE_FILE@0..29
-          FUNCTION_RULE@0..28
-            AT@0..1 "@"
-            IDENT@1..9 "function"
-            WHITESPACE@9..10 " "
-            IDENT@10..13 "foo"
-            PARAM_LIST@13..18
-              LPAREN@13..14 "("
-              PARAM@14..17
-                DOLLAR@14..15 "$"
-                IDENT@15..17 "bg"
-              RPAREN@17..18 ")"
-            BLOCK@18..28
-              WHITESPACE@18..21 "\n  "
-              LBRACE@21..21 ""
-              VARIABLE_DECL@21..28
-                DOLLAR@21..22 "$"
-                IDENT@22..23 "x"
-                COLON@23..24 ":"
-                NUMBER_LITERAL@24..28
-                  WHITESPACE@24..25 " "
-                  NUMBER@25..28 "100"
-                SEMICOLON@28..28 ""
-              RBRACE@28..28 ""
-          WHITESPACE@28..29 "\n"
-    "#]],
+            SOURCE_FILE@0..29
+              FUNCTION_RULE@0..28
+                AT@0..1 "@"
+                IDENT@1..9 "function"
+                WHITESPACE@9..10 " "
+                IDENT@10..13 "foo"
+                PARAM_LIST@13..18
+                  LPAREN@13..14 "("
+                  PARAM@14..17
+                    DOLLAR@14..15 "$"
+                    IDENT@15..17 "bg"
+                  RPAREN@17..18 ")"
+                BLOCK@18..28
+                  LBRACE@18..18 ""
+                  VARIABLE_DECL@18..28
+                    WHITESPACE@18..21 "\n  "
+                    DOLLAR@21..22 "$"
+                    IDENT@22..23 "x"
+                    COLON@23..24 ":"
+                    NUMBER_LITERAL@24..28
+                      WHITESPACE@24..25 " "
+                      NUMBER@25..28 "100"
+                    SEMICOLON@28..28 ""
+                  RBRACE@28..28 ""
+              WHITESPACE@28..29 "\n"
+        "#]],
     );
 }
 
@@ -1669,9 +1669,9 @@ fn keyframes_from_to_open_the_body() {
                 IDENT@1..10 "keyframes"
                 WHITESPACE@10..11 " "
                 IDENT@11..16 "slide"
-                WHITESPACE@16..19 "\n  "
-                LBRACE@19..19 ""
-                KEYFRAME_SELECTOR@19..38
+                LBRACE@16..16 ""
+                KEYFRAME_SELECTOR@16..38
+                  WHITESPACE@16..19 "\n  "
                   IDENT@19..23 "from"
                   BLOCK@23..38
                     LBRACE@23..23 ""
@@ -1719,9 +1719,9 @@ fn keyframes_percent_selectors_open_the_body() {
                 IDENT@1..10 "keyframes"
                 WHITESPACE@10..11 " "
                 IDENT@11..16 "slide"
-                WHITESPACE@16..19 "\n  "
-                LBRACE@19..19 ""
-                KEYFRAME_SELECTOR@19..36
+                LBRACE@16..16 ""
+                KEYFRAME_SELECTOR@16..36
+                  WHITESPACE@16..19 "\n  "
                   NUMBER@19..20 "0"
                   PERCENT@20..21 "%"
                   BLOCK@21..36
@@ -1765,43 +1765,43 @@ fn mixin_body_starting_with_pseudo_selector() {
     check_tree(
         "@mixin m($x)\n  :hover\n    color: red\n",
         expect![[r#"
-        SOURCE_FILE@0..37
-          MIXIN_RULE@0..36
-            AT@0..1 "@"
-            IDENT@1..6 "mixin"
-            WHITESPACE@6..7 " "
-            IDENT@7..8 "m"
-            PARAM_LIST@8..12
-              LPAREN@8..9 "("
-              PARAM@9..11
-                DOLLAR@9..10 "$"
-                IDENT@10..11 "x"
-              RPAREN@11..12 ")"
-            BLOCK@12..36
-              WHITESPACE@12..15 "\n  "
-              LBRACE@15..15 ""
-              RULE_SET@15..36
-                SELECTOR_LIST@15..21
-                  SELECTOR@15..21
-                    PSEUDO_SELECTOR@15..21
-                      COLON@15..16 ":"
-                      IDENT@16..21 "hover"
-                BLOCK@21..36
-                  LBRACE@21..21 ""
-                  DECLARATION@21..36
-                    PROPERTY@21..31
-                      WHITESPACE@21..26 "\n    "
-                      IDENT@26..31 "color"
-                    COLON@31..32 ":"
-                    VALUE@32..36
-                      VALUE@32..36
-                        WHITESPACE@32..33 " "
-                        IDENT@33..36 "red"
-                    SEMICOLON@36..36 ""
+            SOURCE_FILE@0..37
+              MIXIN_RULE@0..36
+                AT@0..1 "@"
+                IDENT@1..6 "mixin"
+                WHITESPACE@6..7 " "
+                IDENT@7..8 "m"
+                PARAM_LIST@8..12
+                  LPAREN@8..9 "("
+                  PARAM@9..11
+                    DOLLAR@9..10 "$"
+                    IDENT@10..11 "x"
+                  RPAREN@11..12 ")"
+                BLOCK@12..36
+                  LBRACE@12..12 ""
+                  RULE_SET@12..36
+                    SELECTOR_LIST@12..21
+                      SELECTOR@12..21
+                        PSEUDO_SELECTOR@12..21
+                          WHITESPACE@12..15 "\n  "
+                          COLON@15..16 ":"
+                          IDENT@16..21 "hover"
+                    BLOCK@21..36
+                      LBRACE@21..21 ""
+                      DECLARATION@21..36
+                        PROPERTY@21..31
+                          WHITESPACE@21..26 "\n    "
+                          IDENT@26..31 "color"
+                        COLON@31..32 ":"
+                        VALUE@32..36
+                          VALUE@32..36
+                            WHITESPACE@32..33 " "
+                            IDENT@33..36 "red"
+                        SEMICOLON@36..36 ""
+                      RBRACE@36..36 ""
                   RBRACE@36..36 ""
-              RBRACE@36..36 ""
-          WHITESPACE@36..37 "\n"
-    "#]],
+              WHITESPACE@36..37 "\n"
+        "#]],
     );
 }
 
@@ -1824,12 +1824,12 @@ fn mixin_body_starting_with_continuation_keyword() {
                 WHITESPACE@6..7 " "
                 IDENT@7..8 "m"
                 BLOCK@8..28
-                  WHITESPACE@8..11 "\n  "
-                  LBRACE@11..11 ""
-                  RULE_SET@11..28
-                    SELECTOR_LIST@11..13
-                      SELECTOR@11..13
-                        SIMPLE_SELECTOR@11..13
+                  LBRACE@8..8 ""
+                  RULE_SET@8..28
+                    SELECTOR_LIST@8..13
+                      SELECTOR@8..13
+                        SIMPLE_SELECTOR@8..13
+                          WHITESPACE@8..11 "\n  "
                           IDENT@11..13 "to"
                     BLOCK@13..28
                       LBRACE@13..13 ""
@@ -2063,10 +2063,10 @@ fn variable_named_after_a_continuation_keyword_does_not_break_the_header() {
                       DOLLAR@11..12 "$"
                       IDENT@12..16 "from"
                     BLOCK@16..25
-                      WHITESPACE@16..21 "\n    "
-                      LBRACE@21..21 ""
-                      DECLARATION@21..25
-                        PROPERTY@21..22
+                      LBRACE@16..16 ""
+                      DECLARATION@16..25
+                        PROPERTY@16..22
+                          WHITESPACE@16..21 "\n    "
                           IDENT@21..22 "x"
                         COLON@22..23 ":"
                         VALUE@23..25
@@ -2080,10 +2080,10 @@ fn variable_named_after_a_continuation_keyword_does_not_break_the_header() {
                       AT@28..29 "@"
                       IDENT@29..33 "else"
                       BLOCK@33..42
-                        WHITESPACE@33..38 "\n    "
-                        LBRACE@38..38 ""
-                        DECLARATION@38..42
-                          PROPERTY@38..39
+                        LBRACE@33..33 ""
+                        DECLARATION@33..42
+                          PROPERTY@33..39
+                            WHITESPACE@33..38 "\n    "
                             IDENT@38..39 "y"
                           COLON@39..40 ":"
                           VALUE@40..42
@@ -2222,12 +2222,12 @@ fn boolean_operator_still_continues_a_container_query() {
                 IDENT@51..53 "px"
                 RPAREN@53..54 ")"
                 BLOCK@54..74
-                  WHITESPACE@54..57 "\n  "
-                  LBRACE@57..57 ""
-                  RULE_SET@57..74
-                    SELECTOR_LIST@57..59
-                      SELECTOR@57..59
-                        SIMPLE_SELECTOR@57..59
+                  LBRACE@54..54 ""
+                  RULE_SET@54..74
+                    SELECTOR_LIST@54..59
+                      SELECTOR@54..59
+                        SIMPLE_SELECTOR@54..59
+                          WHITESPACE@54..57 "\n  "
                           DOT@57..58 "."
                           IDENT@58..59 "a"
                     BLOCK@59..74
@@ -2255,47 +2255,47 @@ fn scope_header_continues_with_to() {
     check_tree(
         "@scope (.a) to\n  (.b)\n  .c\n    color: red\n",
         expect![[r#"
-        SOURCE_FILE@0..42
-          SCOPE_RULE@0..41
-            AT@0..1 "@"
-            IDENT@1..6 "scope"
-            WHITESPACE@6..7 " "
-            LPAREN@7..8 "("
-            DOT@8..9 "."
-            IDENT@9..10 "a"
-            RPAREN@10..11 ")"
-            WHITESPACE@11..12 " "
-            IDENT@12..14 "to"
-            WHITESPACE@14..17 "\n  "
-            LPAREN@17..18 "("
-            DOT@18..19 "."
-            IDENT@19..20 "b"
-            RPAREN@20..21 ")"
-            BLOCK@21..41
-              WHITESPACE@21..24 "\n  "
-              LBRACE@24..24 ""
-              RULE_SET@24..41
-                SELECTOR_LIST@24..26
-                  SELECTOR@24..26
-                    SIMPLE_SELECTOR@24..26
-                      DOT@24..25 "."
-                      IDENT@25..26 "c"
-                BLOCK@26..41
-                  LBRACE@26..26 ""
-                  DECLARATION@26..41
-                    PROPERTY@26..36
-                      WHITESPACE@26..31 "\n    "
-                      IDENT@31..36 "color"
-                    COLON@36..37 ":"
-                    VALUE@37..41
-                      VALUE@37..41
-                        WHITESPACE@37..38 " "
-                        IDENT@38..41 "red"
-                    SEMICOLON@41..41 ""
+            SOURCE_FILE@0..42
+              SCOPE_RULE@0..41
+                AT@0..1 "@"
+                IDENT@1..6 "scope"
+                WHITESPACE@6..7 " "
+                LPAREN@7..8 "("
+                DOT@8..9 "."
+                IDENT@9..10 "a"
+                RPAREN@10..11 ")"
+                WHITESPACE@11..12 " "
+                IDENT@12..14 "to"
+                WHITESPACE@14..17 "\n  "
+                LPAREN@17..18 "("
+                DOT@18..19 "."
+                IDENT@19..20 "b"
+                RPAREN@20..21 ")"
+                BLOCK@21..41
+                  LBRACE@21..21 ""
+                  RULE_SET@21..41
+                    SELECTOR_LIST@21..26
+                      SELECTOR@21..26
+                        SIMPLE_SELECTOR@21..26
+                          WHITESPACE@21..24 "\n  "
+                          DOT@24..25 "."
+                          IDENT@25..26 "c"
+                    BLOCK@26..41
+                      LBRACE@26..26 ""
+                      DECLARATION@26..41
+                        PROPERTY@26..36
+                          WHITESPACE@26..31 "\n    "
+                          IDENT@31..36 "color"
+                        COLON@36..37 ":"
+                        VALUE@37..41
+                          VALUE@37..41
+                            WHITESPACE@37..38 " "
+                            IDENT@38..41 "red"
+                        SEMICOLON@41..41 ""
+                      RBRACE@41..41 ""
                   RBRACE@41..41 ""
-              RBRACE@41..41 ""
-          WHITESPACE@41..42 "\n"
-    "#]],
+              WHITESPACE@41..42 "\n"
+        "#]],
     );
 }
 
@@ -2305,46 +2305,46 @@ fn container_header_continues_with_a_parenthesised_query() {
     check_tree(
         "@container card\n  (width > 400px)\n  .a\n    c: red\n",
         expect![[r#"
-        SOURCE_FILE@0..50
-          CONTAINER_RULE@0..49
-            AT@0..1 "@"
-            IDENT@1..10 "container"
-            WHITESPACE@10..11 " "
-            IDENT@11..15 "card"
-            WHITESPACE@15..18 "\n  "
-            LPAREN@18..19 "("
-            IDENT@19..24 "width"
-            WHITESPACE@24..25 " "
-            GT@25..26 ">"
-            WHITESPACE@26..27 " "
-            NUMBER@27..30 "400"
-            IDENT@30..32 "px"
-            RPAREN@32..33 ")"
-            BLOCK@33..49
-              WHITESPACE@33..36 "\n  "
-              LBRACE@36..36 ""
-              RULE_SET@36..49
-                SELECTOR_LIST@36..38
-                  SELECTOR@36..38
-                    SIMPLE_SELECTOR@36..38
-                      DOT@36..37 "."
-                      IDENT@37..38 "a"
-                BLOCK@38..49
-                  LBRACE@38..38 ""
-                  DECLARATION@38..49
-                    PROPERTY@38..44
-                      WHITESPACE@38..43 "\n    "
-                      IDENT@43..44 "c"
-                    COLON@44..45 ":"
-                    VALUE@45..49
-                      VALUE@45..49
-                        WHITESPACE@45..46 " "
-                        IDENT@46..49 "red"
-                    SEMICOLON@49..49 ""
+            SOURCE_FILE@0..50
+              CONTAINER_RULE@0..49
+                AT@0..1 "@"
+                IDENT@1..10 "container"
+                WHITESPACE@10..11 " "
+                IDENT@11..15 "card"
+                WHITESPACE@15..18 "\n  "
+                LPAREN@18..19 "("
+                IDENT@19..24 "width"
+                WHITESPACE@24..25 " "
+                GT@25..26 ">"
+                WHITESPACE@26..27 " "
+                NUMBER@27..30 "400"
+                IDENT@30..32 "px"
+                RPAREN@32..33 ")"
+                BLOCK@33..49
+                  LBRACE@33..33 ""
+                  RULE_SET@33..49
+                    SELECTOR_LIST@33..38
+                      SELECTOR@33..38
+                        SIMPLE_SELECTOR@33..38
+                          WHITESPACE@33..36 "\n  "
+                          DOT@36..37 "."
+                          IDENT@37..38 "a"
+                    BLOCK@38..49
+                      LBRACE@38..38 ""
+                      DECLARATION@38..49
+                        PROPERTY@38..44
+                          WHITESPACE@38..43 "\n    "
+                          IDENT@43..44 "c"
+                        COLON@44..45 ":"
+                        VALUE@45..49
+                          VALUE@45..49
+                            WHITESPACE@45..46 " "
+                            IDENT@46..49 "red"
+                        SEMICOLON@49..49 ""
+                      RBRACE@49..49 ""
                   RBRACE@49..49 ""
-              RBRACE@49..49 ""
-          WHITESPACE@49..50 "\n"
-    "#]],
+              WHITESPACE@49..50 "\n"
+        "#]],
     );
 }
 
@@ -2373,10 +2373,10 @@ fn boolean_operator_still_continues_a_media_query() {
                   IDENT@33..35 "px"
                   RPAREN@35..36 ")"
                 BLOCK@36..43
-                  WHITESPACE@36..39 "\n  "
-                  LBRACE@39..39 ""
-                  DECLARATION@39..43
-                    PROPERTY@39..40
+                  LBRACE@36..36 ""
+                  DECLARATION@36..43
+                    PROPERTY@36..40
+                      WHITESPACE@36..39 "\n  "
                       IDENT@39..40 "p"
                     COLON@40..41 ":"
                     VALUE@41..43
@@ -2407,10 +2407,10 @@ fn bare_else_body_can_start_with_a_variable_declaration() {
                   DOLLAR@4..5 "$"
                   IDENT@5..6 "a"
                 BLOCK@6..13
-                  WHITESPACE@6..9 "\n  "
-                  LBRACE@9..9 ""
-                  DECLARATION@9..13
-                    PROPERTY@9..10
+                  LBRACE@6..6 ""
+                  DECLARATION@6..13
+                    PROPERTY@6..10
+                      WHITESPACE@6..9 "\n  "
                       IDENT@9..10 "p"
                     COLON@10..11 ":"
                     VALUE@11..13
@@ -2424,9 +2424,9 @@ fn bare_else_body_can_start_with_a_variable_declaration() {
                   AT@14..15 "@"
                   IDENT@15..19 "else"
                   BLOCK@19..39
-                    WHITESPACE@19..22 "\n  "
-                    LBRACE@22..22 ""
-                    VARIABLE_DECL@22..29
+                    LBRACE@19..19 ""
+                    VARIABLE_DECL@19..29
+                      WHITESPACE@19..22 "\n  "
                       DOLLAR@22..23 "$"
                       IDENT@23..26 "lum"
                       COLON@26..27 ":"
@@ -2456,52 +2456,52 @@ fn else_if_on_the_next_line_still_continues_the_header() {
     check_tree(
         "@if $a\n  p: 1\n@else\n  if $b\n    q: 2\n",
         expect![[r#"
-        SOURCE_FILE@0..37
-          IF_RULE@0..36
-            AT@0..1 "@"
-            IDENT@1..3 "if"
-            VARIABLE_REF@3..6
-              WHITESPACE@3..4 " "
-              DOLLAR@4..5 "$"
-              IDENT@5..6 "a"
-            BLOCK@6..13
-              WHITESPACE@6..9 "\n  "
-              LBRACE@9..9 ""
-              DECLARATION@9..13
-                PROPERTY@9..10
-                  IDENT@9..10 "p"
-                COLON@10..11 ":"
-                VALUE@11..13
-                  NUMBER_LITERAL@11..13
-                    WHITESPACE@11..12 " "
-                    NUMBER@12..13 "1"
-                SEMICOLON@13..13 ""
-              RBRACE@13..13 ""
-            ELSE_CLAUSE@13..36
-              WHITESPACE@13..14 "\n"
-              AT@14..15 "@"
-              IDENT@15..19 "else"
-              WHITESPACE@19..22 "\n  "
-              IDENT@22..24 "if"
-              VARIABLE_REF@24..27
-                WHITESPACE@24..25 " "
-                DOLLAR@25..26 "$"
-                IDENT@26..27 "b"
-              BLOCK@27..36
-                WHITESPACE@27..32 "\n    "
-                LBRACE@32..32 ""
-                DECLARATION@32..36
-                  PROPERTY@32..33
-                    IDENT@32..33 "q"
-                  COLON@33..34 ":"
-                  VALUE@34..36
-                    NUMBER_LITERAL@34..36
-                      WHITESPACE@34..35 " "
-                      NUMBER@35..36 "2"
-                  SEMICOLON@36..36 ""
-                RBRACE@36..36 ""
-          WHITESPACE@36..37 "\n"
-    "#]],
+            SOURCE_FILE@0..37
+              IF_RULE@0..36
+                AT@0..1 "@"
+                IDENT@1..3 "if"
+                VARIABLE_REF@3..6
+                  WHITESPACE@3..4 " "
+                  DOLLAR@4..5 "$"
+                  IDENT@5..6 "a"
+                BLOCK@6..13
+                  LBRACE@6..6 ""
+                  DECLARATION@6..13
+                    PROPERTY@6..10
+                      WHITESPACE@6..9 "\n  "
+                      IDENT@9..10 "p"
+                    COLON@10..11 ":"
+                    VALUE@11..13
+                      NUMBER_LITERAL@11..13
+                        WHITESPACE@11..12 " "
+                        NUMBER@12..13 "1"
+                    SEMICOLON@13..13 ""
+                  RBRACE@13..13 ""
+                ELSE_CLAUSE@13..36
+                  WHITESPACE@13..14 "\n"
+                  AT@14..15 "@"
+                  IDENT@15..19 "else"
+                  WHITESPACE@19..22 "\n  "
+                  IDENT@22..24 "if"
+                  VARIABLE_REF@24..27
+                    WHITESPACE@24..25 " "
+                    DOLLAR@25..26 "$"
+                    IDENT@26..27 "b"
+                  BLOCK@27..36
+                    LBRACE@27..27 ""
+                    DECLARATION@27..36
+                      PROPERTY@27..33
+                        WHITESPACE@27..32 "\n    "
+                        IDENT@32..33 "q"
+                      COLON@33..34 ":"
+                      VALUE@34..36
+                        NUMBER_LITERAL@34..36
+                          WHITESPACE@34..35 " "
+                          NUMBER@35..36 "2"
+                      SEMICOLON@36..36 ""
+                    RBRACE@36..36 ""
+              WHITESPACE@36..37 "\n"
+        "#]],
     );
 }
 
@@ -2512,29 +2512,29 @@ fn if_header_still_continues_with_a_variable_on_the_next_line() {
     check_tree(
         "@if\n  $a\n  p: 1\n",
         expect![[r#"
-        SOURCE_FILE@0..16
-          IF_RULE@0..15
-            AT@0..1 "@"
-            IDENT@1..3 "if"
-            VARIABLE_REF@3..8
-              WHITESPACE@3..6 "\n  "
-              DOLLAR@6..7 "$"
-              IDENT@7..8 "a"
-            BLOCK@8..15
-              WHITESPACE@8..11 "\n  "
-              LBRACE@11..11 ""
-              DECLARATION@11..15
-                PROPERTY@11..12
-                  IDENT@11..12 "p"
-                COLON@12..13 ":"
-                VALUE@13..15
-                  NUMBER_LITERAL@13..15
-                    WHITESPACE@13..14 " "
-                    NUMBER@14..15 "1"
-                SEMICOLON@15..15 ""
-              RBRACE@15..15 ""
-          WHITESPACE@15..16 "\n"
-    "#]],
+            SOURCE_FILE@0..16
+              IF_RULE@0..15
+                AT@0..1 "@"
+                IDENT@1..3 "if"
+                VARIABLE_REF@3..8
+                  WHITESPACE@3..6 "\n  "
+                  DOLLAR@6..7 "$"
+                  IDENT@7..8 "a"
+                BLOCK@8..15
+                  LBRACE@8..8 ""
+                  DECLARATION@8..15
+                    PROPERTY@8..12
+                      WHITESPACE@8..11 "\n  "
+                      IDENT@11..12 "p"
+                    COLON@12..13 ":"
+                    VALUE@13..15
+                      NUMBER_LITERAL@13..15
+                        WHITESPACE@13..14 " "
+                        NUMBER@14..15 "1"
+                    SEMICOLON@15..15 ""
+                  RBRACE@15..15 ""
+              WHITESPACE@15..16 "\n"
+        "#]],
     );
 }
 
@@ -2560,9 +2560,9 @@ fn at_root_opens_a_body_for_an_indented_include() {
                     AT@7..8 "@"
                     IDENT@8..15 "at-root"
                     BLOCK@15..47
-                      WHITESPACE@15..20 "\n    "
-                      LBRACE@20..20 ""
-                      INCLUDE_RULE@20..47
+                      LBRACE@15..15 ""
+                      INCLUDE_RULE@15..47
+                        WHITESPACE@15..20 "\n    "
                         AT@20..21 "@"
                         IDENT@21..28 "include"
                         WHITESPACE@28..29 " "
@@ -2571,10 +2571,10 @@ fn at_root_opens_a_body_for_an_indented_include() {
                           LPAREN@32..33 "("
                           RPAREN@33..34 ")"
                         BLOCK@34..47
-                          WHITESPACE@34..41 "\n      "
-                          LBRACE@41..41 ""
-                          DECLARATION@41..47
-                            PROPERTY@41..44
+                          LBRACE@34..34 ""
+                          DECLARATION@34..47
+                            PROPERTY@34..44
+                              WHITESPACE@34..41 "\n      "
                               IDENT@41..44 "baz"
                             COLON@44..45 ":"
                             VALUE@45..47
@@ -2599,45 +2599,45 @@ fn at_root_opens_a_body_for_an_indented_selector() {
     check_tree(
         ".foo\n  @at-root\n    .bar\n      baz: 1\n",
         expect![[r#"
-        SOURCE_FILE@0..38
-          RULE_SET@0..37
-            SELECTOR_LIST@0..4
-              SELECTOR@0..4
-                SIMPLE_SELECTOR@0..4
-                  DOT@0..1 "."
-                  IDENT@1..4 "foo"
-            BLOCK@4..37
-              LBRACE@4..4 ""
-              AT_ROOT_RULE@4..37
-                WHITESPACE@4..7 "\n  "
-                AT@7..8 "@"
-                IDENT@8..15 "at-root"
-                BLOCK@15..37
-                  WHITESPACE@15..20 "\n    "
-                  LBRACE@20..20 ""
-                  RULE_SET@20..37
-                    SELECTOR_LIST@20..24
-                      SELECTOR@20..24
-                        SIMPLE_SELECTOR@20..24
-                          DOT@20..21 "."
-                          IDENT@21..24 "bar"
-                    BLOCK@24..37
-                      LBRACE@24..24 ""
-                      DECLARATION@24..37
-                        PROPERTY@24..34
-                          WHITESPACE@24..31 "\n      "
-                          IDENT@31..34 "baz"
-                        COLON@34..35 ":"
-                        VALUE@35..37
-                          NUMBER_LITERAL@35..37
-                            WHITESPACE@35..36 " "
-                            NUMBER@36..37 "1"
-                        SEMICOLON@37..37 ""
+            SOURCE_FILE@0..38
+              RULE_SET@0..37
+                SELECTOR_LIST@0..4
+                  SELECTOR@0..4
+                    SIMPLE_SELECTOR@0..4
+                      DOT@0..1 "."
+                      IDENT@1..4 "foo"
+                BLOCK@4..37
+                  LBRACE@4..4 ""
+                  AT_ROOT_RULE@4..37
+                    WHITESPACE@4..7 "\n  "
+                    AT@7..8 "@"
+                    IDENT@8..15 "at-root"
+                    BLOCK@15..37
+                      LBRACE@15..15 ""
+                      RULE_SET@15..37
+                        SELECTOR_LIST@15..24
+                          SELECTOR@15..24
+                            SIMPLE_SELECTOR@15..24
+                              WHITESPACE@15..20 "\n    "
+                              DOT@20..21 "."
+                              IDENT@21..24 "bar"
+                        BLOCK@24..37
+                          LBRACE@24..24 ""
+                          DECLARATION@24..37
+                            PROPERTY@24..34
+                              WHITESPACE@24..31 "\n      "
+                              IDENT@31..34 "baz"
+                            COLON@34..35 ":"
+                            VALUE@35..37
+                              NUMBER_LITERAL@35..37
+                                WHITESPACE@35..36 " "
+                                NUMBER@36..37 "1"
+                            SEMICOLON@37..37 ""
+                          RBRACE@37..37 ""
                       RBRACE@37..37 ""
                   RBRACE@37..37 ""
-              RBRACE@37..37 ""
-          WHITESPACE@37..38 "\n"
-    "#]],
+              WHITESPACE@37..38 "\n"
+        "#]],
     );
 }
 
@@ -2671,12 +2671,12 @@ fn at_root_header_still_continues_for_a_parenthesised_query() {
                       IDENT@30..35 "media"
                       RPAREN@35..36 ")"
                     BLOCK@36..56
-                      WHITESPACE@36..41 "\n    "
-                      LBRACE@41..41 ""
-                      RULE_SET@41..56
-                        SELECTOR_LIST@41..45
-                          SELECTOR@41..45
-                            SIMPLE_SELECTOR@41..45
+                      LBRACE@36..36 ""
+                      RULE_SET@36..56
+                        SELECTOR_LIST@36..45
+                          SELECTOR@36..45
+                            SIMPLE_SELECTOR@36..45
+                              WHITESPACE@36..41 "\n    "
                               DOT@41..42 "."
                               IDENT@42..45 "bar"
                         BLOCK@45..56
@@ -2819,38 +2819,38 @@ fn star_in_directive_expression_still_continues() {
     check_tree(
         "@function f($x)\n  @return $x *\n    2\n",
         expect![[r#"
-        SOURCE_FILE@0..37
-          FUNCTION_RULE@0..36
-            AT@0..1 "@"
-            IDENT@1..9 "function"
-            WHITESPACE@9..10 " "
-            IDENT@10..11 "f"
-            PARAM_LIST@11..15
-              LPAREN@11..12 "("
-              PARAM@12..14
-                DOLLAR@12..13 "$"
-                IDENT@13..14 "x"
-              RPAREN@14..15 ")"
-            BLOCK@15..36
-              WHITESPACE@15..18 "\n  "
-              LBRACE@18..18 ""
-              RETURN_RULE@18..36
-                AT@18..19 "@"
-                IDENT@19..25 "return"
-                BINARY_EXPR@25..36
-                  VARIABLE_REF@25..28
-                    WHITESPACE@25..26 " "
-                    DOLLAR@26..27 "$"
-                    IDENT@27..28 "x"
-                  WHITESPACE@28..29 " "
-                  STAR@29..30 "*"
-                  NUMBER_LITERAL@30..36
-                    WHITESPACE@30..35 "\n    "
-                    NUMBER@35..36 "2"
-                SEMICOLON@36..36 ""
-              RBRACE@36..36 ""
-          WHITESPACE@36..37 "\n"
-    "#]],
+            SOURCE_FILE@0..37
+              FUNCTION_RULE@0..36
+                AT@0..1 "@"
+                IDENT@1..9 "function"
+                WHITESPACE@9..10 " "
+                IDENT@10..11 "f"
+                PARAM_LIST@11..15
+                  LPAREN@11..12 "("
+                  PARAM@12..14
+                    DOLLAR@12..13 "$"
+                    IDENT@13..14 "x"
+                  RPAREN@14..15 ")"
+                BLOCK@15..36
+                  LBRACE@15..15 ""
+                  RETURN_RULE@15..36
+                    WHITESPACE@15..18 "\n  "
+                    AT@18..19 "@"
+                    IDENT@19..25 "return"
+                    BINARY_EXPR@25..36
+                      VARIABLE_REF@25..28
+                        WHITESPACE@25..26 " "
+                        DOLLAR@26..27 "$"
+                        IDENT@27..28 "x"
+                      WHITESPACE@28..29 " "
+                      STAR@29..30 "*"
+                      NUMBER_LITERAL@30..36
+                        WHITESPACE@30..35 "\n    "
+                        NUMBER@35..36 "2"
+                    SEMICOLON@36..36 ""
+                  RBRACE@36..36 ""
+              WHITESPACE@36..37 "\n"
+        "#]],
     );
 }
 
@@ -3106,46 +3106,46 @@ fn value_context_is_cleared_when_a_deferred_block_opens() {
     check_tree(
         "@foo a: b\n  .b > *\n    color: red\n",
         expect![[r#"
-        SOURCE_FILE@0..34
-          GENERIC_AT_RULE@0..33
-            AT@0..1 "@"
-            IDENT@1..4 "foo"
-            WHITESPACE@4..5 " "
-            IDENT@5..6 "a"
-            COLON@6..7 ":"
-            WHITESPACE@7..8 " "
-            IDENT@8..9 "b"
-            BLOCK@9..33
-              WHITESPACE@9..12 "\n  "
-              LBRACE@12..12 ""
-              RULE_SET@12..33
-                SELECTOR_LIST@12..18
-                  SELECTOR@12..18
-                    SIMPLE_SELECTOR@12..14
-                      DOT@12..13 "."
-                      IDENT@13..14 "b"
-                    COMBINATOR@14..16
-                      WHITESPACE@14..15 " "
-                      GT@15..16 ">"
-                    SIMPLE_SELECTOR@16..18
-                      WHITESPACE@16..17 " "
-                      STAR@17..18 "*"
-                BLOCK@18..33
-                  LBRACE@18..18 ""
-                  DECLARATION@18..33
-                    PROPERTY@18..28
-                      WHITESPACE@18..23 "\n    "
-                      IDENT@23..28 "color"
-                    COLON@28..29 ":"
-                    VALUE@29..33
-                      VALUE@29..33
-                        WHITESPACE@29..30 " "
-                        IDENT@30..33 "red"
-                    SEMICOLON@33..33 ""
+            SOURCE_FILE@0..34
+              GENERIC_AT_RULE@0..33
+                AT@0..1 "@"
+                IDENT@1..4 "foo"
+                WHITESPACE@4..5 " "
+                IDENT@5..6 "a"
+                COLON@6..7 ":"
+                WHITESPACE@7..8 " "
+                IDENT@8..9 "b"
+                BLOCK@9..33
+                  LBRACE@9..9 ""
+                  RULE_SET@9..33
+                    SELECTOR_LIST@9..18
+                      SELECTOR@9..18
+                        SIMPLE_SELECTOR@9..14
+                          WHITESPACE@9..12 "\n  "
+                          DOT@12..13 "."
+                          IDENT@13..14 "b"
+                        COMBINATOR@14..16
+                          WHITESPACE@14..15 " "
+                          GT@15..16 ">"
+                        SIMPLE_SELECTOR@16..18
+                          WHITESPACE@16..17 " "
+                          STAR@17..18 "*"
+                    BLOCK@18..33
+                      LBRACE@18..18 ""
+                      DECLARATION@18..33
+                        PROPERTY@18..28
+                          WHITESPACE@18..23 "\n    "
+                          IDENT@23..28 "color"
+                        COLON@28..29 ":"
+                        VALUE@29..33
+                          VALUE@29..33
+                            WHITESPACE@29..30 " "
+                            IDENT@30..33 "red"
+                        SEMICOLON@33..33 ""
+                      RBRACE@33..33 ""
                   RBRACE@33..33 ""
-              RBRACE@33..33 ""
-          WHITESPACE@33..34 "\n"
-    "#]],
+              WHITESPACE@33..34 "\n"
+        "#]],
     );
 }
 
@@ -3587,51 +3587,51 @@ fn if_header_with_trailing_star_still_continues() {
     check_tree(
         "@if $a *\n  abs($b)\n  a\n    b: c\n",
         expect![[r#"
-        SOURCE_FILE@0..32
-          IF_RULE@0..31
-            AT@0..1 "@"
-            IDENT@1..3 "if"
-            BINARY_EXPR@3..18
-              VARIABLE_REF@3..6
-                WHITESPACE@3..4 " "
-                DOLLAR@4..5 "$"
-                IDENT@5..6 "a"
-              WHITESPACE@6..7 " "
-              STAR@7..8 "*"
-              FUNCTION_CALL@8..18
-                WHITESPACE@8..11 "\n  "
-                IDENT@11..14 "abs"
-                ARG_LIST@14..18
-                  LPAREN@14..15 "("
-                  ARG@15..17
-                    VARIABLE_REF@15..17
-                      DOLLAR@15..16 "$"
-                      IDENT@16..17 "b"
-                  RPAREN@17..18 ")"
-            BLOCK@18..31
-              WHITESPACE@18..21 "\n  "
-              LBRACE@21..21 ""
-              RULE_SET@21..31
-                SELECTOR_LIST@21..22
-                  SELECTOR@21..22
-                    SIMPLE_SELECTOR@21..22
-                      IDENT@21..22 "a"
-                BLOCK@22..31
-                  LBRACE@22..22 ""
-                  DECLARATION@22..31
-                    PROPERTY@22..28
-                      WHITESPACE@22..27 "\n    "
-                      IDENT@27..28 "b"
-                    COLON@28..29 ":"
-                    VALUE@29..31
-                      VALUE@29..31
-                        WHITESPACE@29..30 " "
-                        IDENT@30..31 "c"
-                    SEMICOLON@31..31 ""
+            SOURCE_FILE@0..32
+              IF_RULE@0..31
+                AT@0..1 "@"
+                IDENT@1..3 "if"
+                BINARY_EXPR@3..18
+                  VARIABLE_REF@3..6
+                    WHITESPACE@3..4 " "
+                    DOLLAR@4..5 "$"
+                    IDENT@5..6 "a"
+                  WHITESPACE@6..7 " "
+                  STAR@7..8 "*"
+                  FUNCTION_CALL@8..18
+                    WHITESPACE@8..11 "\n  "
+                    IDENT@11..14 "abs"
+                    ARG_LIST@14..18
+                      LPAREN@14..15 "("
+                      ARG@15..17
+                        VARIABLE_REF@15..17
+                          DOLLAR@15..16 "$"
+                          IDENT@16..17 "b"
+                      RPAREN@17..18 ")"
+                BLOCK@18..31
+                  LBRACE@18..18 ""
+                  RULE_SET@18..31
+                    SELECTOR_LIST@18..22
+                      SELECTOR@18..22
+                        SIMPLE_SELECTOR@18..22
+                          WHITESPACE@18..21 "\n  "
+                          IDENT@21..22 "a"
+                    BLOCK@22..31
+                      LBRACE@22..22 ""
+                      DECLARATION@22..31
+                        PROPERTY@22..28
+                          WHITESPACE@22..27 "\n    "
+                          IDENT@27..28 "b"
+                        COLON@28..29 ":"
+                        VALUE@29..31
+                          VALUE@29..31
+                            WHITESPACE@29..30 " "
+                            IDENT@30..31 "c"
+                        SEMICOLON@31..31 ""
+                      RBRACE@31..31 ""
                   RBRACE@31..31 ""
-              RBRACE@31..31 ""
-          WHITESPACE@31..32 "\n"
-    "#]],
+              WHITESPACE@31..32 "\n"
+        "#]],
     );
 }
 
@@ -3745,39 +3745,39 @@ fn mixin_body_of_only_a_comment_closes_at_the_dedent() {
     check_tree(
         "@mixin foo\n  // c\n.a\n  b: c\n",
         expect![[r#"
-        SOURCE_FILE@0..28
-          MIXIN_RULE@0..17
-            AT@0..1 "@"
-            IDENT@1..6 "mixin"
-            WHITESPACE@6..7 " "
-            IDENT@7..10 "foo"
-            BLOCK@10..17
-              WHITESPACE@10..13 "\n  "
-              SINGLE_LINE_COMMENT@13..17 "// c"
-              LBRACE@17..17 ""
-              RBRACE@17..17 ""
-          RULE_SET@17..27
-            SELECTOR_LIST@17..20
-              SELECTOR@17..20
-                SIMPLE_SELECTOR@17..20
-                  WHITESPACE@17..18 "\n"
-                  DOT@18..19 "."
-                  IDENT@19..20 "a"
-            BLOCK@20..27
-              LBRACE@20..20 ""
-              DECLARATION@20..27
-                PROPERTY@20..24
-                  WHITESPACE@20..23 "\n  "
-                  IDENT@23..24 "b"
-                COLON@24..25 ":"
-                VALUE@25..27
-                  VALUE@25..27
-                    WHITESPACE@25..26 " "
-                    IDENT@26..27 "c"
-                SEMICOLON@27..27 ""
-              RBRACE@27..27 ""
-          WHITESPACE@27..28 "\n"
-    "#]],
+            SOURCE_FILE@0..28
+              MIXIN_RULE@0..17
+                AT@0..1 "@"
+                IDENT@1..6 "mixin"
+                WHITESPACE@6..7 " "
+                IDENT@7..10 "foo"
+                BLOCK@10..17
+                  LBRACE@10..10 ""
+                  WHITESPACE@10..13 "\n  "
+                  SINGLE_LINE_COMMENT@13..17 "// c"
+                  RBRACE@17..17 ""
+              RULE_SET@17..27
+                SELECTOR_LIST@17..20
+                  SELECTOR@17..20
+                    SIMPLE_SELECTOR@17..20
+                      WHITESPACE@17..18 "\n"
+                      DOT@18..19 "."
+                      IDENT@19..20 "a"
+                BLOCK@20..27
+                  LBRACE@20..20 ""
+                  DECLARATION@20..27
+                    PROPERTY@20..24
+                      WHITESPACE@20..23 "\n  "
+                      IDENT@23..24 "b"
+                    COLON@24..25 ":"
+                    VALUE@25..27
+                      VALUE@25..27
+                        WHITESPACE@25..26 " "
+                        IDENT@26..27 "c"
+                    SEMICOLON@27..27 ""
+                  RBRACE@27..27 ""
+              WHITESPACE@27..28 "\n"
+        "#]],
     );
 }
 
@@ -3786,40 +3786,40 @@ fn media_body_of_only_a_block_comment_closes_at_the_dedent() {
     check_tree(
         "@media print\n  /* c */\n.a\n  b: c\n",
         expect![[r#"
-        SOURCE_FILE@0..33
-          MEDIA_RULE@0..22
-            AT@0..1 "@"
-            IDENT@1..6 "media"
-            MEDIA_QUERY@6..12
-              WHITESPACE@6..7 " "
-              IDENT@7..12 "print"
-            BLOCK@12..22
-              WHITESPACE@12..15 "\n  "
-              MULTI_LINE_COMMENT@15..22 "/* c */"
-              LBRACE@22..22 ""
-              RBRACE@22..22 ""
-          RULE_SET@22..32
-            SELECTOR_LIST@22..25
-              SELECTOR@22..25
-                SIMPLE_SELECTOR@22..25
-                  WHITESPACE@22..23 "\n"
-                  DOT@23..24 "."
-                  IDENT@24..25 "a"
-            BLOCK@25..32
-              LBRACE@25..25 ""
-              DECLARATION@25..32
-                PROPERTY@25..29
-                  WHITESPACE@25..28 "\n  "
-                  IDENT@28..29 "b"
-                COLON@29..30 ":"
-                VALUE@30..32
-                  VALUE@30..32
-                    WHITESPACE@30..31 " "
-                    IDENT@31..32 "c"
-                SEMICOLON@32..32 ""
-              RBRACE@32..32 ""
-          WHITESPACE@32..33 "\n"
-    "#]],
+            SOURCE_FILE@0..33
+              MEDIA_RULE@0..22
+                AT@0..1 "@"
+                IDENT@1..6 "media"
+                MEDIA_QUERY@6..12
+                  WHITESPACE@6..7 " "
+                  IDENT@7..12 "print"
+                BLOCK@12..22
+                  LBRACE@12..12 ""
+                  WHITESPACE@12..15 "\n  "
+                  MULTI_LINE_COMMENT@15..22 "/* c */"
+                  RBRACE@22..22 ""
+              RULE_SET@22..32
+                SELECTOR_LIST@22..25
+                  SELECTOR@22..25
+                    SIMPLE_SELECTOR@22..25
+                      WHITESPACE@22..23 "\n"
+                      DOT@23..24 "."
+                      IDENT@24..25 "a"
+                BLOCK@25..32
+                  LBRACE@25..25 ""
+                  DECLARATION@25..32
+                    PROPERTY@25..29
+                      WHITESPACE@25..28 "\n  "
+                      IDENT@28..29 "b"
+                    COLON@29..30 ":"
+                    VALUE@30..32
+                      VALUE@30..32
+                        WHITESPACE@30..31 " "
+                        IDENT@31..32 "c"
+                    SEMICOLON@32..32 ""
+                  RBRACE@32..32 ""
+              WHITESPACE@32..33 "\n"
+        "#]],
     );
 }
 
@@ -3828,39 +3828,39 @@ fn include_content_block_of_only_a_comment_closes_at_the_dedent() {
     check_tree(
         "@include foo\n  // c\n.a\n  b: c\n",
         expect![[r#"
-        SOURCE_FILE@0..30
-          INCLUDE_RULE@0..19
-            AT@0..1 "@"
-            IDENT@1..8 "include"
-            WHITESPACE@8..9 " "
-            IDENT@9..12 "foo"
-            BLOCK@12..19
-              WHITESPACE@12..15 "\n  "
-              SINGLE_LINE_COMMENT@15..19 "// c"
-              LBRACE@19..19 ""
-              RBRACE@19..19 ""
-          RULE_SET@19..29
-            SELECTOR_LIST@19..22
-              SELECTOR@19..22
-                SIMPLE_SELECTOR@19..22
-                  WHITESPACE@19..20 "\n"
-                  DOT@20..21 "."
-                  IDENT@21..22 "a"
-            BLOCK@22..29
-              LBRACE@22..22 ""
-              DECLARATION@22..29
-                PROPERTY@22..26
-                  WHITESPACE@22..25 "\n  "
-                  IDENT@25..26 "b"
-                COLON@26..27 ":"
-                VALUE@27..29
-                  VALUE@27..29
-                    WHITESPACE@27..28 " "
-                    IDENT@28..29 "c"
-                SEMICOLON@29..29 ""
-              RBRACE@29..29 ""
-          WHITESPACE@29..30 "\n"
-    "#]],
+            SOURCE_FILE@0..30
+              INCLUDE_RULE@0..19
+                AT@0..1 "@"
+                IDENT@1..8 "include"
+                WHITESPACE@8..9 " "
+                IDENT@9..12 "foo"
+                BLOCK@12..19
+                  LBRACE@12..12 ""
+                  WHITESPACE@12..15 "\n  "
+                  SINGLE_LINE_COMMENT@15..19 "// c"
+                  RBRACE@19..19 ""
+              RULE_SET@19..29
+                SELECTOR_LIST@19..22
+                  SELECTOR@19..22
+                    SIMPLE_SELECTOR@19..22
+                      WHITESPACE@19..20 "\n"
+                      DOT@20..21 "."
+                      IDENT@21..22 "a"
+                BLOCK@22..29
+                  LBRACE@22..22 ""
+                  DECLARATION@22..29
+                    PROPERTY@22..26
+                      WHITESPACE@22..25 "\n  "
+                      IDENT@25..26 "b"
+                    COLON@26..27 ":"
+                    VALUE@27..29
+                      VALUE@27..29
+                        WHITESPACE@27..28 " "
+                        IDENT@28..29 "c"
+                    SEMICOLON@29..29 ""
+                  RBRACE@29..29 ""
+              WHITESPACE@29..30 "\n"
+        "#]],
     );
 }
 
@@ -3869,39 +3869,39 @@ fn comment_only_body_closes_at_a_dedent_after_a_blank_line() {
     check_tree(
         "@mixin foo\n  // c\n\n.a\n  b: c\n",
         expect![[r#"
-        SOURCE_FILE@0..29
-          MIXIN_RULE@0..17
-            AT@0..1 "@"
-            IDENT@1..6 "mixin"
-            WHITESPACE@6..7 " "
-            IDENT@7..10 "foo"
-            BLOCK@10..17
-              WHITESPACE@10..13 "\n  "
-              SINGLE_LINE_COMMENT@13..17 "// c"
-              LBRACE@17..17 ""
-              RBRACE@17..17 ""
-          RULE_SET@17..28
-            SELECTOR_LIST@17..21
-              SELECTOR@17..21
-                SIMPLE_SELECTOR@17..21
-                  WHITESPACE@17..19 "\n\n"
-                  DOT@19..20 "."
-                  IDENT@20..21 "a"
-            BLOCK@21..28
-              LBRACE@21..21 ""
-              DECLARATION@21..28
-                PROPERTY@21..25
-                  WHITESPACE@21..24 "\n  "
-                  IDENT@24..25 "b"
-                COLON@25..26 ":"
-                VALUE@26..28
-                  VALUE@26..28
-                    WHITESPACE@26..27 " "
-                    IDENT@27..28 "c"
-                SEMICOLON@28..28 ""
-              RBRACE@28..28 ""
-          WHITESPACE@28..29 "\n"
-    "#]],
+            SOURCE_FILE@0..29
+              MIXIN_RULE@0..17
+                AT@0..1 "@"
+                IDENT@1..6 "mixin"
+                WHITESPACE@6..7 " "
+                IDENT@7..10 "foo"
+                BLOCK@10..17
+                  LBRACE@10..10 ""
+                  WHITESPACE@10..13 "\n  "
+                  SINGLE_LINE_COMMENT@13..17 "// c"
+                  RBRACE@17..17 ""
+              RULE_SET@17..28
+                SELECTOR_LIST@17..21
+                  SELECTOR@17..21
+                    SIMPLE_SELECTOR@17..21
+                      WHITESPACE@17..19 "\n\n"
+                      DOT@19..20 "."
+                      IDENT@20..21 "a"
+                BLOCK@21..28
+                  LBRACE@21..21 ""
+                  DECLARATION@21..28
+                    PROPERTY@21..25
+                      WHITESPACE@21..24 "\n  "
+                      IDENT@24..25 "b"
+                    COLON@25..26 ":"
+                    VALUE@26..28
+                      VALUE@26..28
+                        WHITESPACE@26..27 " "
+                        IDENT@27..28 "c"
+                    SEMICOLON@28..28 ""
+                  RBRACE@28..28 ""
+              WHITESPACE@28..29 "\n"
+        "#]],
     );
 }
 
@@ -3910,38 +3910,38 @@ fn if_with_a_comment_only_body_still_pairs_with_else() {
     check_tree(
         "@if $x\n  // c\n@else\n  a: b\n",
         expect![[r#"
-        SOURCE_FILE@0..27
-          IF_RULE@0..26
-            AT@0..1 "@"
-            IDENT@1..3 "if"
-            VARIABLE_REF@3..6
-              WHITESPACE@3..4 " "
-              DOLLAR@4..5 "$"
-              IDENT@5..6 "x"
-            BLOCK@6..13
-              WHITESPACE@6..9 "\n  "
-              SINGLE_LINE_COMMENT@9..13 "// c"
-              LBRACE@13..13 ""
-              RBRACE@13..13 ""
-            ELSE_CLAUSE@13..26
-              WHITESPACE@13..14 "\n"
-              AT@14..15 "@"
-              IDENT@15..19 "else"
-              BLOCK@19..26
-                WHITESPACE@19..22 "\n  "
-                LBRACE@22..22 ""
-                DECLARATION@22..26
-                  PROPERTY@22..23
-                    IDENT@22..23 "a"
-                  COLON@23..24 ":"
-                  VALUE@24..26
-                    VALUE@24..26
-                      WHITESPACE@24..25 " "
-                      IDENT@25..26 "b"
-                  SEMICOLON@26..26 ""
-                RBRACE@26..26 ""
-          WHITESPACE@26..27 "\n"
-    "#]],
+            SOURCE_FILE@0..27
+              IF_RULE@0..26
+                AT@0..1 "@"
+                IDENT@1..3 "if"
+                VARIABLE_REF@3..6
+                  WHITESPACE@3..4 " "
+                  DOLLAR@4..5 "$"
+                  IDENT@5..6 "x"
+                BLOCK@6..13
+                  LBRACE@6..6 ""
+                  WHITESPACE@6..9 "\n  "
+                  SINGLE_LINE_COMMENT@9..13 "// c"
+                  RBRACE@13..13 ""
+                ELSE_CLAUSE@13..26
+                  WHITESPACE@13..14 "\n"
+                  AT@14..15 "@"
+                  IDENT@15..19 "else"
+                  BLOCK@19..26
+                    LBRACE@19..19 ""
+                    DECLARATION@19..26
+                      PROPERTY@19..23
+                        WHITESPACE@19..22 "\n  "
+                        IDENT@22..23 "a"
+                      COLON@23..24 ":"
+                      VALUE@24..26
+                        VALUE@24..26
+                          WHITESPACE@24..25 " "
+                          IDENT@25..26 "b"
+                      SEMICOLON@26..26 ""
+                    RBRACE@26..26 ""
+              WHITESPACE@26..27 "\n"
+        "#]],
     );
 }
 
@@ -3950,19 +3950,19 @@ fn comment_only_body_at_end_of_file() {
     check_tree(
         "@mixin foo\n  // c\n",
         expect![[r#"
-        SOURCE_FILE@0..18
-          MIXIN_RULE@0..17
-            AT@0..1 "@"
-            IDENT@1..6 "mixin"
-            WHITESPACE@6..7 " "
-            IDENT@7..10 "foo"
-            BLOCK@10..17
-              WHITESPACE@10..13 "\n  "
-              SINGLE_LINE_COMMENT@13..17 "// c"
-              LBRACE@17..17 ""
-              RBRACE@17..17 ""
-          WHITESPACE@17..18 "\n"
-    "#]],
+            SOURCE_FILE@0..18
+              MIXIN_RULE@0..17
+                AT@0..1 "@"
+                IDENT@1..6 "mixin"
+                WHITESPACE@6..7 " "
+                IDENT@7..10 "foo"
+                BLOCK@10..17
+                  LBRACE@10..10 ""
+                  WHITESPACE@10..13 "\n  "
+                  SINGLE_LINE_COMMENT@13..17 "// c"
+                  RBRACE@17..17 ""
+              WHITESPACE@17..18 "\n"
+        "#]],
     );
 }
 
@@ -3971,49 +3971,49 @@ fn comment_before_body_content_stays_in_the_body() {
     check_tree(
         "@mixin foo\n  // c\n  b: c\n.d\n  e: f\n",
         expect![[r#"
-        SOURCE_FILE@0..35
-          MIXIN_RULE@0..24
-            AT@0..1 "@"
-            IDENT@1..6 "mixin"
-            WHITESPACE@6..7 " "
-            IDENT@7..10 "foo"
-            BLOCK@10..24
-              WHITESPACE@10..13 "\n  "
-              SINGLE_LINE_COMMENT@13..17 "// c"
-              WHITESPACE@17..20 "\n  "
-              LBRACE@20..20 ""
-              DECLARATION@20..24
-                PROPERTY@20..21
-                  IDENT@20..21 "b"
-                COLON@21..22 ":"
-                VALUE@22..24
-                  VALUE@22..24
-                    WHITESPACE@22..23 " "
-                    IDENT@23..24 "c"
-                SEMICOLON@24..24 ""
-              RBRACE@24..24 ""
-          RULE_SET@24..34
-            SELECTOR_LIST@24..27
-              SELECTOR@24..27
-                SIMPLE_SELECTOR@24..27
-                  WHITESPACE@24..25 "\n"
-                  DOT@25..26 "."
-                  IDENT@26..27 "d"
-            BLOCK@27..34
-              LBRACE@27..27 ""
-              DECLARATION@27..34
-                PROPERTY@27..31
-                  WHITESPACE@27..30 "\n  "
-                  IDENT@30..31 "e"
-                COLON@31..32 ":"
-                VALUE@32..34
-                  VALUE@32..34
-                    WHITESPACE@32..33 " "
-                    IDENT@33..34 "f"
-                SEMICOLON@34..34 ""
-              RBRACE@34..34 ""
-          WHITESPACE@34..35 "\n"
-    "#]],
+            SOURCE_FILE@0..35
+              MIXIN_RULE@0..24
+                AT@0..1 "@"
+                IDENT@1..6 "mixin"
+                WHITESPACE@6..7 " "
+                IDENT@7..10 "foo"
+                BLOCK@10..24
+                  LBRACE@10..10 ""
+                  DECLARATION@10..24
+                    PROPERTY@10..21
+                      WHITESPACE@10..13 "\n  "
+                      SINGLE_LINE_COMMENT@13..17 "// c"
+                      WHITESPACE@17..20 "\n  "
+                      IDENT@20..21 "b"
+                    COLON@21..22 ":"
+                    VALUE@22..24
+                      VALUE@22..24
+                        WHITESPACE@22..23 " "
+                        IDENT@23..24 "c"
+                    SEMICOLON@24..24 ""
+                  RBRACE@24..24 ""
+              RULE_SET@24..34
+                SELECTOR_LIST@24..27
+                  SELECTOR@24..27
+                    SIMPLE_SELECTOR@24..27
+                      WHITESPACE@24..25 "\n"
+                      DOT@25..26 "."
+                      IDENT@26..27 "d"
+                BLOCK@27..34
+                  LBRACE@27..27 ""
+                  DECLARATION@27..34
+                    PROPERTY@27..31
+                      WHITESPACE@27..30 "\n  "
+                      IDENT@30..31 "e"
+                    COLON@31..32 ":"
+                    VALUE@32..34
+                      VALUE@32..34
+                        WHITESPACE@32..33 " "
+                        IDENT@33..34 "f"
+                    SEMICOLON@34..34 ""
+                  RBRACE@34..34 ""
+              WHITESPACE@34..35 "\n"
+        "#]],
     );
 }
 
@@ -4023,51 +4023,85 @@ fn comment_between_a_header_and_its_continuation_is_skipped() {
     check_tree(
         "@for $i\n  // c\n  from 1 through 3\n  .a\n    b: $i\n",
         expect![[r#"
-        SOURCE_FILE@0..49
-          FOR_RULE@0..48
-            AT@0..1 "@"
-            IDENT@1..4 "for"
-            WHITESPACE@4..5 " "
-            DOLLAR@5..6 "$"
-            IDENT@6..7 "i"
-            WHITESPACE@7..10 "\n  "
-            SINGLE_LINE_COMMENT@10..14 "// c"
-            WHITESPACE@14..17 "\n  "
-            IDENT@17..21 "from"
-            NUMBER_LITERAL@21..23
-              WHITESPACE@21..22 " "
-              NUMBER@22..23 "1"
-            WHITESPACE@23..24 " "
-            IDENT@24..31 "through"
-            NUMBER_LITERAL@31..33
-              WHITESPACE@31..32 " "
-              NUMBER@32..33 "3"
-            BLOCK@33..48
-              WHITESPACE@33..36 "\n  "
-              LBRACE@36..36 ""
-              RULE_SET@36..48
-                SELECTOR_LIST@36..38
-                  SELECTOR@36..38
-                    SIMPLE_SELECTOR@36..38
-                      DOT@36..37 "."
-                      IDENT@37..38 "a"
-                BLOCK@38..48
-                  LBRACE@38..38 ""
-                  DECLARATION@38..48
-                    PROPERTY@38..44
-                      WHITESPACE@38..43 "\n    "
-                      IDENT@43..44 "b"
-                    COLON@44..45 ":"
-                    VALUE@45..48
-                      VARIABLE_REF@45..48
-                        WHITESPACE@45..46 " "
-                        DOLLAR@46..47 "$"
-                        IDENT@47..48 "i"
-                    SEMICOLON@48..48 ""
+            SOURCE_FILE@0..49
+              FOR_RULE@0..48
+                AT@0..1 "@"
+                IDENT@1..4 "for"
+                WHITESPACE@4..5 " "
+                DOLLAR@5..6 "$"
+                IDENT@6..7 "i"
+                WHITESPACE@7..10 "\n  "
+                SINGLE_LINE_COMMENT@10..14 "// c"
+                WHITESPACE@14..17 "\n  "
+                IDENT@17..21 "from"
+                NUMBER_LITERAL@21..23
+                  WHITESPACE@21..22 " "
+                  NUMBER@22..23 "1"
+                WHITESPACE@23..24 " "
+                IDENT@24..31 "through"
+                NUMBER_LITERAL@31..33
+                  WHITESPACE@31..32 " "
+                  NUMBER@32..33 "3"
+                BLOCK@33..48
+                  LBRACE@33..33 ""
+                  RULE_SET@33..48
+                    SELECTOR_LIST@33..38
+                      SELECTOR@33..38
+                        SIMPLE_SELECTOR@33..38
+                          WHITESPACE@33..36 "\n  "
+                          DOT@36..37 "."
+                          IDENT@37..38 "a"
+                    BLOCK@38..48
+                      LBRACE@38..38 ""
+                      DECLARATION@38..48
+                        PROPERTY@38..44
+                          WHITESPACE@38..43 "\n    "
+                          IDENT@43..44 "b"
+                        COLON@44..45 ":"
+                        VALUE@45..48
+                          VARIABLE_REF@45..48
+                            WHITESPACE@45..46 " "
+                            DOLLAR@46..47 "$"
+                            IDENT@47..48 "i"
+                        SEMICOLON@48..48 ""
+                      RBRACE@48..48 ""
                   RBRACE@48..48 ""
-              RBRACE@48..48 ""
-          WHITESPACE@48..49 "\n"
-    "#]],
+              WHITESPACE@48..49 "\n"
+        "#]],
+    );
+}
+
+#[test]
+fn deferred_block_opens_after_a_trailing_comment_and_before_the_newline() {
+    // An at-rule header defers its block-open decision to the next line. The virtual
+    // LBRACE still lands where an immediately opened block puts it: after the header
+    // line's own trivia, before the line break, so the newline leads the first child.
+    check_tree(
+        "@mixin foo // c\n  color: red\n",
+        expect![[r#"
+            SOURCE_FILE@0..29
+              MIXIN_RULE@0..28
+                AT@0..1 "@"
+                IDENT@1..6 "mixin"
+                WHITESPACE@6..7 " "
+                IDENT@7..10 "foo"
+                BLOCK@10..28
+                  WHITESPACE@10..11 " "
+                  SINGLE_LINE_COMMENT@11..15 "// c"
+                  LBRACE@15..15 ""
+                  DECLARATION@15..28
+                    PROPERTY@15..23
+                      WHITESPACE@15..18 "\n  "
+                      IDENT@18..23 "color"
+                    COLON@23..24 ":"
+                    VALUE@24..28
+                      VALUE@24..28
+                        WHITESPACE@24..25 " "
+                        IDENT@25..28 "red"
+                    SEMICOLON@28..28 ""
+                  RBRACE@28..28 ""
+              WHITESPACE@28..29 "\n"
+        "#]],
     );
 }
 
@@ -4076,45 +4110,45 @@ fn error_after_a_comment_in_a_body_stays_local() {
     check_tree(
         "@mixin foo\n  // c\n  )\n.e\n  f: g\n",
         expect![[r#"
-        SOURCE_FILE@0..32
-          MIXIN_RULE@0..21
-            AT@0..1 "@"
-            IDENT@1..6 "mixin"
-            WHITESPACE@6..7 " "
-            IDENT@7..10 "foo"
-            BLOCK@10..21
-              WHITESPACE@10..13 "\n  "
-              SINGLE_LINE_COMMENT@13..17 "// c"
-              WHITESPACE@17..20 "\n  "
-              LBRACE@20..20 ""
-              ERROR@20..21
-                RPAREN@20..21 ")"
-              SEMICOLON@21..21 ""
-              RBRACE@21..21 ""
-          RULE_SET@21..31
-            SELECTOR_LIST@21..24
-              SELECTOR@21..24
-                SIMPLE_SELECTOR@21..24
-                  WHITESPACE@21..22 "\n"
-                  DOT@22..23 "."
-                  IDENT@23..24 "e"
-            BLOCK@24..31
-              LBRACE@24..24 ""
-              DECLARATION@24..31
-                PROPERTY@24..28
-                  WHITESPACE@24..27 "\n  "
-                  IDENT@27..28 "f"
-                COLON@28..29 ":"
-                VALUE@29..31
-                  VALUE@29..31
-                    WHITESPACE@29..30 " "
-                    IDENT@30..31 "g"
-                SEMICOLON@31..31 ""
-              RBRACE@31..31 ""
-          WHITESPACE@31..32 "\n"
-        errors:
-          20..21: expected declaration or nested rule
-    "#]],
+            SOURCE_FILE@0..32
+              MIXIN_RULE@0..21
+                AT@0..1 "@"
+                IDENT@1..6 "mixin"
+                WHITESPACE@6..7 " "
+                IDENT@7..10 "foo"
+                BLOCK@10..21
+                  LBRACE@10..10 ""
+                  ERROR@10..21
+                    WHITESPACE@10..13 "\n  "
+                    SINGLE_LINE_COMMENT@13..17 "// c"
+                    WHITESPACE@17..20 "\n  "
+                    RPAREN@20..21 ")"
+                  SEMICOLON@21..21 ""
+                  RBRACE@21..21 ""
+              RULE_SET@21..31
+                SELECTOR_LIST@21..24
+                  SELECTOR@21..24
+                    SIMPLE_SELECTOR@21..24
+                      WHITESPACE@21..22 "\n"
+                      DOT@22..23 "."
+                      IDENT@23..24 "e"
+                BLOCK@24..31
+                  LBRACE@24..24 ""
+                  DECLARATION@24..31
+                    PROPERTY@24..28
+                      WHITESPACE@24..27 "\n  "
+                      IDENT@27..28 "f"
+                    COLON@28..29 ":"
+                    VALUE@29..31
+                      VALUE@29..31
+                        WHITESPACE@29..30 " "
+                        IDENT@30..31 "g"
+                    SEMICOLON@31..31 ""
+                  RBRACE@31..31 ""
+              WHITESPACE@31..32 "\n"
+            errors:
+              20..21: expected declaration or nested rule
+        "#]],
     );
 }
 
@@ -4123,41 +4157,41 @@ fn nested_include_with_comment_only_content_block_keeps_its_siblings() {
     check_tree(
         ".a\n  @include foo\n    // c\n    // d\n  b: c\n",
         expect![[r#"
-        SOURCE_FILE@0..43
-          RULE_SET@0..42
-            SELECTOR_LIST@0..2
-              SELECTOR@0..2
-                SIMPLE_SELECTOR@0..2
-                  DOT@0..1 "."
-                  IDENT@1..2 "a"
-            BLOCK@2..42
-              LBRACE@2..2 ""
-              INCLUDE_RULE@2..35
-                WHITESPACE@2..5 "\n  "
-                AT@5..6 "@"
-                IDENT@6..13 "include"
-                WHITESPACE@13..14 " "
-                IDENT@14..17 "foo"
-                BLOCK@17..35
-                  WHITESPACE@17..22 "\n    "
-                  SINGLE_LINE_COMMENT@22..26 "// c"
-                  WHITESPACE@26..31 "\n    "
-                  SINGLE_LINE_COMMENT@31..35 "// d"
-                  LBRACE@35..35 ""
-                  RBRACE@35..35 ""
-              DECLARATION@35..42
-                PROPERTY@35..39
-                  WHITESPACE@35..38 "\n  "
-                  IDENT@38..39 "b"
-                COLON@39..40 ":"
-                VALUE@40..42
-                  VALUE@40..42
-                    WHITESPACE@40..41 " "
-                    IDENT@41..42 "c"
-                SEMICOLON@42..42 ""
-              RBRACE@42..42 ""
-          WHITESPACE@42..43 "\n"
-    "#]],
+            SOURCE_FILE@0..43
+              RULE_SET@0..42
+                SELECTOR_LIST@0..2
+                  SELECTOR@0..2
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "a"
+                BLOCK@2..42
+                  LBRACE@2..2 ""
+                  INCLUDE_RULE@2..35
+                    WHITESPACE@2..5 "\n  "
+                    AT@5..6 "@"
+                    IDENT@6..13 "include"
+                    WHITESPACE@13..14 " "
+                    IDENT@14..17 "foo"
+                    BLOCK@17..35
+                      LBRACE@17..17 ""
+                      WHITESPACE@17..22 "\n    "
+                      SINGLE_LINE_COMMENT@22..26 "// c"
+                      WHITESPACE@26..31 "\n    "
+                      SINGLE_LINE_COMMENT@31..35 "// d"
+                      RBRACE@35..35 ""
+                  DECLARATION@35..42
+                    PROPERTY@35..39
+                      WHITESPACE@35..38 "\n  "
+                      IDENT@38..39 "b"
+                    COLON@39..40 ":"
+                    VALUE@40..42
+                      VALUE@40..42
+                        WHITESPACE@40..41 " "
+                        IDENT@41..42 "c"
+                    SEMICOLON@42..42 ""
+                  RBRACE@42..42 ""
+              WHITESPACE@42..43 "\n"
+        "#]],
     );
 }
 
