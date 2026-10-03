@@ -16,11 +16,23 @@ static ANGULAR_MATERIAL: LazyLock<String> = LazyLock::new(|| {
         return String::new();
     }
     let mut buf = String::new();
-    collect_scss_recursive(&corpus_dir, &mut buf);
+    collect_recursive(&corpus_dir, "scss", &mut buf);
     buf
 });
 
-fn collect_scss_recursive(dir: &Path, out: &mut String) {
+// Every file starts at column 0, so concatenating indented sources keeps each
+// file's block structure intact.
+static VUETIFY_SASS: LazyLock<String> = LazyLock::new(|| {
+    let corpus_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test-corpus/vuetify/src");
+    if !corpus_dir.exists() {
+        return String::new();
+    }
+    let mut buf = String::new();
+    collect_recursive(&corpus_dir, "sass", &mut buf);
+    buf
+});
+
+fn collect_recursive(dir: &Path, extension: &str, out: &mut String) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -28,8 +40,8 @@ fn collect_scss_recursive(dir: &Path, out: &mut String) {
     paths.sort();
     for path in paths {
         if path.is_dir() {
-            collect_scss_recursive(&path, out);
-        } else if path.extension().is_some_and(|ext| ext == "scss")
+            collect_recursive(&path, extension, out);
+        } else if path.extension().is_some_and(|ext| ext == extension)
             && let Ok(content) = std::fs::read_to_string(&path)
         {
             out.push_str(&content);
@@ -156,6 +168,32 @@ fn parse_and_build_tree_angular_material(bencher: Bencher<'_, '_>) {
             let (green, _) = sass_parser::parse_scss(s);
             SyntaxNode::new_root(green)
         });
+}
+
+// ── Vuetify (~290 KB indented-Sass corpus) ─────────────────────────────
+
+#[divan::bench]
+fn lex_vuetify_sass(bencher: Bencher<'_, '_>) {
+    let source = &*VUETIFY_SASS;
+    if source.is_empty() {
+        return;
+    }
+    bencher
+        .counter(divan::counter::BytesCount::of_str(source))
+        .with_inputs(|| source.as_str())
+        .bench_values(sass_parser::sass_lexer::sass_tokenize);
+}
+
+#[divan::bench]
+fn parse_vuetify_sass(bencher: Bencher<'_, '_>) {
+    let source = &*VUETIFY_SASS;
+    if source.is_empty() {
+        return;
+    }
+    bencher
+        .counter(divan::counter::BytesCount::of_str(source))
+        .with_inputs(|| source.as_str())
+        .bench_values(sass_parser::parse_sass);
 }
 
 // ── Incremental reparse benchmarks ──────────────────────────────────────

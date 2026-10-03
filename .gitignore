@@ -25,3 +25,4 @@ crates/sass-parser/fuzz/artifacts/
 /test-corpus/vuetify/
 /test-corpus/quasar/
 /test-corpus/sass-corpus-baseline.actual.txt
+/test-corpus/scss-corpus-baseline.actual.txt

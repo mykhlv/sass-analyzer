@@ -87,6 +87,15 @@ pub fn parse_scss(source: &str) -> (rowan::GreenNode, Vec<(String, TextRange)>) 
 /// with [`sass_lexer::sass_tokenize()`] to insert virtual `{`/`}`/`;` tokens
 /// based on indentation and newlines.
 pub fn parse_sass(source: &str) -> (rowan::GreenNode, Vec<(String, TextRange)>) {
+    parse_sass_legacy(source)
+}
+
+/// The indented-Sass pipeline built on [`sass_lexer::sass_tokenize()`], callable
+/// under its own name so that it stays available as the reference when
+/// [`parse_sass()`] moves to a different frontend: a differential test compares
+/// the two trees and error lists. Not part of the supported API.
+#[doc(hidden)]
+pub fn parse_sass_legacy(source: &str) -> (rowan::GreenNode, Vec<(String, TextRange)>) {
     let tokens = sass_lexer::sass_tokenize(source);
     let input = input::Input::from_tokens(&tokens);
     let mut parser = parser::Parser::new(input, source);

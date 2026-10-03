@@ -1,6 +1,6 @@
 use super::*;
 
-async fn get_selection_ranges(
+pub(super) async fn get_selection_ranges(
     reader: &mut (impl AsyncReadExt + Unpin),
     writer: &mut (impl AsyncWriteExt + Unpin),
     uri: &str,
@@ -16,7 +16,7 @@ async fn get_selection_ranges(
             "params": {
                 "textDocument": {
                     "uri": uri,
-                    "languageId": "scss",
+                    "languageId": language_id(uri),
                     "version": 1,
                     "text": scss
                 }
@@ -50,7 +50,7 @@ async fn get_selection_ranges(
 }
 
 /// Flatten a nested `SelectionRange` into a list of ranges from innermost to outermost.
-fn flatten_selection_range(sr: &Value) -> Vec<&Value> {
+pub(super) fn flatten_selection_range(sr: &Value) -> Vec<&Value> {
     let mut result = Vec::new();
     let mut current = sr;
     loop {
