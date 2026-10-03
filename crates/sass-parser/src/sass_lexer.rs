@@ -1,4 +1,4 @@
-use crate::lexer;
+use crate::lexer::{self, IndentedLexer, contains_newline};
 use crate::syntax_kind::SyntaxKind;
 use crate::text_range::TextSize;
 
@@ -76,8 +76,8 @@ impl StmtCtx<'_> {
 
 /// Transform SCSS tokens into a Sass-compatible token stream.
 ///
-/// Wraps the SCSS lexer and inserts virtual (zero-width) `LBRACE`/`RBRACE`/`SEMICOLON`
-/// tokens based on indentation and newlines. The resulting token stream can be fed
+/// Wraps [`lexer::IndentedLexer`] and inserts virtual (zero-width) `LBRACE`/`RBRACE`/
+/// `SEMICOLON` tokens based on indentation and newlines. The resulting token stream can be fed
 /// directly into `Input::from_tokens()` and then into the existing parser unchanged.
 ///
 /// # Indentation rules
@@ -86,7 +86,8 @@ impl StmtCtx<'_> {
 /// - Same indentation after content → virtual `;` (statement end)
 /// - Indentation decrease → virtual `;` + virtual `}` per closed level
 /// - Inside `()`, `[]`, or `#{}` → newlines are not significant
-/// - Continuation token at end of line → no virtual tokens
+/// - Continuation token at end of line → no virtual tokens, and a comment that starts the
+///   next line does not reach over the lines indented beneath it
 ///
 /// # Sass shorthands
 ///
@@ -97,8 +98,7 @@ pub fn sass_tokenize(source: &str) -> Vec<(SyntaxKind, &str)> {
 }
 
 /// Every newline-bearing WHITESPACE that [`sass_tokenize`] hands to its indentation logic
-/// (outside brackets and `//` comment continuations), as the whitespace's start offset and
-/// the indentation measured there.
+/// (outside brackets), as the whitespace's start offset and the indentation measured there.
 ///
 /// Reports what the lexer decides through its own code path, so that layout facts
 /// computed elsewhere can be checked against it without re-deriving which newlines it
@@ -118,8 +118,8 @@ fn tokenize_observing_newlines<'src>(
     source: &'src str,
     mut on_newline: impl FnMut(&'src str, u32),
 ) -> Vec<(SyntaxKind, &'src str)> {
-    let raw = lexer::tokenize(source);
-    let mut result = Vec::with_capacity(raw.len() + raw.len() / 4);
+    let mut tokens = Lookahead::new(source);
+    let mut result = Vec::with_capacity(source.len() / 4);
     let mut indent_stack: Vec<u32> = vec![0];
     let mut saw_content = false;
     let mut last = LastSig::new();
@@ -128,15 +128,13 @@ fn tokenize_observing_newlines<'src>(
     let mut nesting: u32 = 0;
     // Deferred block-open decision, set when a header line may still continue below.
     let mut pending_lbrace: Option<PendingLbrace> = None;
-    // Indentation of the current line (updated on each newline-containing WHITESPACE).
-    let mut current_line_indent: u32 = 0;
 
-    let mut i = 0;
-    while i < raw.len() {
-        let (kind, text) = raw[i];
+    // A comment starts a statement only on a line that does not continue the one above.
+    while let Some((kind, text)) = tokens.next(!saw_content && nesting == 0) {
         let prior_content = saw_content;
 
-        // Unterminated block comments are valid in indented Sass (close at dedent/EOF).
+        // A block comment that does not start a statement and never closes runs to the end of
+        // the file, as in SCSS. Dart Sass reports it; this lexer has no way to.
         let kind = if kind == SyntaxKind::ERROR && text.starts_with("/*") {
             SyntaxKind::MULTI_LINE_COMMENT
         } else {
@@ -188,8 +186,7 @@ fn tokenize_observing_newlines<'src>(
                 last.set(kind, text);
             }
             SyntaxKind::WHITESPACE if nesting == 0 && contains_newline(text) => {
-                current_line_indent = measure_indent_after_last_newline(text);
-                on_newline(text, current_line_indent);
+                on_newline(text, lexer::indent_after_last_newline(text));
                 process_newline(
                     text,
                     &mut result,
@@ -212,7 +209,7 @@ fn tokenize_observing_newlines<'src>(
             }
             // Sass shorthand: `+name` at statement start → @include
             SyntaxKind::PLUS if nesting == 0 && !saw_content => {
-                if i + 1 < raw.len() && raw[i + 1].0 == SyntaxKind::IDENT {
+                if tokens.peek(0) == SyntaxKind::IDENT {
                     result.push((SyntaxKind::AT, ""));
                     result.push((SyntaxKind::IDENT, text));
                     saw_content = true;
@@ -241,36 +238,6 @@ fn tokenize_observing_newlines<'src>(
                 last.set(kind, text);
                 ctx.after_dollar = true;
             }
-            // In indented Sass, standalone // comments extend to subsequent indented lines.
-            // Only applies when the comment is the sole content on its line (!saw_content).
-            SyntaxKind::SINGLE_LINE_COMMENT if nesting == 0 && !saw_content => {
-                result.push((kind, text));
-                let base = current_line_indent;
-                while i + 1 < raw.len() {
-                    let (nk, nt) = raw[i + 1];
-                    if nk == SyntaxKind::WHITESPACE && contains_newline(nt) {
-                        // A blank line breaks comment continuation.
-                        let next_indent = measure_indent_after_last_newline(nt);
-                        if line_break_count(nt) == 1 && next_indent > base {
-                            // Continuation line — emit whitespace, then retag line tokens.
-                            i += 1;
-                            result.push((SyntaxKind::WHITESPACE, nt));
-                            while i + 1 < raw.len() {
-                                let (tk, tt) = raw[i + 1];
-                                if tk == SyntaxKind::WHITESPACE && contains_newline(tt) {
-                                    break;
-                                }
-                                i += 1;
-                                result.push((SyntaxKind::SINGLE_LINE_COMMENT, tt));
-                            }
-                        } else {
-                            break;
-                        }
-                    } else {
-                        break;
-                    }
-                }
-            }
             _ if kind.is_trivia() => {
                 result.push((kind, text));
             }
@@ -281,7 +248,7 @@ fn tokenize_observing_newlines<'src>(
                 // Sass reads `foo:bar` in the indented syntax: setting the flag there
                 // turns the `*` of `.a:hover > *` into multiplication and swallows the
                 // block below. `::` lexes as a single COLON_COLON and never lands here.
-                if kind == SyntaxKind::COLON && nesting == 0 && !starts_identifier(&raw[i + 1..]) {
+                if kind == SyntaxKind::COLON && nesting == 0 && !starts_identifier(&mut tokens) {
                     ctx.saw_colon = true;
                 }
                 // Track when this IDENT is the directive keyword name (first IDENT after AT).
@@ -297,7 +264,6 @@ fn tokenize_observing_newlines<'src>(
         if !kind.is_trivia() {
             last.had_prior_content = prior_content;
         }
-        i += 1;
     }
 
     // Flush pending LBRACE at EOF
@@ -317,14 +283,53 @@ fn tokenize_observing_newlines<'src>(
     result
 }
 
-/// Whether `tokens` begins with something that can start an identifier, with no whitespace
-/// before it. Mirrors the parser's pseudo-class check.
-fn starts_identifier(tokens: &[(SyntaxKind, &str)]) -> bool {
-    match tokens {
-        [(SyntaxKind::IDENT | SyntaxKind::HASH_LBRACE, _), ..] => true,
-        [(SyntaxKind::MINUS, _), (next, _), ..] => {
-            matches!(next, SyntaxKind::IDENT | SyntaxKind::HASH_LBRACE)
+/// The indented lexer with up to two tokens of lookahead.
+struct Lookahead<'src> {
+    lexer: IndentedLexer<'src>,
+    peeked: [(SyntaxKind, &'src str); 2],
+    peeked_len: usize,
+}
+
+impl<'src> Lookahead<'src> {
+    fn new(source: &'src str) -> Self {
+        Self {
+            lexer: IndentedLexer::new(source),
+            peeked: [(SyntaxKind::EOF, ""); 2],
+            peeked_len: 0,
         }
+    }
+
+    /// The next token, `None` at EOF. `statement_position` is whether a comment here would
+    /// start a statement: false on a line that continues the one above.
+    fn next(&mut self, statement_position: bool) -> Option<(SyntaxKind, &'src str)> {
+        let token = if self.peeked_len == 0 {
+            self.lexer.next_token_where(statement_position)
+        } else {
+            let token = self.peeked[0];
+            self.peeked[0] = self.peeked[1];
+            self.peeked_len -= 1;
+            token
+        };
+        (token.0 != SyntaxKind::EOF).then_some(token)
+    }
+
+    /// The kind of the token `n` places past the next one. Lookahead only ever inspects the
+    /// rest of the current line, where no comment can start a statement.
+    fn peek(&mut self, n: usize) -> SyntaxKind {
+        while self.peeked_len <= n {
+            self.peeked[self.peeked_len] = self.lexer.next_token_where(false);
+            self.peeked_len += 1;
+        }
+        self.peeked[n].0
+    }
+}
+
+/// Whether the next tokens start an identifier, with no whitespace before it. Mirrors the
+/// parser's pseudo-class check.
+fn starts_identifier(tokens: &mut Lookahead<'_>) -> bool {
+    match tokens.peek(0) {
+        SyntaxKind::IDENT | SyntaxKind::HASH_LBRACE => true,
+        SyntaxKind::MINUS => matches!(tokens.peek(1), SyntaxKind::IDENT | SyntaxKind::HASH_LBRACE),
         _ => false,
     }
 }
@@ -595,7 +600,7 @@ fn process_newline<'src>(
     last: &LastSig<'_>,
     ctx: &mut StmtCtx<'_>,
 ) {
-    let new_indent = measure_indent_after_last_newline(ws_text);
+    let new_indent = lexer::indent_after_last_newline(ws_text);
     let current_indent = *indent_stack.last().unwrap_or(&0);
 
     // Continuation token at end of line → statement continues on the next line.
@@ -700,40 +705,6 @@ fn line_is_namespace_prefix(result: &[(SyntaxKind, &str)]) -> bool {
         [.., (SyntaxKind::WHITESPACE, ws)] => contains_newline(ws) || rest.len() == 1,
         _ => false,
     }
-}
-
-fn contains_newline(text: &str) -> bool {
-    text.contains(['\n', '\r', '\x0c'])
-}
-
-/// `\r\n` is one line break, as is a lone `\n`, `\r` or `\x0c`.
-fn line_break_count(text: &str) -> usize {
-    let bytes = text.as_bytes();
-    bytes
-        .iter()
-        .enumerate()
-        .filter(|&(i, &b)| match b {
-            b'\n' => i == 0 || bytes[i - 1] != b'\r',
-            b'\r' | b'\x0c' => true,
-            _ => false,
-        })
-        .count()
-}
-
-fn measure_indent_after_last_newline(text: &str) -> u32 {
-    let after = match text.rfind(['\n', '\r', '\x0c']) {
-        Some(pos) => &text[pos + 1..],
-        None => text,
-    };
-    let mut indent = 0u32;
-    for b in after.bytes() {
-        match b {
-            // Tabs count as 1 column, matching Dart Sass behavior.
-            b' ' | b'\t' => indent += 1,
-            _ => break,
-        }
-    }
-    indent
 }
 
 #[cfg(test)]

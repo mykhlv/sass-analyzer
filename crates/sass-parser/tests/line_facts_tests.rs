@@ -146,7 +146,7 @@ fn tabs_count_one_column_each() {
 #[test]
 fn comment_only_lines_keep_a_break_of_their_own() {
     check(
-        ".a\n  b: c\n// x\n    /* y */\n  d: e\n",
+        ".a\n  b: c\n/* x */\n    // y\n  d: e\n",
         expect![[r#"
             DOT "."
             IDENT "a"
@@ -212,14 +212,14 @@ fn empty_and_whitespace_only_input() {
 #[test]
 fn lexing_errors_do_not_disturb_the_facts() {
     check(
-        ".a\n  b: c\n  /* never closed\n  d: e\n",
+        ".a\n  b: c /* never closed\n  d: e\n",
         expect![[r#"
             DOT "."
             IDENT "a"
             IDENT "b" <- 2 spaces
             COLON ":"
             IDENT "c"
-            ERROR "/* never closed\n  d: e\n" <- 2 spaces
+            ERROR "/* never closed\n  d: e\n"
             EOF
         "#]],
     );
@@ -238,8 +238,56 @@ fn lexing_errors_do_not_disturb_the_facts() {
 }
 
 #[test]
-fn tokens_are_those_of_the_braced_input() {
-    let source = ".a\n  b: c\n// x\n  @include d(1,\n    2)\n";
+fn a_loud_comment_starting_a_statement_ends_at_the_dedent() {
+    check(
+        "/* a\n  b\n.c\n  d: e\n",
+        expect![[r#"
+        DOT "." <- 0
+        IDENT "c"
+        IDENT "d" <- 2 spaces
+        COLON ":"
+        IDENT "e"
+        EOF <- 0
+    "#]],
+    );
+}
+
+#[test]
+fn a_silent_comment_starting_a_statement_takes_the_deeper_lines() {
+    check(
+        "// a\n  b: c\n.d\n  e: f\n",
+        expect![[r#"
+        DOT "." <- 2 spaces, 0
+        IDENT "d"
+        IDENT "e" <- 2 spaces
+        COLON ":"
+        IDENT "f"
+        EOF <- 0
+    "#]],
+    );
+}
+
+/// The legacy lexer knows that a comment starting a continued line does not start a
+/// statement. The layout alone cannot, so these facts read it as one.
+#[test]
+fn the_layout_alone_reads_a_comment_on_a_continued_line_as_a_statement() {
+    let mismatches = line_facts::line_fact_mismatches(".a,\n// c\n  .b\n    x: y\n");
+    expect![[r#"
+        [
+            "layout comment 11..12 \".\"",
+            "layout comment 12..13 \"b\"",
+            "layout comment 18..19 \"x\"",
+            "layout comment 19..20 \":\"",
+            "layout comment 20..21 \" \"",
+            "layout comment 21..22 \"y\"",
+        ]
+    "#]]
+    .assert_debug_eq(&mismatches);
+}
+
+#[test]
+fn tokens_are_those_of_the_braced_input_where_no_comment_reaches_further() {
+    let source = ".a\n  b: c\n  // x\n  @include d(1,\n    2)\n";
     let braced = Input::from_source(source);
     let indented = Input::from_source_indented(source);
     assert_eq!(braced.len(), indented.len());
@@ -316,8 +364,8 @@ const LAYOUT_INPUTS: &[&str] = &[
 ];
 
 /// The cross-check is only as strong as the set of newlines legacy reports: it must
-/// skip those inside brackets and `//` continuations, and report every other one,
-/// trailing whitespace included.
+/// skip those inside brackets, and report every other one, the line breaks of a `//`
+/// comment's continuation lines and trailing whitespace included.
 #[test]
 fn legacy_reports_the_newlines_it_measures() {
     let source = "// c\n  more\n.a\n  b: fn(1,\n2)\n    ";
@@ -325,7 +373,7 @@ fn legacy_reports_the_newlines_it_measures() {
         .into_iter()
         .map(|(offset, column)| format!("{offset:?}={column}"))
         .collect();
-    expect![[r#"["11=0", "14=2", "28=4"]"#]].assert_eq(&format!("{seen:?}"));
+    expect![[r#"["4=2", "11=0", "14=2", "28=4"]"#]].assert_eq(&format!("{seen:?}"));
 }
 
 #[test]

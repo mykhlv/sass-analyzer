@@ -147,21 +147,24 @@ impl Input {
     /// Lexes directly into the `Input` fields, avoiding the intermediate
     /// `Vec<(SyntaxKind, &str)>` allocation that `tokenize()` + `from_tokens()` would create.
     pub fn from_source(source: &str) -> Self {
-        Self::lex::<false>(source)
+        Self::lex::<false>(source, lexer::Lexer::new(source))
     }
 
     /// Lex indented-Sass source and build `Input` with its layout facts.
     ///
-    /// The tokens are exactly those of [`Input::from_source`]. The facts are gathered in
-    /// the same pass, and only here: `from_source` compiles without that code.
+    /// The tokens are those of [`Input::from_source`] except where a comment reaches over
+    /// the lines indented beneath it (see [`lexer::IndentedLexer`]). The facts are gathered
+    /// in the same pass, and only here: `from_source` compiles without that code.
     pub fn from_source_indented(source: &str) -> Self {
-        Self::lex::<true>(source)
+        Self::lex::<true>(source, lexer::IndentedLexer::new(source))
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn lex<const LAYOUT: bool>(source: &str) -> Self {
+    fn lex<'src, const LAYOUT: bool>(
+        source: &'src str,
+        mut lexer: impl lexer::TokenSource<'src>,
+    ) -> Self {
         let estimated_tokens = source.len() / 5;
-        let mut lexer = lexer::Lexer::new(source);
         let mut kinds = Vec::with_capacity(estimated_tokens);
         let mut ranges = Vec::with_capacity(estimated_tokens);
         let mut all_trivia = Vec::with_capacity(estimated_tokens / 2);

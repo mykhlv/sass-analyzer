@@ -406,7 +406,7 @@ fn collect_all_cases() -> Vec<TestCase> {
 }
 
 /// Every indented case has layout facts that reproduce the indentation the legacy
-/// indented lexer measures at each newline.
+/// indented lexer measures at each newline, and the same comments.
 #[test]
 #[ignore = "requires downloading sass-spec corpus"]
 fn sass_spec_line_facts_match_legacy() {

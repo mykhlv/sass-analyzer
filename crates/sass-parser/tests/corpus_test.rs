@@ -450,7 +450,8 @@ fn scss_corpora_match_baseline() {
 }
 
 /// Every file of the indented corpora, `.scss` ones included, has layout facts that
-/// reproduce the indentation the legacy indented lexer measures at each newline.
+/// reproduce the indentation the legacy indented lexer measures at each newline, and the
+/// same comments.
 #[test]
 #[ignore = "requires downloading test corpus"]
 fn sass_corpora_line_facts_match_legacy() {

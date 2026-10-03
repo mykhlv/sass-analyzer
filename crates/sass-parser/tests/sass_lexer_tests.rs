@@ -14,6 +14,10 @@ fn check_parse(source: &str) -> String {
         mismatches.is_empty(),
         "layout facts disagree with the legacy lexer: {mismatches:#?}"
     );
+    parse_tree(source)
+}
+
+fn parse_tree(source: &str) -> String {
     let (green, errs) = sass_parser::parse_sass(source);
     let tree = rowan::SyntaxNode::<SassLanguage>::new_root(green);
     assert_eq!(
@@ -34,6 +38,18 @@ fn check_parse(source: &str) -> String {
 #[allow(clippy::needless_pass_by_value)]
 fn check_tree(source: &str, expect: Expect) {
     expect.assert_eq(&check_parse(source));
+}
+
+/// For a comment that starts a line continuing the one above. Only the legacy lexer,
+/// which tracks continuations, sees that such a comment does not start a statement; the
+/// layout alone reads it as one, so the cross-check must disagree here.
+#[allow(clippy::needless_pass_by_value)]
+fn check_tree_on_a_continued_line(source: &str, expect: Expect) {
+    assert!(
+        !line_facts::line_fact_mismatches(source).is_empty(),
+        "the layout alone already agrees with the legacy lexer on {source:?}"
+    );
+    expect.assert_eq(&parse_tree(source));
 }
 
 // ── Empty input ──────────────────────────────────────────────────────
@@ -4630,6 +4646,1072 @@ fn pseudo_class_rule_nested_in_the_indented_syntax_is_unaffected() {
                   RBRACE@21..21 ""
               RBRACE@21..21 ""
           WHITESPACE@21..22 "\n"
+    "#]],
+    );
+}
+
+// ── Comment extent ───────────────────────────────────────────────────
+//
+// A comment that starts a statement reaches over the lines indented beneath it, and a
+// loud one needs no `*/`. Anywhere else the SCSS rules apply.
+
+#[test]
+fn loud_comment_ends_at_the_first_line_not_indented_beneath_it() {
+    check_tree(
+        "/* loud\n  still comment\n.a\n  b: c\n.d\n  e: f\n",
+        expect![[r#"
+            SOURCE_FILE@0..44
+              RULE_SET@0..33
+                SELECTOR_LIST@0..26
+                  SELECTOR@0..26
+                    SIMPLE_SELECTOR@0..26
+                      MULTI_LINE_COMMENT@0..23 "/* loud\n  still comment"
+                      WHITESPACE@23..24 "\n"
+                      DOT@24..25 "."
+                      IDENT@25..26 "a"
+                BLOCK@26..33
+                  LBRACE@26..26 ""
+                  DECLARATION@26..33
+                    PROPERTY@26..30
+                      WHITESPACE@26..29 "\n  "
+                      IDENT@29..30 "b"
+                    COLON@30..31 ":"
+                    VALUE@31..33
+                      VALUE@31..33
+                        WHITESPACE@31..32 " "
+                        IDENT@32..33 "c"
+                    SEMICOLON@33..33 ""
+                  RBRACE@33..33 ""
+              RULE_SET@33..43
+                SELECTOR_LIST@33..36
+                  SELECTOR@33..36
+                    SIMPLE_SELECTOR@33..36
+                      WHITESPACE@33..34 "\n"
+                      DOT@34..35 "."
+                      IDENT@35..36 "d"
+                BLOCK@36..43
+                  LBRACE@36..36 ""
+                  DECLARATION@36..43
+                    PROPERTY@36..40
+                      WHITESPACE@36..39 "\n  "
+                      IDENT@39..40 "e"
+                    COLON@40..41 ":"
+                    VALUE@41..43
+                      VALUE@41..43
+                        WHITESPACE@41..42 " "
+                        IDENT@42..43 "f"
+                    SEMICOLON@43..43 ""
+                  RBRACE@43..43 ""
+              WHITESPACE@43..44 "\n"
+        "#]],
+    );
+}
+
+#[test]
+fn sass_documentation_comment_example() {
+    check_tree(
+        "// This comment won't be included in the CSS.\n\n/* But this comment will, except in compressed mode.\n\n/* It can also contain interpolation:\n * 1 + 1 = #{1 + 1}\n\n/*! This comment will be included even in compressed mode.\n\np .sans\n  font: Helvetica, /* Inline comments must be closed. */ sans-serif\n",
+        expect![[r#"
+            SOURCE_FILE@0..296
+              RULE_SET@0..295
+                SELECTOR_LIST@0..227
+                  SELECTOR@0..227
+                    SIMPLE_SELECTOR@0..221
+                      SINGLE_LINE_COMMENT@0..45 "// This comment won't be included in the CSS."
+                      WHITESPACE@45..47 "\n\n"
+                      MULTI_LINE_COMMENT@47..99 "/* But this comment will, except in compressed mode."
+                      WHITESPACE@99..101 "\n\n"
+                      MULTI_LINE_COMMENT@101..158 "/* It can also contain interpolation:\n * 1 + 1 = #{1 + 1}"
+                      WHITESPACE@158..160 "\n\n"
+                      MULTI_LINE_COMMENT@160..218 "/*! This comment will be included even in compressed mode."
+                      WHITESPACE@218..220 "\n\n"
+                      IDENT@220..221 "p"
+                    SIMPLE_SELECTOR@221..227
+                      WHITESPACE@221..222 " "
+                      DOT@222..223 "."
+                      IDENT@223..227 "sans"
+                BLOCK@227..295
+                  LBRACE@227..227 ""
+                  DECLARATION@227..295
+                    PROPERTY@227..234
+                      WHITESPACE@227..230 "\n  "
+                      IDENT@230..234 "font"
+                    COLON@234..235 ":"
+                    VALUE@235..295
+                      VALUE@235..245
+                        WHITESPACE@235..236 " "
+                        IDENT@236..245 "Helvetica"
+                      COMMA@245..246 ","
+                      VALUE@246..295
+                        WHITESPACE@246..247 " "
+                        MULTI_LINE_COMMENT@247..284 "/* Inline comments must be closed. */"
+                        WHITESPACE@284..285 " "
+                        IDENT@285..295 "sans-serif"
+                    SEMICOLON@295..295 ""
+                  RBRACE@295..295 ""
+              WHITESPACE@295..296 "\n"
+        "#]],
+    );
+}
+
+/// The eight comments of sass-spec `non_conformant/sass/comment/loud.hrx`.
+#[test]
+fn every_loud_comment_of_the_sass_spec_example_is_its_own() {
+    check_tree(
+        "/* Single-line\n\n/*\n  Multi\n  line\n\n/* Multiline starting on\n   the first line\n\n/* Preserves\n\n   empty\n\n\n   lines\n\n/* Ignores comment closer */\n\n/*\n  Handles\n         weird\n   indentation\n       gracefully\n\n/* Even\n      when\n     it starts\n         on the\n       first line\n\n/* Allows interpolation: #{1 + 1}\n",
+        expect![[r#"
+            SOURCE_FILE@0..309
+              MULTI_LINE_COMMENT@0..14 "/* Single-line"
+              WHITESPACE@14..16 "\n\n"
+              MULTI_LINE_COMMENT@16..33 "/*\n  Multi\n  line"
+              WHITESPACE@33..35 "\n\n"
+              MULTI_LINE_COMMENT@35..77 "/* Multiline starting on\n   the first line"
+              WHITESPACE@77..79 "\n\n"
+              MULTI_LINE_COMMENT@79..112 "/* Preserves\n\n   empty\n\n\n   lines"
+              WHITESPACE@112..114 "\n\n"
+              MULTI_LINE_COMMENT@114..142 "/* Ignores comment closer */"
+              WHITESPACE@142..144 "\n\n"
+              MULTI_LINE_COMMENT@144..204 "/*\n  Handles\n         weird\n   indentation\n       gracefully"
+              WHITESPACE@204..206 "\n\n"
+              MULTI_LINE_COMMENT@206..273 "/* Even\n      when\n     it starts\n         on the\n       first line"
+              WHITESPACE@273..275 "\n\n"
+              MULTI_LINE_COMMENT@275..308 "/* Allows interpolation: #{1 + 1}"
+              WHITESPACE@308..309 "\n"
+        "#]],
+    );
+}
+
+#[test]
+fn unclosed_loud_comment_in_a_body_ends_before_a_dedented_rule() {
+    check_tree(
+        ".a\n  /* note\n.b\n  c: d\n",
+        expect![[r#"
+        SOURCE_FILE@0..23
+          RULE_SET@0..12
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            BLOCK@2..12
+              LBRACE@2..2 ""
+              WHITESPACE@2..5 "\n  "
+              MULTI_LINE_COMMENT@5..12 "/* note"
+              RBRACE@12..12 ""
+          RULE_SET@12..22
+            SELECTOR_LIST@12..15
+              SELECTOR@12..15
+                SIMPLE_SELECTOR@12..15
+                  WHITESPACE@12..13 "\n"
+                  DOT@13..14 "."
+                  IDENT@14..15 "b"
+            BLOCK@15..22
+              LBRACE@15..15 ""
+              DECLARATION@15..22
+                PROPERTY@15..19
+                  WHITESPACE@15..18 "\n  "
+                  IDENT@18..19 "c"
+                COLON@19..20 ":"
+                VALUE@20..22
+                  VALUE@20..22
+                    WHITESPACE@20..21 " "
+                    IDENT@21..22 "d"
+                SEMICOLON@22..22 ""
+              RBRACE@22..22 ""
+          WHITESPACE@22..23 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn loud_comment_in_a_body_ends_before_the_next_declaration() {
+    check_tree(
+        ".a\n  b: c\n  /* x\n    y\n  d: e\n",
+        expect![[r#"
+        SOURCE_FILE@0..30
+          RULE_SET@0..29
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            BLOCK@2..29
+              LBRACE@2..2 ""
+              DECLARATION@2..9
+                PROPERTY@2..6
+                  WHITESPACE@2..5 "\n  "
+                  IDENT@5..6 "b"
+                COLON@6..7 ":"
+                VALUE@7..9
+                  VALUE@7..9
+                    WHITESPACE@7..8 " "
+                    IDENT@8..9 "c"
+                SEMICOLON@9..9 ""
+              DECLARATION@9..29
+                PROPERTY@9..26
+                  WHITESPACE@9..12 "\n  "
+                  MULTI_LINE_COMMENT@12..22 "/* x\n    y"
+                  WHITESPACE@22..25 "\n  "
+                  IDENT@25..26 "d"
+                COLON@26..27 ":"
+                VALUE@27..29
+                  VALUE@27..29
+                    WHITESPACE@27..28 " "
+                    IDENT@28..29 "e"
+                SEMICOLON@29..29 ""
+              RBRACE@29..29 ""
+          WHITESPACE@29..30 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn loud_comment_continuation_may_look_like_code() {
+    check_tree(
+        "/* a\n  #{1 + 1} { c }\n  \"d\n.e\n  f: g\n",
+        expect![[r#"
+            SOURCE_FILE@0..37
+              RULE_SET@0..36
+                SELECTOR_LIST@0..29
+                  SELECTOR@0..29
+                    SIMPLE_SELECTOR@0..29
+                      MULTI_LINE_COMMENT@0..26 "/* a\n  #{1 + 1} { c }\n  \"d"
+                      WHITESPACE@26..27 "\n"
+                      DOT@27..28 "."
+                      IDENT@28..29 "e"
+                BLOCK@29..36
+                  LBRACE@29..29 ""
+                  DECLARATION@29..36
+                    PROPERTY@29..33
+                      WHITESPACE@29..32 "\n  "
+                      IDENT@32..33 "f"
+                    COLON@33..34 ":"
+                    VALUE@34..36
+                      VALUE@34..36
+                        WHITESPACE@34..35 " "
+                        IDENT@35..36 "g"
+                    SEMICOLON@36..36 ""
+                  RBRACE@36..36 ""
+              WHITESPACE@36..37 "\n"
+        "#]],
+    );
+}
+
+#[test]
+fn loud_comment_closed_on_a_continuation_line() {
+    check_tree(
+        "/* a\n  b */\n.c\n  d: e\n",
+        expect![[r#"
+        SOURCE_FILE@0..22
+          RULE_SET@0..21
+            SELECTOR_LIST@0..14
+              SELECTOR@0..14
+                SIMPLE_SELECTOR@0..14
+                  MULTI_LINE_COMMENT@0..11 "/* a\n  b */"
+                  WHITESPACE@11..12 "\n"
+                  DOT@12..13 "."
+                  IDENT@13..14 "c"
+            BLOCK@14..21
+              LBRACE@14..14 ""
+              DECLARATION@14..21
+                PROPERTY@14..18
+                  WHITESPACE@14..17 "\n  "
+                  IDENT@17..18 "d"
+                COLON@18..19 ":"
+                VALUE@19..21
+                  VALUE@19..21
+                    WHITESPACE@19..20 " "
+                    IDENT@20..21 "e"
+                SEMICOLON@21..21 ""
+              RBRACE@21..21 ""
+          WHITESPACE@21..22 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn closed_loud_comment_followed_by_indented_comment_lines() {
+    check_tree(
+        "/* a */\n  // b\n.c\n  d: e\n",
+        expect![[r#"
+        SOURCE_FILE@0..25
+          RULE_SET@0..24
+            SELECTOR_LIST@0..17
+              SELECTOR@0..17
+                SIMPLE_SELECTOR@0..17
+                  MULTI_LINE_COMMENT@0..7 "/* a */"
+                  WHITESPACE@7..10 "\n  "
+                  SINGLE_LINE_COMMENT@10..14 "// b"
+                  WHITESPACE@14..15 "\n"
+                  DOT@15..16 "."
+                  IDENT@16..17 "c"
+            BLOCK@17..24
+              LBRACE@17..17 ""
+              DECLARATION@17..24
+                PROPERTY@17..21
+                  WHITESPACE@17..20 "\n  "
+                  IDENT@20..21 "d"
+                COLON@21..22 ":"
+                VALUE@22..24
+                  VALUE@22..24
+                    WHITESPACE@22..23 " "
+                    IDENT@23..24 "e"
+                SEMICOLON@24..24 ""
+              RBRACE@24..24 ""
+          WHITESPACE@24..25 "\n"
+    "#]],
+    );
+}
+
+/// Dart Sass rejects this: `Unexpected text after end of comment`. The comment ends at
+/// its `*/` either way; the text beneath it is left to the parser, which has no rule
+/// against it.
+#[test]
+fn closed_loud_comment_followed_by_indented_text_is_a_known_limitation() {
+    check_tree(
+        "/* a */\n  b\n.c\n  d: e\n",
+        expect![[r#"
+        SOURCE_FILE@0..22
+          RULE_SET@0..11
+            SELECTOR_LIST@0..11
+              SELECTOR@0..11
+                SIMPLE_SELECTOR@0..11
+                  MULTI_LINE_COMMENT@0..7 "/* a */"
+                  WHITESPACE@7..10 "\n  "
+                  IDENT@10..11 "b"
+          SEMICOLON@11..11 ""
+          RULE_SET@11..21
+            SELECTOR_LIST@11..14
+              SELECTOR@11..14
+                SIMPLE_SELECTOR@11..14
+                  WHITESPACE@11..12 "\n"
+                  DOT@12..13 "."
+                  IDENT@13..14 "c"
+            BLOCK@14..21
+              LBRACE@14..14 ""
+              DECLARATION@14..21
+                PROPERTY@14..18
+                  WHITESPACE@14..17 "\n  "
+                  IDENT@17..18 "d"
+                COLON@18..19 ":"
+                VALUE@19..21
+                  VALUE@19..21
+                    WHITESPACE@19..20 " "
+                    IDENT@20..21 "e"
+                SEMICOLON@21..21 ""
+              RBRACE@21..21 ""
+          WHITESPACE@21..22 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn loud_comment_with_nothing_after_the_opener_takes_the_next_line_whatever_its_indent() {
+    check_tree(
+        "/*\n.a\n  b: c\n",
+        expect![[r#"
+        SOURCE_FILE@0..13
+          MULTI_LINE_COMMENT@0..12 "/*\n.a\n  b: c"
+          WHITESPACE@12..13 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn loud_comment_keeps_its_blank_lines() {
+    check_tree(
+        "/* a\n\n  b\n\n.c\n  d: e\n",
+        expect![[r#"
+        SOURCE_FILE@0..21
+          RULE_SET@0..20
+            SELECTOR_LIST@0..13
+              SELECTOR@0..13
+                SIMPLE_SELECTOR@0..13
+                  MULTI_LINE_COMMENT@0..9 "/* a\n\n  b"
+                  WHITESPACE@9..11 "\n\n"
+                  DOT@11..12 "."
+                  IDENT@12..13 "c"
+            BLOCK@13..20
+              LBRACE@13..13 ""
+              DECLARATION@13..20
+                PROPERTY@13..17
+                  WHITESPACE@13..16 "\n  "
+                  IDENT@16..17 "d"
+                COLON@17..18 ":"
+                VALUE@18..20
+                  VALUE@18..20
+                    WHITESPACE@18..19 " "
+                    IDENT@19..20 "e"
+                SEMICOLON@20..20 ""
+              RBRACE@20..20 ""
+          WHITESPACE@20..21 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn loud_comment_closer_on_a_dedented_line_is_an_error() {
+    check_tree(
+        "/* a\n*/\n.b\n  c: d\n",
+        expect![[r#"
+        SOURCE_FILE@0..18
+          RULE_SET@0..6
+            SELECTOR_LIST@0..6
+              SELECTOR@0..6
+                SIMPLE_SELECTOR@0..6
+                  MULTI_LINE_COMMENT@0..4 "/* a"
+                  WHITESPACE@4..5 "\n"
+                  STAR@5..6 "*"
+          ERROR@6..7
+            SLASH@6..7 "/"
+          RULE_SET@7..17
+            SELECTOR_LIST@7..10
+              SELECTOR@7..10
+                SIMPLE_SELECTOR@7..10
+                  WHITESPACE@7..8 "\n"
+                  DOT@8..9 "."
+                  IDENT@9..10 "b"
+            BLOCK@10..17
+              LBRACE@10..10 ""
+              DECLARATION@10..17
+                PROPERTY@10..14
+                  WHITESPACE@10..13 "\n  "
+                  IDENT@13..14 "c"
+                COLON@14..15 ":"
+                VALUE@15..17
+                  VALUE@15..17
+                    WHITESPACE@15..16 " "
+                    IDENT@16..17 "d"
+                SEMICOLON@17..17 ""
+              RBRACE@17..17 ""
+          WHITESPACE@17..18 "\n"
+        errors:
+          6..7: expected rule
+    "#]],
+    );
+}
+
+/// Dart Sass reports `expected more input.` at the end of the file. A comment after
+/// content follows the SCSS rule, and the lexer has no way to report one never closed.
+#[test]
+fn unclosed_loud_comment_after_content_runs_to_the_end_of_the_file() {
+    check_tree(
+        ".a /* x\n  y\n.b\n  c: d\n",
+        expect![[r#"
+        SOURCE_FILE@0..22
+          RULE_SET@0..2
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+          WHITESPACE@2..3 " "
+          MULTI_LINE_COMMENT@3..22 "/* x\n  y\n.b\n  c: d\n"
+          SEMICOLON@22..22 ""
+    "#]],
+    );
+}
+
+#[test]
+fn loud_comment_on_a_continued_line_follows_the_scss_rule() {
+    check_tree(
+        "$a: 1 +\n  /* x\n    y */\n  2\n.b\n  c: $a\n",
+        expect![[r#"
+            SOURCE_FILE@0..39
+              VARIABLE_DECL@0..27
+                DOLLAR@0..1 "$"
+                IDENT@1..2 "a"
+                COLON@2..3 ":"
+                BINARY_EXPR@3..27
+                  NUMBER_LITERAL@3..5
+                    WHITESPACE@3..4 " "
+                    NUMBER@4..5 "1"
+                  WHITESPACE@5..6 " "
+                  PLUS@6..7 "+"
+                  NUMBER_LITERAL@7..27
+                    WHITESPACE@7..10 "\n  "
+                    MULTI_LINE_COMMENT@10..23 "/* x\n    y */"
+                    WHITESPACE@23..26 "\n  "
+                    NUMBER@26..27 "2"
+                SEMICOLON@27..27 ""
+              RULE_SET@27..38
+                SELECTOR_LIST@27..30
+                  SELECTOR@27..30
+                    SIMPLE_SELECTOR@27..30
+                      WHITESPACE@27..28 "\n"
+                      DOT@28..29 "."
+                      IDENT@29..30 "b"
+                BLOCK@30..38
+                  LBRACE@30..30 ""
+                  DECLARATION@30..38
+                    PROPERTY@30..34
+                      WHITESPACE@30..33 "\n  "
+                      IDENT@33..34 "c"
+                    COLON@34..35 ":"
+                    VALUE@35..38
+                      VARIABLE_REF@35..38
+                        WHITESPACE@35..36 " "
+                        DOLLAR@36..37 "$"
+                        IDENT@37..38 "a"
+                    SEMICOLON@38..38 ""
+                  RBRACE@38..38 ""
+              WHITESPACE@38..39 "\n"
+        "#]],
+    );
+}
+
+#[test]
+fn loud_comment_with_carriage_return_line_endings() {
+    check_tree(
+        "/* a\r  b\r.c\r  d: e\r",
+        expect![[r#"
+        SOURCE_FILE@0..19
+          RULE_SET@0..18
+            SELECTOR_LIST@0..11
+              SELECTOR@0..11
+                SIMPLE_SELECTOR@0..11
+                  MULTI_LINE_COMMENT@0..8 "/* a\r  b"
+                  WHITESPACE@8..9 "\r"
+                  DOT@9..10 "."
+                  IDENT@10..11 "c"
+            BLOCK@11..18
+              LBRACE@11..11 ""
+              DECLARATION@11..18
+                PROPERTY@11..15
+                  WHITESPACE@11..14 "\r  "
+                  IDENT@14..15 "d"
+                COLON@15..16 ":"
+                VALUE@16..18
+                  VALUE@16..18
+                    WHITESPACE@16..17 " "
+                    IDENT@17..18 "e"
+                SEMICOLON@18..18 ""
+              RBRACE@18..18 ""
+          WHITESPACE@18..19 "\r"
+    "#]],
+    );
+}
+
+#[test]
+fn loud_comment_with_form_feed_line_endings() {
+    check_tree(
+        "/* a\x0c  b\x0c.c\x0c  d: e\x0c",
+        expect![[r#"
+        SOURCE_FILE@0..19
+          RULE_SET@0..18
+            SELECTOR_LIST@0..11
+              SELECTOR@0..11
+                SIMPLE_SELECTOR@0..11
+                  MULTI_LINE_COMMENT@0..8 "/* a\u{c}  b"
+                  WHITESPACE@8..9 "\u{c}"
+                  DOT@9..10 "."
+                  IDENT@10..11 "c"
+            BLOCK@11..18
+              LBRACE@11..11 ""
+              DECLARATION@11..18
+                PROPERTY@11..15
+                  WHITESPACE@11..14 "\u{c}  "
+                  IDENT@14..15 "d"
+                COLON@15..16 ":"
+                VALUE@16..18
+                  VALUE@16..18
+                    WHITESPACE@16..17 " "
+                    IDENT@17..18 "e"
+                SEMICOLON@18..18 ""
+              RBRACE@18..18 ""
+          WHITESPACE@18..19 "\u{c}"
+    "#]],
+    );
+}
+
+#[test]
+fn silent_comment_continues_over_deeper_lines() {
+    check_tree(
+        "// c\n  more\n    deeper\n.a\n  b: c\n",
+        expect![[r#"
+            SOURCE_FILE@0..33
+              RULE_SET@0..32
+                SELECTOR_LIST@0..25
+                  SELECTOR@0..25
+                    SIMPLE_SELECTOR@0..25
+                      SINGLE_LINE_COMMENT@0..4 "// c"
+                      WHITESPACE@4..7 "\n  "
+                      SINGLE_LINE_COMMENT@7..11 "more"
+                      WHITESPACE@11..16 "\n    "
+                      SINGLE_LINE_COMMENT@16..22 "deeper"
+                      WHITESPACE@22..23 "\n"
+                      DOT@23..24 "."
+                      IDENT@24..25 "a"
+                BLOCK@25..32
+                  LBRACE@25..25 ""
+                  DECLARATION@25..32
+                    PROPERTY@25..29
+                      WHITESPACE@25..28 "\n  "
+                      IDENT@28..29 "b"
+                    COLON@29..30 ":"
+                    VALUE@30..32
+                      VALUE@30..32
+                        WHITESPACE@30..31 " "
+                        IDENT@31..32 "c"
+                    SEMICOLON@32..32 ""
+                  RBRACE@32..32 ""
+              WHITESPACE@32..33 "\n"
+        "#]],
+    );
+}
+
+#[test]
+fn silent_comment_in_a_body_ends_before_the_next_declaration() {
+    check_tree(
+        ".a\n  // c\n    more\n  b: c\n",
+        expect![[r#"
+        SOURCE_FILE@0..26
+          RULE_SET@0..25
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            BLOCK@2..25
+              LBRACE@2..2 ""
+              DECLARATION@2..25
+                PROPERTY@2..22
+                  WHITESPACE@2..5 "\n  "
+                  SINGLE_LINE_COMMENT@5..9 "// c"
+                  WHITESPACE@9..14 "\n    "
+                  SINGLE_LINE_COMMENT@14..18 "more"
+                  WHITESPACE@18..21 "\n  "
+                  IDENT@21..22 "b"
+                COLON@22..23 ":"
+                VALUE@23..25
+                  VALUE@23..25
+                    WHITESPACE@23..24 " "
+                    IDENT@24..25 "c"
+                SEMICOLON@25..25 ""
+              RBRACE@25..25 ""
+          WHITESPACE@25..26 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn silent_comment_reaches_over_a_less_indented_declaration() {
+    check_tree(
+        ".a\n  b: c\n// x\n  d: e\n",
+        expect![[r#"
+        SOURCE_FILE@0..22
+          RULE_SET@0..9
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            BLOCK@2..9
+              LBRACE@2..2 ""
+              DECLARATION@2..9
+                PROPERTY@2..6
+                  WHITESPACE@2..5 "\n  "
+                  IDENT@5..6 "b"
+                COLON@6..7 ":"
+                VALUE@7..9
+                  VALUE@7..9
+                    WHITESPACE@7..8 " "
+                    IDENT@8..9 "c"
+                SEMICOLON@9..9 ""
+              RBRACE@9..9 ""
+          WHITESPACE@9..10 "\n"
+          SINGLE_LINE_COMMENT@10..14 "// x"
+          WHITESPACE@14..17 "\n  "
+          SINGLE_LINE_COMMENT@17..18 "d"
+          SINGLE_LINE_COMMENT@18..19 ":"
+          SINGLE_LINE_COMMENT@19..20 " "
+          SINGLE_LINE_COMMENT@20..21 "e"
+          WHITESPACE@21..22 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn silent_comment_continuation_line_ends_with_its_line() {
+    check_tree(
+        "// c\n  it's\n.a\n  b: c\n.d\n  e: 'f'\n",
+        expect![[r#"
+            SOURCE_FILE@0..34
+              RULE_SET@0..21
+                SELECTOR_LIST@0..14
+                  SELECTOR@0..14
+                    SIMPLE_SELECTOR@0..14
+                      SINGLE_LINE_COMMENT@0..4 "// c"
+                      WHITESPACE@4..7 "\n  "
+                      SINGLE_LINE_COMMENT@7..9 "it"
+                      SINGLE_LINE_COMMENT@9..11 "'s"
+                      WHITESPACE@11..12 "\n"
+                      DOT@12..13 "."
+                      IDENT@13..14 "a"
+                BLOCK@14..21
+                  LBRACE@14..14 ""
+                  DECLARATION@14..21
+                    PROPERTY@14..18
+                      WHITESPACE@14..17 "\n  "
+                      IDENT@17..18 "b"
+                    COLON@18..19 ":"
+                    VALUE@19..21
+                      VALUE@19..21
+                        WHITESPACE@19..20 " "
+                        IDENT@20..21 "c"
+                    SEMICOLON@21..21 ""
+                  RBRACE@21..21 ""
+              RULE_SET@21..33
+                SELECTOR_LIST@21..24
+                  SELECTOR@21..24
+                    SIMPLE_SELECTOR@21..24
+                      WHITESPACE@21..22 "\n"
+                      DOT@22..23 "."
+                      IDENT@23..24 "d"
+                BLOCK@24..33
+                  LBRACE@24..24 ""
+                  DECLARATION@24..33
+                    PROPERTY@24..28
+                      WHITESPACE@24..27 "\n  "
+                      IDENT@27..28 "e"
+                    COLON@28..29 ":"
+                    VALUE@29..33
+                      STRING_LITERAL@29..33
+                        WHITESPACE@29..30 " "
+                        QUOTED_STRING@30..33 "'f'"
+                    SEMICOLON@33..33 ""
+                  RBRACE@33..33 ""
+              WHITESPACE@33..34 "\n"
+        "#]],
+    );
+}
+
+#[test]
+fn silent_comment_continuation_line_with_an_unclosed_string() {
+    check_tree(
+        "// c\n  \"open\n.a\n  b: c\n",
+        expect![[r#"
+        SOURCE_FILE@0..23
+          RULE_SET@0..22
+            SELECTOR_LIST@0..15
+              SELECTOR@0..15
+                SIMPLE_SELECTOR@0..15
+                  SINGLE_LINE_COMMENT@0..4 "// c"
+                  WHITESPACE@4..7 "\n  "
+                  SINGLE_LINE_COMMENT@7..12 "\"open"
+                  WHITESPACE@12..13 "\n"
+                  DOT@13..14 "."
+                  IDENT@14..15 "a"
+            BLOCK@15..22
+              LBRACE@15..15 ""
+              DECLARATION@15..22
+                PROPERTY@15..19
+                  WHITESPACE@15..18 "\n  "
+                  IDENT@18..19 "b"
+                COLON@19..20 ":"
+                VALUE@20..22
+                  VALUE@20..22
+                    WHITESPACE@20..21 " "
+                    IDENT@21..22 "c"
+                SEMICOLON@22..22 ""
+              RBRACE@22..22 ""
+          WHITESPACE@22..23 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn silent_comment_continuation_line_with_an_unclosed_loud_comment() {
+    check_tree(
+        "// c\n  /* x\n.a\n  b: c\n",
+        expect![[r#"
+        SOURCE_FILE@0..22
+          RULE_SET@0..21
+            SELECTOR_LIST@0..14
+              SELECTOR@0..14
+                SIMPLE_SELECTOR@0..14
+                  SINGLE_LINE_COMMENT@0..4 "// c"
+                  WHITESPACE@4..7 "\n  "
+                  SINGLE_LINE_COMMENT@7..11 "/* x"
+                  WHITESPACE@11..12 "\n"
+                  DOT@12..13 "."
+                  IDENT@13..14 "a"
+            BLOCK@14..21
+              LBRACE@14..14 ""
+              DECLARATION@14..21
+                PROPERTY@14..18
+                  WHITESPACE@14..17 "\n  "
+                  IDENT@17..18 "b"
+                COLON@18..19 ":"
+                VALUE@19..21
+                  VALUE@19..21
+                    WHITESPACE@19..20 " "
+                    IDENT@20..21 "c"
+                SEMICOLON@21..21 ""
+              RBRACE@21..21 ""
+          WHITESPACE@21..22 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn silent_comment_continuation_line_with_an_unclosed_url() {
+    check_tree(
+        "// c\n  url(x\n.a\n  b: c\n",
+        expect![[r#"
+        SOURCE_FILE@0..23
+          RULE_SET@0..22
+            SELECTOR_LIST@0..15
+              SELECTOR@0..15
+                SIMPLE_SELECTOR@0..15
+                  SINGLE_LINE_COMMENT@0..4 "// c"
+                  WHITESPACE@4..7 "\n  "
+                  SINGLE_LINE_COMMENT@7..10 "url"
+                  SINGLE_LINE_COMMENT@10..11 "("
+                  SINGLE_LINE_COMMENT@11..12 "x"
+                  WHITESPACE@12..13 "\n"
+                  DOT@13..14 "."
+                  IDENT@14..15 "a"
+            BLOCK@15..22
+              LBRACE@15..15 ""
+              DECLARATION@15..22
+                PROPERTY@15..19
+                  WHITESPACE@15..18 "\n  "
+                  IDENT@18..19 "b"
+                COLON@19..20 ":"
+                VALUE@20..22
+                  VALUE@20..22
+                    WHITESPACE@20..21 " "
+                    IDENT@21..22 "c"
+                SEMICOLON@22..22 ""
+              RBRACE@22..22 ""
+          WHITESPACE@22..23 "\n"
+    "#]],
+    );
+}
+
+/// Dart Sass continues the comment over the blank line, so `more` is part of it and the
+/// file compiles to `.a { b: c }`.
+#[test]
+fn blank_line_ending_a_silent_comment_is_a_known_limitation() {
+    check_tree(
+        "// c\n\n  more\n.a\n  b: c\n",
+        expect![[r#"
+        SOURCE_FILE@0..23
+          RULE_SET@0..12
+            SELECTOR_LIST@0..12
+              SELECTOR@0..12
+                SIMPLE_SELECTOR@0..12
+                  SINGLE_LINE_COMMENT@0..4 "// c"
+                  WHITESPACE@4..8 "\n\n  "
+                  IDENT@8..12 "more"
+          SEMICOLON@12..12 ""
+          RULE_SET@12..22
+            SELECTOR_LIST@12..15
+              SELECTOR@12..15
+                SIMPLE_SELECTOR@12..15
+                  WHITESPACE@12..13 "\n"
+                  DOT@13..14 "."
+                  IDENT@14..15 "a"
+            BLOCK@15..22
+              LBRACE@15..15 ""
+              DECLARATION@15..22
+                PROPERTY@15..19
+                  WHITESPACE@15..18 "\n  "
+                  IDENT@18..19 "b"
+                COLON@19..20 ":"
+                VALUE@20..22
+                  VALUE@20..22
+                    WHITESPACE@20..21 " "
+                    IDENT@21..22 "c"
+                SEMICOLON@22..22 ""
+              RBRACE@22..22 ""
+          WHITESPACE@22..23 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn silent_comment_inside_brackets_is_one_line() {
+    check_tree(
+        "$m: (\n  // c\n    d: 1,\n  a: 1\n)\n",
+        expect![[r#"
+        SOURCE_FILE@0..32
+          VARIABLE_DECL@0..31
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "m"
+            COLON@2..3 ":"
+            MAP_EXPR@3..31
+              WHITESPACE@3..4 " "
+              LPAREN@4..5 "("
+              MAP_ENTRY@5..21
+                VALUE@5..18
+                  WHITESPACE@5..8 "\n  "
+                  SINGLE_LINE_COMMENT@8..12 "// c"
+                  WHITESPACE@12..17 "\n    "
+                  IDENT@17..18 "d"
+                COLON@18..19 ":"
+                NUMBER_LITERAL@19..21
+                  WHITESPACE@19..20 " "
+                  NUMBER@20..21 "1"
+              COMMA@21..22 ","
+              MAP_ENTRY@22..29
+                VALUE@22..26
+                  WHITESPACE@22..25 "\n  "
+                  IDENT@25..26 "a"
+                COLON@26..27 ":"
+                NUMBER_LITERAL@27..29
+                  WHITESPACE@27..28 " "
+                  NUMBER@28..29 "1"
+              WHITESPACE@29..30 "\n"
+              RPAREN@30..31 ")"
+            SEMICOLON@31..31 ""
+          WHITESPACE@31..32 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn silent_comment_on_a_continued_selector_line_is_one_line() {
+    check_tree_on_a_continued_line(
+        ".a,\n// c\n  .b\n    x: y\n",
+        expect![[r#"
+        SOURCE_FILE@0..23
+          RULE_SET@0..22
+            SELECTOR_LIST@0..13
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+              COMMA@2..3 ","
+              SELECTOR@3..13
+                SIMPLE_SELECTOR@3..13
+                  WHITESPACE@3..4 "\n"
+                  SINGLE_LINE_COMMENT@4..8 "// c"
+                  WHITESPACE@8..11 "\n  "
+                  DOT@11..12 "."
+                  IDENT@12..13 "b"
+            BLOCK@13..22
+              LBRACE@13..13 ""
+              DECLARATION@13..22
+                PROPERTY@13..19
+                  WHITESPACE@13..18 "\n    "
+                  IDENT@18..19 "x"
+                COLON@19..20 ":"
+                VALUE@20..22
+                  VALUE@20..22
+                    WHITESPACE@20..21 " "
+                    IDENT@21..22 "y"
+                SEMICOLON@22..22 ""
+              RBRACE@22..22 ""
+          WHITESPACE@22..23 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn silent_comment_on_a_continued_value_line_is_one_line() {
+    check_tree_on_a_continued_line(
+        "$a: 1 +\n  // c\n    2\n.b\n  c: $a\n",
+        expect![[r#"
+            SOURCE_FILE@0..32
+              VARIABLE_DECL@0..20
+                DOLLAR@0..1 "$"
+                IDENT@1..2 "a"
+                COLON@2..3 ":"
+                BINARY_EXPR@3..20
+                  NUMBER_LITERAL@3..5
+                    WHITESPACE@3..4 " "
+                    NUMBER@4..5 "1"
+                  WHITESPACE@5..6 " "
+                  PLUS@6..7 "+"
+                  NUMBER_LITERAL@7..20
+                    WHITESPACE@7..10 "\n  "
+                    SINGLE_LINE_COMMENT@10..14 "// c"
+                    WHITESPACE@14..19 "\n    "
+                    NUMBER@19..20 "2"
+                SEMICOLON@20..20 ""
+              RULE_SET@20..31
+                SELECTOR_LIST@20..23
+                  SELECTOR@20..23
+                    SIMPLE_SELECTOR@20..23
+                      WHITESPACE@20..21 "\n"
+                      DOT@21..22 "."
+                      IDENT@22..23 "b"
+                BLOCK@23..31
+                  LBRACE@23..23 ""
+                  DECLARATION@23..31
+                    PROPERTY@23..27
+                      WHITESPACE@23..26 "\n  "
+                      IDENT@26..27 "c"
+                    COLON@27..28 ":"
+                    VALUE@28..31
+                      VARIABLE_REF@28..31
+                        WHITESPACE@28..29 " "
+                        DOLLAR@29..30 "$"
+                        IDENT@30..31 "a"
+                    SEMICOLON@31..31 ""
+                  RBRACE@31..31 ""
+              WHITESPACE@31..32 "\n"
+        "#]],
+    );
+}
+
+#[test]
+fn error_after_a_silent_comment_block_stays_local() {
+    check_tree(
+        "// c\n  more\n.a\n  b: c $\n.d\n  e: f\n",
+        expect![[r#"
+        SOURCE_FILE@0..34
+          RULE_SET@0..23
+            SELECTOR_LIST@0..14
+              SELECTOR@0..14
+                SIMPLE_SELECTOR@0..14
+                  SINGLE_LINE_COMMENT@0..4 "// c"
+                  WHITESPACE@4..7 "\n  "
+                  SINGLE_LINE_COMMENT@7..11 "more"
+                  WHITESPACE@11..12 "\n"
+                  DOT@12..13 "."
+                  IDENT@13..14 "a"
+            BLOCK@14..23
+              LBRACE@14..14 ""
+              DECLARATION@14..23
+                PROPERTY@14..18
+                  WHITESPACE@14..17 "\n  "
+                  IDENT@17..18 "b"
+                COLON@18..19 ":"
+                VALUE@19..23
+                  VALUE@19..21
+                    WHITESPACE@19..20 " "
+                    IDENT@20..21 "c"
+                  VARIABLE_REF@21..23
+                    WHITESPACE@21..22 " "
+                    DOLLAR@22..23 "$"
+                SEMICOLON@23..23 ""
+              RBRACE@23..23 ""
+          RULE_SET@23..33
+            SELECTOR_LIST@23..26
+              SELECTOR@23..26
+                SIMPLE_SELECTOR@23..26
+                  WHITESPACE@23..24 "\n"
+                  DOT@24..25 "."
+                  IDENT@25..26 "d"
+            BLOCK@26..33
+              LBRACE@26..26 ""
+              DECLARATION@26..33
+                PROPERTY@26..30
+                  WHITESPACE@26..29 "\n  "
+                  IDENT@29..30 "e"
+                COLON@30..31 ":"
+                VALUE@31..33
+                  VALUE@31..33
+                    WHITESPACE@31..32 " "
+                    IDENT@32..33 "f"
+                SEMICOLON@33..33 ""
+              RBRACE@33..33 ""
+          WHITESPACE@33..34 "\n"
+        errors:
+          23..23: expected IDENT
     "#]],
     );
 }
