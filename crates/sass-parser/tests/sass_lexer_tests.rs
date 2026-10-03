@@ -1,47 +1,7 @@
 use expect_test::{Expect, expect};
-use sass_parser::sass_lexer::sass_tokenize;
 use sass_parser::syntax::SassLanguage;
-use sass_parser::syntax_kind::SyntaxKind::{self, *};
 
 // ── Helpers ──────────────────────────────────────────────────────────
-
-fn tokens(source: &str) -> Vec<(SyntaxKind, &str)> {
-    sass_tokenize(source)
-}
-
-fn significant(source: &str) -> Vec<(SyntaxKind, &str)> {
-    sass_tokenize(source)
-        .into_iter()
-        .filter(|(k, _)| !k.is_trivia())
-        .collect()
-}
-
-fn format_tokens(toks: &[(SyntaxKind, &str)]) -> String {
-    use std::fmt::Write;
-
-    let mut buf = String::new();
-    for (kind, text) in toks {
-        if text.is_empty() {
-            let _ = writeln!(buf, "{kind:?}(virtual)");
-        } else {
-            let escaped = text.replace('\n', "\\n").replace('\t', "\\t");
-            let _ = writeln!(buf, "{kind:?} \"{escaped}\"");
-        }
-    }
-    buf
-}
-
-#[allow(clippy::needless_pass_by_value)]
-fn check_tokens(source: &str, expect: Expect) {
-    let toks = tokens(source);
-    expect.assert_eq(&format_tokens(&toks));
-}
-
-#[allow(clippy::needless_pass_by_value)]
-fn check_significant(source: &str, expect: Expect) {
-    let toks = significant(source);
-    expect.assert_eq(&format_tokens(&toks));
-}
 
 fn check_parse(source: &str) -> String {
     let (green, errs) = sass_parser::parse_sass(source);
@@ -70,16 +30,22 @@ fn check_tree(source: &str, expect: Expect) {
 
 #[test]
 fn empty_input() {
-    assert!(tokens("").is_empty());
+    check_tree(
+        "",
+        expect![[r#"
+        SOURCE_FILE@0..0
+    "#]],
+    );
 }
 
 #[test]
 fn whitespace_only() {
-    check_tokens(
+    check_tree(
         "  \n",
         expect![[r#"
-        WHITESPACE "  \n"
-    "#]],
+            SOURCE_FILE@0..3
+              WHITESPACE@0..3 "  \n"
+        "#]],
     );
 }
 
@@ -87,40 +53,72 @@ fn whitespace_only() {
 
 #[test]
 fn single_rule_one_property() {
-    check_significant(
+    check_tree(
         ".foo\n  color: red\n",
         expect![[r#"
-        DOT "."
-        IDENT "foo"
-        LBRACE(virtual)
-        IDENT "color"
-        COLON ":"
-        IDENT "red"
-        SEMICOLON(virtual)
-        RBRACE(virtual)
-    "#]],
+            SOURCE_FILE@0..18
+              RULE_SET@0..17
+                SELECTOR_LIST@0..4
+                  SELECTOR@0..4
+                    SIMPLE_SELECTOR@0..4
+                      DOT@0..1 "."
+                      IDENT@1..4 "foo"
+                BLOCK@4..17
+                  LBRACE@4..4 ""
+                  DECLARATION@4..17
+                    PROPERTY@4..12
+                      WHITESPACE@4..7 "\n  "
+                      IDENT@7..12 "color"
+                    COLON@12..13 ":"
+                    VALUE@13..17
+                      VALUE@13..17
+                        WHITESPACE@13..14 " "
+                        IDENT@14..17 "red"
+                    SEMICOLON@17..17 ""
+                  RBRACE@17..17 ""
+              WHITESPACE@17..18 "\n"
+        "#]],
     );
 }
 
 #[test]
 fn single_rule_multiple_properties() {
-    check_significant(
+    check_tree(
         ".foo\n  color: red\n  font-size: 14px\n",
         expect![[r#"
-        DOT "."
-        IDENT "foo"
-        LBRACE(virtual)
-        IDENT "color"
-        COLON ":"
-        IDENT "red"
-        SEMICOLON(virtual)
-        IDENT "font-size"
-        COLON ":"
-        NUMBER "14"
-        IDENT "px"
-        SEMICOLON(virtual)
-        RBRACE(virtual)
-    "#]],
+            SOURCE_FILE@0..36
+              RULE_SET@0..35
+                SELECTOR_LIST@0..4
+                  SELECTOR@0..4
+                    SIMPLE_SELECTOR@0..4
+                      DOT@0..1 "."
+                      IDENT@1..4 "foo"
+                BLOCK@4..35
+                  LBRACE@4..4 ""
+                  DECLARATION@4..17
+                    PROPERTY@4..12
+                      WHITESPACE@4..7 "\n  "
+                      IDENT@7..12 "color"
+                    COLON@12..13 ":"
+                    VALUE@13..17
+                      VALUE@13..17
+                        WHITESPACE@13..14 " "
+                        IDENT@14..17 "red"
+                    SEMICOLON@17..17 ""
+                  DECLARATION@17..35
+                    PROPERTY@17..29
+                      WHITESPACE@17..20 "\n  "
+                      IDENT@20..29 "font-size"
+                    COLON@29..30 ":"
+                    VALUE@30..35
+                      DIMENSION@30..35
+                        WHITESPACE@30..31 " "
+                        NUMBER@31..33 "14"
+                        IDENT@33..35 "px"
+                    SEMICOLON@35..35 ""
+                  RBRACE@35..35 ""
+              WHITESPACE@35..36 "\n"
+        "#]],
     );
 }
 
@@ -128,53 +126,103 @@ fn single_rule_multiple_properties() {
 
 #[test]
 fn nested_rule() {
-    check_significant(
+    check_tree(
         ".foo\n  color: red\n  .bar\n    font-size: 14px\n",
         expect![[r#"
-        DOT "."
-        IDENT "foo"
-        LBRACE(virtual)
-        IDENT "color"
-        COLON ":"
-        IDENT "red"
-        SEMICOLON(virtual)
-        DOT "."
-        IDENT "bar"
-        LBRACE(virtual)
-        IDENT "font-size"
-        COLON ":"
-        NUMBER "14"
-        IDENT "px"
-        SEMICOLON(virtual)
-        RBRACE(virtual)
-        RBRACE(virtual)
-    "#]],
+            SOURCE_FILE@0..45
+              RULE_SET@0..44
+                SELECTOR_LIST@0..4
+                  SELECTOR@0..4
+                    SIMPLE_SELECTOR@0..4
+                      DOT@0..1 "."
+                      IDENT@1..4 "foo"
+                BLOCK@4..44
+                  LBRACE@4..4 ""
+                  DECLARATION@4..17
+                    PROPERTY@4..12
+                      WHITESPACE@4..7 "\n  "
+                      IDENT@7..12 "color"
+                    COLON@12..13 ":"
+                    VALUE@13..17
+                      VALUE@13..17
+                        WHITESPACE@13..14 " "
+                        IDENT@14..17 "red"
+                    SEMICOLON@17..17 ""
+                  RULE_SET@17..44
+                    SELECTOR_LIST@17..24
+                      SELECTOR@17..24
+                        SIMPLE_SELECTOR@17..24
+                          WHITESPACE@17..20 "\n  "
+                          DOT@20..21 "."
+                          IDENT@21..24 "bar"
+                    BLOCK@24..44
+                      LBRACE@24..24 ""
+                      DECLARATION@24..44
+                        PROPERTY@24..38
+                          WHITESPACE@24..29 "\n    "
+                          IDENT@29..38 "font-size"
+                        COLON@38..39 ":"
+                        VALUE@39..44
+                          DIMENSION@39..44
+                            WHITESPACE@39..40 " "
+                            NUMBER@40..42 "14"
+                            IDENT@42..44 "px"
+                        SEMICOLON@44..44 ""
+                      RBRACE@44..44 ""
+                  RBRACE@44..44 ""
+              WHITESPACE@44..45 "\n"
+        "#]],
     );
 }
 
 #[test]
 fn nested_then_sibling() {
     let src = ".foo\n  .bar\n    color: red\n  margin: 0\n";
-    check_significant(
+    check_tree(
         src,
         expect![[r#"
-        DOT "."
-        IDENT "foo"
-        LBRACE(virtual)
-        DOT "."
-        IDENT "bar"
-        LBRACE(virtual)
-        IDENT "color"
-        COLON ":"
-        IDENT "red"
-        SEMICOLON(virtual)
-        RBRACE(virtual)
-        IDENT "margin"
-        COLON ":"
-        NUMBER "0"
-        SEMICOLON(virtual)
-        RBRACE(virtual)
-    "#]],
+            SOURCE_FILE@0..39
+              RULE_SET@0..38
+                SELECTOR_LIST@0..4
+                  SELECTOR@0..4
+                    SIMPLE_SELECTOR@0..4
+                      DOT@0..1 "."
+                      IDENT@1..4 "foo"
+                BLOCK@4..38
+                  LBRACE@4..4 ""
+                  RULE_SET@4..26
+                    SELECTOR_LIST@4..11
+                      SELECTOR@4..11
+                        SIMPLE_SELECTOR@4..11
+                          WHITESPACE@4..7 "\n  "
+                          DOT@7..8 "."
+                          IDENT@8..11 "bar"
+                    BLOCK@11..26
+                      LBRACE@11..11 ""
+                      DECLARATION@11..26
+                        PROPERTY@11..21
+                          WHITESPACE@11..16 "\n    "
+                          IDENT@16..21 "color"
+                        COLON@21..22 ":"
+                        VALUE@22..26
+                          VALUE@22..26
+                            WHITESPACE@22..23 " "
+                            IDENT@23..26 "red"
+                        SEMICOLON@26..26 ""
+                      RBRACE@26..26 ""
+                  DECLARATION@26..38
+                    PROPERTY@26..35
+                      WHITESPACE@26..29 "\n  "
+                      IDENT@29..35 "margin"
+                    COLON@35..36 ":"
+                    VALUE@36..38
+                      NUMBER_LITERAL@36..38
+                        WHITESPACE@36..37 " "
+                        NUMBER@37..38 "0"
+                    SEMICOLON@38..38 ""
+                  RBRACE@38..38 ""
+              WHITESPACE@38..39 "\n"
+        "#]],
     );
 }
 
@@ -183,27 +231,52 @@ fn nested_then_sibling() {
 #[test]
 fn two_top_level_rules() {
     let src = ".foo\n  color: red\n.bar\n  font-size: 14px\n";
-    check_significant(
+    check_tree(
         src,
         expect![[r#"
-        DOT "."
-        IDENT "foo"
-        LBRACE(virtual)
-        IDENT "color"
-        COLON ":"
-        IDENT "red"
-        SEMICOLON(virtual)
-        RBRACE(virtual)
-        DOT "."
-        IDENT "bar"
-        LBRACE(virtual)
-        IDENT "font-size"
-        COLON ":"
-        NUMBER "14"
-        IDENT "px"
-        SEMICOLON(virtual)
-        RBRACE(virtual)
-    "#]],
+            SOURCE_FILE@0..41
+              RULE_SET@0..17
+                SELECTOR_LIST@0..4
+                  SELECTOR@0..4
+                    SIMPLE_SELECTOR@0..4
+                      DOT@0..1 "."
+                      IDENT@1..4 "foo"
+                BLOCK@4..17
+                  LBRACE@4..4 ""
+                  DECLARATION@4..17
+                    PROPERTY@4..12
+                      WHITESPACE@4..7 "\n  "
+                      IDENT@7..12 "color"
+                    COLON@12..13 ":"
+                    VALUE@13..17
+                      VALUE@13..17
+                        WHITESPACE@13..14 " "
+                        IDENT@14..17 "red"
+                    SEMICOLON@17..17 ""
+                  RBRACE@17..17 ""
+              RULE_SET@17..40
+                SELECTOR_LIST@17..22
+                  SELECTOR@17..22
+                    SIMPLE_SELECTOR@17..22
+                      WHITESPACE@17..18 "\n"
+                      DOT@18..19 "."
+                      IDENT@19..22 "bar"
+                BLOCK@22..40
+                  LBRACE@22..22 ""
+                  DECLARATION@22..40
+                    PROPERTY@22..34
+                      WHITESPACE@22..25 "\n  "
+                      IDENT@25..34 "font-size"
+                    COLON@34..35 ":"
+                    VALUE@35..40
+                      DIMENSION@35..40
+                        WHITESPACE@35..36 " "
+                        NUMBER@36..38 "14"
+                        IDENT@38..40 "px"
+                    SEMICOLON@40..40 ""
+                  RBRACE@40..40 ""
+              WHITESPACE@40..41 "\n"
+        "#]],
     );
 }
 
@@ -212,45 +285,80 @@ fn two_top_level_rules() {
 #[test]
 fn comma_selector_continuation() {
     let src = ".foo,\n.bar\n  color: red\n";
-    check_significant(
+    check_tree(
         src,
         expect![[r#"
-        DOT "."
-        IDENT "foo"
-        COMMA ","
-        DOT "."
-        IDENT "bar"
-        LBRACE(virtual)
-        IDENT "color"
-        COLON ":"
-        IDENT "red"
-        SEMICOLON(virtual)
-        RBRACE(virtual)
-    "#]],
+            SOURCE_FILE@0..24
+              RULE_SET@0..23
+                SELECTOR_LIST@0..10
+                  SELECTOR@0..4
+                    SIMPLE_SELECTOR@0..4
+                      DOT@0..1 "."
+                      IDENT@1..4 "foo"
+                  COMMA@4..5 ","
+                  SELECTOR@5..10
+                    SIMPLE_SELECTOR@5..10
+                      WHITESPACE@5..6 "\n"
+                      DOT@6..7 "."
+                      IDENT@7..10 "bar"
+                BLOCK@10..23
+                  LBRACE@10..10 ""
+                  DECLARATION@10..23
+                    PROPERTY@10..18
+                      WHITESPACE@10..13 "\n  "
+                      IDENT@13..18 "color"
+                    COLON@18..19 ":"
+                    VALUE@19..23
+                      VALUE@19..23
+                        WHITESPACE@19..20 " "
+                        IDENT@20..23 "red"
+                    SEMICOLON@23..23 ""
+                  RBRACE@23..23 ""
+              WHITESPACE@23..24 "\n"
+        "#]],
     );
 }
 
 #[test]
 fn multi_line_comma_continuation() {
     let src = ".a,\n.b,\n.c\n  color: red\n";
-    check_significant(
+    check_tree(
         src,
         expect![[r#"
-        DOT "."
-        IDENT "a"
-        COMMA ","
-        DOT "."
-        IDENT "b"
-        COMMA ","
-        DOT "."
-        IDENT "c"
-        LBRACE(virtual)
-        IDENT "color"
-        COLON ":"
-        IDENT "red"
-        SEMICOLON(virtual)
-        RBRACE(virtual)
-    "#]],
+            SOURCE_FILE@0..24
+              RULE_SET@0..23
+                SELECTOR_LIST@0..10
+                  SELECTOR@0..2
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "a"
+                  COMMA@2..3 ","
+                  SELECTOR@3..6
+                    SIMPLE_SELECTOR@3..6
+                      WHITESPACE@3..4 "\n"
+                      DOT@4..5 "."
+                      IDENT@5..6 "b"
+                  COMMA@6..7 ","
+                  SELECTOR@7..10
+                    SIMPLE_SELECTOR@7..10
+                      WHITESPACE@7..8 "\n"
+                      DOT@8..9 "."
+                      IDENT@9..10 "c"
+                BLOCK@10..23
+                  LBRACE@10..10 ""
+                  DECLARATION@10..23
+                    PROPERTY@10..18
+                      WHITESPACE@10..13 "\n  "
+                      IDENT@13..18 "color"
+                    COLON@18..19 ":"
+                    VALUE@19..23
+                      VALUE@19..23
+                        WHITESPACE@19..20 " "
+                        IDENT@20..23 "red"
+                    SEMICOLON@23..23 ""
+                  RBRACE@23..23 ""
+              WHITESPACE@23..24 "\n"
+        "#]],
     );
 }
 
@@ -259,25 +367,49 @@ fn multi_line_comma_continuation() {
 #[test]
 fn paren_suppresses_newline_handling() {
     let src = ".foo\n  color: rgb(\n    255,\n    0,\n    0\n  )\n";
-    check_significant(
+    check_tree(
         src,
         expect![[r#"
-        DOT "."
-        IDENT "foo"
-        LBRACE(virtual)
-        IDENT "color"
-        COLON ":"
-        IDENT "rgb"
-        LPAREN "("
-        NUMBER "255"
-        COMMA ","
-        NUMBER "0"
-        COMMA ","
-        NUMBER "0"
-        RPAREN ")"
-        SEMICOLON(virtual)
-        RBRACE(virtual)
-    "#]],
+            SOURCE_FILE@0..45
+              RULE_SET@0..44
+                SELECTOR_LIST@0..4
+                  SELECTOR@0..4
+                    SIMPLE_SELECTOR@0..4
+                      DOT@0..1 "."
+                      IDENT@1..4 "foo"
+                BLOCK@4..44
+                  LBRACE@4..4 ""
+                  DECLARATION@4..44
+                    PROPERTY@4..12
+                      WHITESPACE@4..7 "\n  "
+                      IDENT@7..12 "color"
+                    COLON@12..13 ":"
+                    VALUE@13..44
+                      FUNCTION_CALL@13..44
+                        WHITESPACE@13..14 " "
+                        IDENT@14..17 "rgb"
+                        ARG_LIST@17..44
+                          LPAREN@17..18 "("
+                          ARG@18..26
+                            NUMBER_LITERAL@18..26
+                              WHITESPACE@18..23 "\n    "
+                              NUMBER@23..26 "255"
+                          COMMA@26..27 ","
+                          ARG@27..33
+                            NUMBER_LITERAL@27..33
+                              WHITESPACE@27..32 "\n    "
+                              NUMBER@32..33 "0"
+                          COMMA@33..34 ","
+                          ARG@34..40
+                            NUMBER_LITERAL@34..40
+                              WHITESPACE@34..39 "\n    "
+                              NUMBER@39..40 "0"
+                          WHITESPACE@40..43 "\n  "
+                          RPAREN@43..44 ")"
+                    SEMICOLON@44..44 ""
+                  RBRACE@44..44 ""
+              WHITESPACE@44..45 "\n"
+        "#]],
     );
 }
 
@@ -286,55 +418,96 @@ fn paren_suppresses_newline_handling() {
 #[test]
 fn mixin_and_include() {
     let src = "@mixin foo\n  color: red\n.bar\n  @include foo\n";
-    check_significant(
+    check_tree(
         src,
         expect![[r#"
-        AT "@"
-        IDENT "mixin"
-        IDENT "foo"
-        LBRACE(virtual)
-        IDENT "color"
-        COLON ":"
-        IDENT "red"
-        SEMICOLON(virtual)
-        RBRACE(virtual)
-        DOT "."
-        IDENT "bar"
-        LBRACE(virtual)
-        AT "@"
-        IDENT "include"
-        IDENT "foo"
-        SEMICOLON(virtual)
-        RBRACE(virtual)
-    "#]],
+            SOURCE_FILE@0..44
+              MIXIN_RULE@0..23
+                AT@0..1 "@"
+                IDENT@1..6 "mixin"
+                WHITESPACE@6..7 " "
+                IDENT@7..10 "foo"
+                BLOCK@10..23
+                  WHITESPACE@10..13 "\n  "
+                  LBRACE@13..13 ""
+                  DECLARATION@13..23
+                    PROPERTY@13..18
+                      IDENT@13..18 "color"
+                    COLON@18..19 ":"
+                    VALUE@19..23
+                      VALUE@19..23
+                        WHITESPACE@19..20 " "
+                        IDENT@20..23 "red"
+                    SEMICOLON@23..23 ""
+                  RBRACE@23..23 ""
+              RULE_SET@23..43
+                SELECTOR_LIST@23..28
+                  SELECTOR@23..28
+                    SIMPLE_SELECTOR@23..28
+                      WHITESPACE@23..24 "\n"
+                      DOT@24..25 "."
+                      IDENT@25..28 "bar"
+                BLOCK@28..43
+                  LBRACE@28..28 ""
+                  INCLUDE_RULE@28..43
+                    WHITESPACE@28..31 "\n  "
+                    AT@31..32 "@"
+                    IDENT@32..39 "include"
+                    WHITESPACE@39..40 " "
+                    IDENT@40..43 "foo"
+                    SEMICOLON@43..43 ""
+                  RBRACE@43..43 ""
+              WHITESPACE@43..44 "\n"
+        "#]],
     );
 }
 
 #[test]
 fn if_else() {
     let src = "@if $cond\n  color: red\n@else\n  color: blue\n";
-    check_significant(
+    check_tree(
         src,
         expect![[r#"
-        AT "@"
-        IDENT "if"
-        DOLLAR "$"
-        IDENT "cond"
-        LBRACE(virtual)
-        IDENT "color"
-        COLON ":"
-        IDENT "red"
-        SEMICOLON(virtual)
-        RBRACE(virtual)
-        AT "@"
-        IDENT "else"
-        LBRACE(virtual)
-        IDENT "color"
-        COLON ":"
-        IDENT "blue"
-        SEMICOLON(virtual)
-        RBRACE(virtual)
-    "#]],
+            SOURCE_FILE@0..43
+              IF_RULE@0..42
+                AT@0..1 "@"
+                IDENT@1..3 "if"
+                VARIABLE_REF@3..9
+                  WHITESPACE@3..4 " "
+                  DOLLAR@4..5 "$"
+                  IDENT@5..9 "cond"
+                BLOCK@9..22
+                  WHITESPACE@9..12 "\n  "
+                  LBRACE@12..12 ""
+                  DECLARATION@12..22
+                    PROPERTY@12..17
+                      IDENT@12..17 "color"
+                    COLON@17..18 ":"
+                    VALUE@18..22
+                      VALUE@18..22
+                        WHITESPACE@18..19 " "
+                        IDENT@19..22 "red"
+                    SEMICOLON@22..22 ""
+                  RBRACE@22..22 ""
+                ELSE_CLAUSE@22..42
+                  WHITESPACE@22..23 "\n"
+                  AT@23..24 "@"
+                  IDENT@24..28 "else"
+                  BLOCK@28..42
+                    WHITESPACE@28..31 "\n  "
+                    LBRACE@31..31 ""
+                    DECLARATION@31..42
+                      PROPERTY@31..36
+                        IDENT@31..36 "color"
+                      COLON@36..37 ":"
+                      VALUE@37..42
+                        VALUE@37..42
+                          WHITESPACE@37..38 " "
+                          IDENT@38..42 "blue"
+                      SEMICOLON@42..42 ""
+                    RBRACE@42..42 ""
+              WHITESPACE@42..43 "\n"
+        "#]],
     );
 }
 
@@ -484,20 +657,35 @@ fn nested_if_no_else_in_function_tree() {
 // ── Comments ─────────────────────────────────────────────────────────
 
 #[test]
-fn comment_line_does_not_emit_semicolon() {
+fn comment_line_does_not_end_a_statement() {
     let src = ".foo\n  // comment\n  color: red\n";
-    check_significant(
+    check_tree(
         src,
         expect![[r#"
-        DOT "."
-        IDENT "foo"
-        LBRACE(virtual)
-        IDENT "color"
-        COLON ":"
-        IDENT "red"
-        SEMICOLON(virtual)
-        RBRACE(virtual)
-    "#]],
+            SOURCE_FILE@0..31
+              RULE_SET@0..30
+                SELECTOR_LIST@0..4
+                  SELECTOR@0..4
+                    SIMPLE_SELECTOR@0..4
+                      DOT@0..1 "."
+                      IDENT@1..4 "foo"
+                BLOCK@4..30
+                  LBRACE@4..4 ""
+                  DECLARATION@4..30
+                    PROPERTY@4..25
+                      WHITESPACE@4..7 "\n  "
+                      SINGLE_LINE_COMMENT@7..17 "// comment"
+                      WHITESPACE@17..20 "\n  "
+                      IDENT@20..25 "color"
+                    COLON@25..26 ":"
+                    VALUE@26..30
+                      VALUE@26..30
+                        WHITESPACE@26..27 " "
+                        IDENT@27..30 "red"
+                    SEMICOLON@30..30 ""
+                  RBRACE@30..30 ""
+              WHITESPACE@30..31 "\n"
+        "#]],
     );
 }
 
@@ -506,23 +694,42 @@ fn comment_line_does_not_emit_semicolon() {
 #[test]
 fn blank_lines_are_ignored() {
     let src = ".foo\n  color: red\n\n  font-size: 14px\n";
-    check_significant(
+    check_tree(
         src,
         expect![[r#"
-        DOT "."
-        IDENT "foo"
-        LBRACE(virtual)
-        IDENT "color"
-        COLON ":"
-        IDENT "red"
-        SEMICOLON(virtual)
-        IDENT "font-size"
-        COLON ":"
-        NUMBER "14"
-        IDENT "px"
-        SEMICOLON(virtual)
-        RBRACE(virtual)
-    "#]],
+            SOURCE_FILE@0..37
+              RULE_SET@0..36
+                SELECTOR_LIST@0..4
+                  SELECTOR@0..4
+                    SIMPLE_SELECTOR@0..4
+                      DOT@0..1 "."
+                      IDENT@1..4 "foo"
+                BLOCK@4..36
+                  LBRACE@4..4 ""
+                  DECLARATION@4..17
+                    PROPERTY@4..12
+                      WHITESPACE@4..7 "\n  "
+                      IDENT@7..12 "color"
+                    COLON@12..13 ":"
+                    VALUE@13..17
+                      VALUE@13..17
+                        WHITESPACE@13..14 " "
+                        IDENT@14..17 "red"
+                    SEMICOLON@17..17 ""
+                  DECLARATION@17..36
+                    PROPERTY@17..30
+                      WHITESPACE@17..21 "\n\n  "
+                      IDENT@21..30 "font-size"
+                    COLON@30..31 ":"
+                    VALUE@31..36
+                      DIMENSION@31..36
+                        WHITESPACE@31..32 " "
+                        NUMBER@32..34 "14"
+                        IDENT@34..36 "px"
+                    SEMICOLON@36..36 ""
+                  RBRACE@36..36 ""
+              WHITESPACE@36..37 "\n"
+        "#]],
     );
 }
 
@@ -531,24 +738,41 @@ fn blank_lines_are_ignored() {
 #[test]
 fn top_level_variable() {
     let src = "$color: red\n.foo\n  color: $color\n";
-    check_significant(
+    check_tree(
         src,
         expect![[r#"
-        DOLLAR "$"
-        IDENT "color"
-        COLON ":"
-        IDENT "red"
-        SEMICOLON(virtual)
-        DOT "."
-        IDENT "foo"
-        LBRACE(virtual)
-        IDENT "color"
-        COLON ":"
-        DOLLAR "$"
-        IDENT "color"
-        SEMICOLON(virtual)
-        RBRACE(virtual)
-    "#]],
+            SOURCE_FILE@0..33
+              VARIABLE_DECL@0..11
+                DOLLAR@0..1 "$"
+                IDENT@1..6 "color"
+                COLON@6..7 ":"
+                VALUE@7..11
+                  WHITESPACE@7..8 " "
+                  IDENT@8..11 "red"
+                SEMICOLON@11..11 ""
+              RULE_SET@11..32
+                SELECTOR_LIST@11..16
+                  SELECTOR@11..16
+                    SIMPLE_SELECTOR@11..16
+                      WHITESPACE@11..12 "\n"
+                      DOT@12..13 "."
+                      IDENT@13..16 "foo"
+                BLOCK@16..32
+                  LBRACE@16..16 ""
+                  DECLARATION@16..32
+                    PROPERTY@16..24
+                      WHITESPACE@16..19 "\n  "
+                      IDENT@19..24 "color"
+                    COLON@24..25 ":"
+                    VALUE@25..32
+                      VARIABLE_REF@25..32
+                        WHITESPACE@25..26 " "
+                        DOLLAR@26..27 "$"
+                        IDENT@27..32 "color"
+                    SEMICOLON@32..32 ""
+                  RBRACE@32..32 ""
+              WHITESPACE@32..33 "\n"
+        "#]],
     );
 }
 
@@ -557,18 +781,30 @@ fn top_level_variable() {
 #[test]
 fn no_trailing_newline() {
     let src = ".foo\n  color: red";
-    check_significant(
+    check_tree(
         src,
         expect![[r#"
-        DOT "."
-        IDENT "foo"
-        LBRACE(virtual)
-        IDENT "color"
-        COLON ":"
-        IDENT "red"
-        SEMICOLON(virtual)
-        RBRACE(virtual)
-    "#]],
+            SOURCE_FILE@0..17
+              RULE_SET@0..17
+                SELECTOR_LIST@0..4
+                  SELECTOR@0..4
+                    SIMPLE_SELECTOR@0..4
+                      DOT@0..1 "."
+                      IDENT@1..4 "foo"
+                BLOCK@4..17
+                  LBRACE@4..4 ""
+                  DECLARATION@4..17
+                    PROPERTY@4..12
+                      WHITESPACE@4..7 "\n  "
+                      IDENT@7..12 "color"
+                    COLON@12..13 ":"
+                    VALUE@13..17
+                      VALUE@13..17
+                        WHITESPACE@13..14 " "
+                        IDENT@14..17 "red"
+                    SEMICOLON@17..17 ""
+                  RBRACE@17..17 ""
+        "#]],
     );
 }
 
@@ -577,30 +813,38 @@ fn no_trailing_newline() {
 #[test]
 fn interpolation_in_selector() {
     let src = ".foo-#{$bar}\n  color: red\n";
-    let toks = significant(src);
-    let kinds: Vec<_> = toks.iter().map(|(k, _)| *k).collect();
-    // SCSS lexer treats `.foo-` as a single selector fragment before `#{`
-    // so we get DOT IDENT HASH_LBRACE (no separate MINUS)
-    assert_eq!(
-        kinds,
-        vec![
-            DOT,
-            IDENT,
-            HASH_LBRACE,
-            DOLLAR,
-            IDENT,
-            RBRACE,
-            LBRACE,
-            IDENT,
-            COLON,
-            IDENT,
-            SEMICOLON,
-            RBRACE,
-        ]
+    check_tree(
+        src,
+        expect![[r##"
+        SOURCE_FILE@0..26
+          RULE_SET@0..25
+            SELECTOR_LIST@0..12
+              SELECTOR@0..12
+                SIMPLE_SELECTOR@0..5
+                  DOT@0..1 "."
+                  IDENT@1..5 "foo-"
+                INTERPOLATION@5..12
+                  HASH_LBRACE@5..7 "#{"
+                  VARIABLE_REF@7..11
+                    DOLLAR@7..8 "$"
+                    IDENT@8..11 "bar"
+                  RBRACE@11..12 "}"
+            BLOCK@12..25
+              LBRACE@12..12 ""
+              DECLARATION@12..25
+                PROPERTY@12..20
+                  WHITESPACE@12..15 "\n  "
+                  IDENT@15..20 "color"
+                COLON@20..21 ":"
+                VALUE@21..25
+                  VALUE@21..25
+                    WHITESPACE@21..22 " "
+                    IDENT@22..25 "red"
+                SEMICOLON@25..25 ""
+              RBRACE@25..25 ""
+          WHITESPACE@25..26 "\n"
+    "##]],
     );
-    // Verify HASH_LBRACE has real text, LBRACE is virtual
-    assert_eq!(toks[2], (HASH_LBRACE, "#{"));
-    assert_eq!(toks[6], (LBRACE, ""));
 }
 
 // ── Tab indentation ──────────────────────────────────────────────────
@@ -608,18 +852,31 @@ fn interpolation_in_selector() {
 #[test]
 fn tab_indentation() {
     let src = ".foo\n\tcolor: red\n";
-    check_significant(
+    check_tree(
         src,
         expect![[r#"
-        DOT "."
-        IDENT "foo"
-        LBRACE(virtual)
-        IDENT "color"
-        COLON ":"
-        IDENT "red"
-        SEMICOLON(virtual)
-        RBRACE(virtual)
-    "#]],
+            SOURCE_FILE@0..17
+              RULE_SET@0..16
+                SELECTOR_LIST@0..4
+                  SELECTOR@0..4
+                    SIMPLE_SELECTOR@0..4
+                      DOT@0..1 "."
+                      IDENT@1..4 "foo"
+                BLOCK@4..16
+                  LBRACE@4..4 ""
+                  DECLARATION@4..16
+                    PROPERTY@4..11
+                      WHITESPACE@4..6 "\n\t"
+                      IDENT@6..11 "color"
+                    COLON@11..12 ":"
+                    VALUE@12..16
+                      VALUE@12..16
+                        WHITESPACE@12..13 " "
+                        IDENT@13..16 "red"
+                    SEMICOLON@16..16 ""
+                  RBRACE@16..16 ""
+              WHITESPACE@16..17 "\n"
+        "#]],
     );
 }
 
@@ -628,18 +885,31 @@ fn tab_indentation() {
 #[test]
 fn crlf_line_endings() {
     let src = ".foo\r\n  color: red\r\n";
-    check_significant(
+    check_tree(
         src,
         expect![[r#"
-        DOT "."
-        IDENT "foo"
-        LBRACE(virtual)
-        IDENT "color"
-        COLON ":"
-        IDENT "red"
-        SEMICOLON(virtual)
-        RBRACE(virtual)
-    "#]],
+            SOURCE_FILE@0..20
+              RULE_SET@0..18
+                SELECTOR_LIST@0..4
+                  SELECTOR@0..4
+                    SIMPLE_SELECTOR@0..4
+                      DOT@0..1 "."
+                      IDENT@1..4 "foo"
+                BLOCK@4..18
+                  LBRACE@4..4 ""
+                  DECLARATION@4..18
+                    PROPERTY@4..13
+                      WHITESPACE@4..8 "\r\n  "
+                      IDENT@8..13 "color"
+                    COLON@13..14 ":"
+                    VALUE@14..18
+                      VALUE@14..18
+                        WHITESPACE@14..15 " "
+                        IDENT@15..18 "red"
+                    SEMICOLON@18..18 ""
+                  RBRACE@18..18 ""
+              WHITESPACE@18..20 "\r\n"
+        "#]],
     );
 }
 
@@ -648,60 +918,122 @@ fn crlf_line_endings() {
 #[test]
 fn three_level_nesting() {
     let src = ".a\n  .b\n    .c\n      color: red\n";
-    check_significant(
+    check_tree(
         src,
         expect![[r#"
-        DOT "."
-        IDENT "a"
-        LBRACE(virtual)
-        DOT "."
-        IDENT "b"
-        LBRACE(virtual)
-        DOT "."
-        IDENT "c"
-        LBRACE(virtual)
-        IDENT "color"
-        COLON ":"
-        IDENT "red"
-        SEMICOLON(virtual)
-        RBRACE(virtual)
-        RBRACE(virtual)
-        RBRACE(virtual)
-    "#]],
+            SOURCE_FILE@0..32
+              RULE_SET@0..31
+                SELECTOR_LIST@0..2
+                  SELECTOR@0..2
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "a"
+                BLOCK@2..31
+                  LBRACE@2..2 ""
+                  RULE_SET@2..31
+                    SELECTOR_LIST@2..7
+                      SELECTOR@2..7
+                        SIMPLE_SELECTOR@2..7
+                          WHITESPACE@2..5 "\n  "
+                          DOT@5..6 "."
+                          IDENT@6..7 "b"
+                    BLOCK@7..31
+                      LBRACE@7..7 ""
+                      RULE_SET@7..31
+                        SELECTOR_LIST@7..14
+                          SELECTOR@7..14
+                            SIMPLE_SELECTOR@7..14
+                              WHITESPACE@7..12 "\n    "
+                              DOT@12..13 "."
+                              IDENT@13..14 "c"
+                        BLOCK@14..31
+                          LBRACE@14..14 ""
+                          DECLARATION@14..31
+                            PROPERTY@14..26
+                              WHITESPACE@14..21 "\n      "
+                              IDENT@21..26 "color"
+                            COLON@26..27 ":"
+                            VALUE@27..31
+                              VALUE@27..31
+                                WHITESPACE@27..28 " "
+                                IDENT@28..31 "red"
+                            SEMICOLON@31..31 ""
+                          RBRACE@31..31 ""
+                      RBRACE@31..31 ""
+                  RBRACE@31..31 ""
+              WHITESPACE@31..32 "\n"
+        "#]],
     );
 }
 
 #[test]
 fn dedent_multiple_levels_at_once() {
     let src = ".a\n  .b\n    .c\n      color: red\n.d\n  margin: 0\n";
-    check_significant(
+    check_tree(
         src,
         expect![[r#"
-        DOT "."
-        IDENT "a"
-        LBRACE(virtual)
-        DOT "."
-        IDENT "b"
-        LBRACE(virtual)
-        DOT "."
-        IDENT "c"
-        LBRACE(virtual)
-        IDENT "color"
-        COLON ":"
-        IDENT "red"
-        SEMICOLON(virtual)
-        RBRACE(virtual)
-        RBRACE(virtual)
-        RBRACE(virtual)
-        DOT "."
-        IDENT "d"
-        LBRACE(virtual)
-        IDENT "margin"
-        COLON ":"
-        NUMBER "0"
-        SEMICOLON(virtual)
-        RBRACE(virtual)
-    "#]],
+            SOURCE_FILE@0..47
+              RULE_SET@0..31
+                SELECTOR_LIST@0..2
+                  SELECTOR@0..2
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "a"
+                BLOCK@2..31
+                  LBRACE@2..2 ""
+                  RULE_SET@2..31
+                    SELECTOR_LIST@2..7
+                      SELECTOR@2..7
+                        SIMPLE_SELECTOR@2..7
+                          WHITESPACE@2..5 "\n  "
+                          DOT@5..6 "."
+                          IDENT@6..7 "b"
+                    BLOCK@7..31
+                      LBRACE@7..7 ""
+                      RULE_SET@7..31
+                        SELECTOR_LIST@7..14
+                          SELECTOR@7..14
+                            SIMPLE_SELECTOR@7..14
+                              WHITESPACE@7..12 "\n    "
+                              DOT@12..13 "."
+                              IDENT@13..14 "c"
+                        BLOCK@14..31
+                          LBRACE@14..14 ""
+                          DECLARATION@14..31
+                            PROPERTY@14..26
+                              WHITESPACE@14..21 "\n      "
+                              IDENT@21..26 "color"
+                            COLON@26..27 ":"
+                            VALUE@27..31
+                              VALUE@27..31
+                                WHITESPACE@27..28 " "
+                                IDENT@28..31 "red"
+                            SEMICOLON@31..31 ""
+                          RBRACE@31..31 ""
+                      RBRACE@31..31 ""
+                  RBRACE@31..31 ""
+              RULE_SET@31..46
+                SELECTOR_LIST@31..34
+                  SELECTOR@31..34
+                    SIMPLE_SELECTOR@31..34
+                      WHITESPACE@31..32 "\n"
+                      DOT@32..33 "."
+                      IDENT@33..34 "d"
+                BLOCK@34..46
+                  LBRACE@34..34 ""
+                  DECLARATION@34..46
+                    PROPERTY@34..43
+                      WHITESPACE@34..37 "\n  "
+                      IDENT@37..43 "margin"
+                    COLON@43..44 ":"
+                    VALUE@44..46
+                      NUMBER_LITERAL@44..46
+                        WHITESPACE@44..45 " "
+                        NUMBER@45..46 "0"
+                    SEMICOLON@46..46 ""
+                  RBRACE@46..46 ""
+              WHITESPACE@46..47 "\n"
+        "#]],
     );
 }
 
@@ -710,13 +1042,27 @@ fn dedent_multiple_levels_at_once() {
 #[test]
 fn only_comments() {
     let src = "// just a comment\n";
-    assert_eq!(significant(src), vec![]);
+    check_tree(
+        src,
+        expect![[r#"
+        SOURCE_FILE@0..18
+          SINGLE_LINE_COMMENT@0..17 "// just a comment"
+          WHITESPACE@17..18 "\n"
+    "#]],
+    );
 }
 
 #[test]
 fn only_block_comment() {
     let src = "/* block\n   comment */\n";
-    assert_eq!(significant(src), vec![]);
+    check_tree(
+        src,
+        expect![[r#"
+        SOURCE_FILE@0..23
+          MULTI_LINE_COMMENT@0..22 "/* block\n   comment */"
+          WHITESPACE@22..23 "\n"
+    "#]],
+    );
 }
 
 // ── Consecutive blank lines ──────────────────────────────────────────
@@ -724,23 +1070,42 @@ fn only_block_comment() {
 #[test]
 fn consecutive_blank_lines() {
     let src = ".foo\n  color: red\n\n\n\n  font-size: 14px\n";
-    check_significant(
+    check_tree(
         src,
         expect![[r#"
-        DOT "."
-        IDENT "foo"
-        LBRACE(virtual)
-        IDENT "color"
-        COLON ":"
-        IDENT "red"
-        SEMICOLON(virtual)
-        IDENT "font-size"
-        COLON ":"
-        NUMBER "14"
-        IDENT "px"
-        SEMICOLON(virtual)
-        RBRACE(virtual)
-    "#]],
+            SOURCE_FILE@0..39
+              RULE_SET@0..38
+                SELECTOR_LIST@0..4
+                  SELECTOR@0..4
+                    SIMPLE_SELECTOR@0..4
+                      DOT@0..1 "."
+                      IDENT@1..4 "foo"
+                BLOCK@4..38
+                  LBRACE@4..4 ""
+                  DECLARATION@4..17
+                    PROPERTY@4..12
+                      WHITESPACE@4..7 "\n  "
+                      IDENT@7..12 "color"
+                    COLON@12..13 ":"
+                    VALUE@13..17
+                      VALUE@13..17
+                        WHITESPACE@13..14 " "
+                        IDENT@14..17 "red"
+                    SEMICOLON@17..17 ""
+                  DECLARATION@17..38
+                    PROPERTY@17..32
+                      WHITESPACE@17..23 "\n\n\n\n  "
+                      IDENT@23..32 "font-size"
+                    COLON@32..33 ":"
+                    VALUE@33..38
+                      DIMENSION@33..38
+                        WHITESPACE@33..34 " "
+                        NUMBER@34..36 "14"
+                        IDENT@36..38 "px"
+                    SEMICOLON@38..38 ""
+                  RBRACE@38..38 ""
+              WHITESPACE@38..39 "\n"
+        "#]],
     );
 }
 
@@ -750,30 +1115,59 @@ fn consecutive_blank_lines() {
 fn comma_continuation_with_blank_line() {
     // Comma continuation spans blank lines (matches Dart Sass behavior)
     let src = ".a,\n\n.b\n  color: red\n";
-    check_significant(
+    check_tree(
         src,
         expect![[r#"
-        DOT "."
-        IDENT "a"
-        COMMA ","
-        DOT "."
-        IDENT "b"
-        LBRACE(virtual)
-        IDENT "color"
-        COLON ":"
-        IDENT "red"
-        SEMICOLON(virtual)
-        RBRACE(virtual)
-    "#]],
+            SOURCE_FILE@0..21
+              RULE_SET@0..20
+                SELECTOR_LIST@0..7
+                  SELECTOR@0..2
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "a"
+                  COMMA@2..3 ","
+                  SELECTOR@3..7
+                    SIMPLE_SELECTOR@3..7
+                      WHITESPACE@3..5 "\n\n"
+                      DOT@5..6 "."
+                      IDENT@6..7 "b"
+                BLOCK@7..20
+                  LBRACE@7..7 ""
+                  DECLARATION@7..20
+                    PROPERTY@7..15
+                      WHITESPACE@7..10 "\n  "
+                      IDENT@10..15 "color"
+                    COLON@15..16 ":"
+                    VALUE@16..20
+                      VALUE@16..20
+                        WHITESPACE@16..17 " "
+                        IDENT@17..20 "red"
+                    SEMICOLON@20..20 ""
+                  RBRACE@20..20 ""
+              WHITESPACE@20..21 "\n"
+        "#]],
     );
 }
 
 #[test]
 fn comma_as_last_token_in_file() {
     let src = "$list: 1,";
-    let toks = significant(src);
-    let kinds: Vec<_> = toks.iter().map(|(k, _)| *k).collect();
-    assert_eq!(kinds, vec![DOLLAR, IDENT, COLON, NUMBER, COMMA, SEMICOLON]);
+    check_tree(
+        src,
+        expect![[r#"
+        SOURCE_FILE@0..9
+          VARIABLE_DECL@0..9
+            DOLLAR@0..1 "$"
+            IDENT@1..5 "list"
+            COLON@5..6 ":"
+            LIST_EXPR@6..9
+              NUMBER_LITERAL@6..8
+                WHITESPACE@6..7 " "
+                NUMBER@7..8 "1"
+              COMMA@8..9 ","
+            SEMICOLON@9..9 ""
+    "#]],
+    );
 }
 
 // ── Blank line breaks continuation ───────────────────────────────────
@@ -826,23 +1220,42 @@ fn colon_continuation_broken_by_blank_line() {
 fn percent_as_unit_not_continuation() {
     // `50%` at EOL is a unit suffix, not modulo operator — no continuation.
     let src = ".foo\n  width: 50%\n  color: red\n";
-    check_significant(
+    check_tree(
         src,
         expect![[r#"
-        DOT "."
-        IDENT "foo"
-        LBRACE(virtual)
-        IDENT "width"
-        COLON ":"
-        NUMBER "50"
-        PERCENT "%"
-        SEMICOLON(virtual)
-        IDENT "color"
-        COLON ":"
-        IDENT "red"
-        SEMICOLON(virtual)
-        RBRACE(virtual)
-    "#]],
+            SOURCE_FILE@0..31
+              RULE_SET@0..30
+                SELECTOR_LIST@0..4
+                  SELECTOR@0..4
+                    SIMPLE_SELECTOR@0..4
+                      DOT@0..1 "."
+                      IDENT@1..4 "foo"
+                BLOCK@4..30
+                  LBRACE@4..4 ""
+                  DECLARATION@4..17
+                    PROPERTY@4..12
+                      WHITESPACE@4..7 "\n  "
+                      IDENT@7..12 "width"
+                    COLON@12..13 ":"
+                    VALUE@13..17
+                      DIMENSION@13..17
+                        WHITESPACE@13..14 " "
+                        NUMBER@14..16 "50"
+                        PERCENT@16..17 "%"
+                    SEMICOLON@17..17 ""
+                  DECLARATION@17..30
+                    PROPERTY@17..25
+                      WHITESPACE@17..20 "\n  "
+                      IDENT@20..25 "color"
+                    COLON@25..26 ":"
+                    VALUE@26..30
+                      VALUE@26..30
+                        WHITESPACE@26..27 " "
+                        IDENT@27..30 "red"
+                    SEMICOLON@30..30 ""
+                  RBRACE@30..30 ""
+              WHITESPACE@30..31 "\n"
+        "#]],
     );
 }
 
@@ -851,20 +1264,34 @@ fn percent_as_unit_not_continuation() {
 #[test]
 fn bracket_in_selector() {
     let src = "a[href]\n  color: red\n";
-    check_significant(
+    check_tree(
         src,
         expect![[r#"
-        IDENT "a"
-        LBRACKET "["
-        IDENT "href"
-        RBRACKET "]"
-        LBRACE(virtual)
-        IDENT "color"
-        COLON ":"
-        IDENT "red"
-        SEMICOLON(virtual)
-        RBRACE(virtual)
-    "#]],
+            SOURCE_FILE@0..21
+              RULE_SET@0..20
+                SELECTOR_LIST@0..7
+                  SELECTOR@0..7
+                    SIMPLE_SELECTOR@0..1
+                      IDENT@0..1 "a"
+                    ATTR_SELECTOR@1..7
+                      LBRACKET@1..2 "["
+                      IDENT@2..6 "href"
+                      RBRACKET@6..7 "]"
+                BLOCK@7..20
+                  LBRACE@7..7 ""
+                  DECLARATION@7..20
+                    PROPERTY@7..15
+                      WHITESPACE@7..10 "\n  "
+                      IDENT@10..15 "color"
+                    COLON@15..16 ":"
+                    VALUE@16..20
+                      VALUE@16..20
+                        WHITESPACE@16..17 " "
+                        IDENT@17..20 "red"
+                    SEMICOLON@20..20 ""
+                  RBRACE@20..20 ""
+              WHITESPACE@20..21 "\n"
+        "#]],
     );
 }
 
@@ -873,10 +1300,48 @@ fn bracket_in_selector() {
 #[test]
 fn use_rule() {
     let src = "@use \"sass:math\"\n.foo\n  width: math.ceil(1.5)\n";
-    let toks = significant(src);
-    let kinds: Vec<_> = toks.iter().map(|(k, _)| *k).collect();
-    // @use "sass:math" ; .foo { ... }
-    assert!(kinds.starts_with(&[AT, IDENT, QUOTED_STRING, SEMICOLON]));
+    check_tree(
+        src,
+        expect![[r#"
+        SOURCE_FILE@0..46
+          USE_RULE@0..16
+            AT@0..1 "@"
+            IDENT@1..4 "use"
+            WHITESPACE@4..5 " "
+            QUOTED_STRING@5..16 "\"sass:math\""
+            SEMICOLON@16..16 ""
+          RULE_SET@16..45
+            SELECTOR_LIST@16..21
+              SELECTOR@16..21
+                SIMPLE_SELECTOR@16..21
+                  WHITESPACE@16..17 "\n"
+                  DOT@17..18 "."
+                  IDENT@18..21 "foo"
+            BLOCK@21..45
+              LBRACE@21..21 ""
+              DECLARATION@21..45
+                PROPERTY@21..29
+                  WHITESPACE@21..24 "\n  "
+                  IDENT@24..29 "width"
+                COLON@29..30 ":"
+                VALUE@30..45
+                  NAMESPACE_REF@30..45
+                    WHITESPACE@30..31 " "
+                    IDENT@31..35 "math"
+                    DOT@35..36 "."
+                    FUNCTION_CALL@36..45
+                      IDENT@36..40 "ceil"
+                      ARG_LIST@40..45
+                        LPAREN@40..41 "("
+                        ARG@41..44
+                          NUMBER_LITERAL@41..44
+                            NUMBER@41..44 "1.5"
+                        RPAREN@44..45 ")"
+                SEMICOLON@45..45 ""
+              RBRACE@45..45 ""
+          WHITESPACE@45..46 "\n"
+    "#]],
+    );
 }
 
 // ── Multi-line block comment ─────────────────────────────────────────
@@ -884,18 +1349,33 @@ fn use_rule() {
 #[test]
 fn multiline_block_comment_in_rule() {
     let src = ".foo\n  /* multi\n     line */\n  color: red\n";
-    check_significant(
+    check_tree(
         src,
         expect![[r#"
-        DOT "."
-        IDENT "foo"
-        LBRACE(virtual)
-        IDENT "color"
-        COLON ":"
-        IDENT "red"
-        SEMICOLON(virtual)
-        RBRACE(virtual)
-    "#]],
+            SOURCE_FILE@0..42
+              RULE_SET@0..41
+                SELECTOR_LIST@0..4
+                  SELECTOR@0..4
+                    SIMPLE_SELECTOR@0..4
+                      DOT@0..1 "."
+                      IDENT@1..4 "foo"
+                BLOCK@4..41
+                  LBRACE@4..4 ""
+                  DECLARATION@4..41
+                    PROPERTY@4..36
+                      WHITESPACE@4..7 "\n  "
+                      MULTI_LINE_COMMENT@7..28 "/* multi\n     line */"
+                      WHITESPACE@28..31 "\n  "
+                      IDENT@31..36 "color"
+                    COLON@36..37 ":"
+                    VALUE@37..41
+                      VALUE@37..41
+                        WHITESPACE@37..38 " "
+                        IDENT@38..41 "red"
+                    SEMICOLON@41..41 ""
+                  RBRACE@41..41 ""
+              WHITESPACE@41..42 "\n"
+        "#]],
     );
 }
 
