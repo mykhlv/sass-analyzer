@@ -4633,3 +4633,105 @@ fn pseudo_class_rule_nested_in_the_indented_syntax_is_unaffected() {
     "#]],
     );
 }
+
+// ── Line endings in comments ─────────────────────────────────────────
+
+#[test]
+fn silent_comment_with_carriage_return_line_endings() {
+    check_tree(
+        "// c\r.a\r  b: c\r",
+        expect![[r#"
+        SOURCE_FILE@0..15
+          RULE_SET@0..14
+            SELECTOR_LIST@0..7
+              SELECTOR@0..7
+                SIMPLE_SELECTOR@0..7
+                  SINGLE_LINE_COMMENT@0..4 "// c"
+                  WHITESPACE@4..5 "\r"
+                  DOT@5..6 "."
+                  IDENT@6..7 "a"
+            BLOCK@7..14
+              LBRACE@7..7 ""
+              DECLARATION@7..14
+                PROPERTY@7..11
+                  WHITESPACE@7..10 "\r  "
+                  IDENT@10..11 "b"
+                COLON@11..12 ":"
+                VALUE@12..14
+                  VALUE@12..14
+                    WHITESPACE@12..13 " "
+                    IDENT@13..14 "c"
+                SEMICOLON@14..14 ""
+              RBRACE@14..14 ""
+          WHITESPACE@14..15 "\r"
+    "#]],
+    );
+}
+
+#[test]
+fn silent_comment_with_form_feed_line_endings() {
+    check_tree(
+        "// c\x0c.a\x0c  b: c\x0c",
+        expect![[r#"
+        SOURCE_FILE@0..15
+          RULE_SET@0..14
+            SELECTOR_LIST@0..7
+              SELECTOR@0..7
+                SIMPLE_SELECTOR@0..7
+                  SINGLE_LINE_COMMENT@0..4 "// c"
+                  WHITESPACE@4..5 "\u{c}"
+                  DOT@5..6 "."
+                  IDENT@6..7 "a"
+            BLOCK@7..14
+              LBRACE@7..7 ""
+              DECLARATION@7..14
+                PROPERTY@7..11
+                  WHITESPACE@7..10 "\u{c}  "
+                  IDENT@10..11 "b"
+                COLON@11..12 ":"
+                VALUE@12..14
+                  VALUE@12..14
+                    WHITESPACE@12..13 " "
+                    IDENT@13..14 "c"
+                SEMICOLON@14..14 ""
+              RBRACE@14..14 ""
+          WHITESPACE@14..15 "\u{c}"
+    "#]],
+    );
+}
+
+#[test]
+fn silent_comment_continues_over_crlf_line_breaks() {
+    check_tree(
+        "// c\r\n  more\r\n  deeper\r\n.a\r\n  b: c\r\n",
+        expect![[r#"
+            SOURCE_FILE@0..36
+              RULE_SET@0..34
+                SELECTOR_LIST@0..26
+                  SELECTOR@0..26
+                    SIMPLE_SELECTOR@0..26
+                      SINGLE_LINE_COMMENT@0..4 "// c"
+                      WHITESPACE@4..8 "\r\n  "
+                      SINGLE_LINE_COMMENT@8..12 "more"
+                      WHITESPACE@12..16 "\r\n  "
+                      SINGLE_LINE_COMMENT@16..22 "deeper"
+                      WHITESPACE@22..24 "\r\n"
+                      DOT@24..25 "."
+                      IDENT@25..26 "a"
+                BLOCK@26..34
+                  LBRACE@26..26 ""
+                  DECLARATION@26..34
+                    PROPERTY@26..31
+                      WHITESPACE@26..30 "\r\n  "
+                      IDENT@30..31 "b"
+                    COLON@31..32 ":"
+                    VALUE@32..34
+                      VALUE@32..34
+                        WHITESPACE@32..33 " "
+                        IDENT@33..34 "c"
+                    SEMICOLON@34..34 ""
+                  RBRACE@34..34 ""
+              WHITESPACE@34..36 "\r\n"
+        "#]],
+    );
+}

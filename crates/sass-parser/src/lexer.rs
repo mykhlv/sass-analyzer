@@ -64,7 +64,7 @@ impl<'src> Lexer<'src> {
             // ── Comments & slash ───────────────────────────────────
             b'/' => match self.peek() {
                 Some(b'/') => {
-                    self.eat_while(|b| b != b'\n');
+                    self.eat_while(|b| !matches!(b, b'\n' | b'\r' | b'\x0C'));
                     SyntaxKind::SINGLE_LINE_COMMENT
                 }
                 Some(b'*') => {

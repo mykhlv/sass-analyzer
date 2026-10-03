@@ -122,6 +122,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now a selector colon. A value written without a space after the colon, such as
   `color:red *` with its operand on the next line, consequently no longer continues — Dart
   Sass reads that line as a selector as well
+- Parser: a `//` comment ends at any line break, `\r` and form feed included, as in CSS and
+  Dart Sass. In a file with lone `\r` line endings it ran to the end of the file, in both
+  syntaxes. In indented Sass, a `//` comment also continues over every indented line
+  separated by `\r\n` line breaks, where it stopped after the first
 
 ### Documentation
 - Corrected the 0.3.3 indented-Sass compliance figure: it reported 100% (346/346), the

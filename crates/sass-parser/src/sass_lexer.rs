@@ -249,13 +249,9 @@ fn tokenize_observing_newlines<'src>(
                 while i + 1 < raw.len() {
                     let (nk, nt) = raw[i + 1];
                     if nk == SyntaxKind::WHITESPACE && contains_newline(nt) {
-                        // A blank line (2+ newlines) breaks comment continuation.
-                        let newlines = nt
-                            .bytes()
-                            .filter(|&b| b == b'\n' || b == b'\r' || b == b'\x0c')
-                            .count();
+                        // A blank line breaks comment continuation.
                         let next_indent = measure_indent_after_last_newline(nt);
-                        if newlines == 1 && next_indent > base {
+                        if line_break_count(nt) == 1 && next_indent > base {
                             // Continuation line — emit whitespace, then retag line tokens.
                             i += 1;
                             result.push((SyntaxKind::WHITESPACE, nt));
@@ -708,6 +704,20 @@ fn line_is_namespace_prefix(result: &[(SyntaxKind, &str)]) -> bool {
 
 fn contains_newline(text: &str) -> bool {
     text.contains(['\n', '\r', '\x0c'])
+}
+
+/// `\r\n` is one line break, as is a lone `\n`, `\r` or `\x0c`.
+fn line_break_count(text: &str) -> usize {
+    let bytes = text.as_bytes();
+    bytes
+        .iter()
+        .enumerate()
+        .filter(|&(i, &b)| match b {
+            b'\n' => i == 0 || bytes[i - 1] != b'\r',
+            b'\r' | b'\x0c' => true,
+            _ => false,
+        })
+        .count()
 }
 
 fn measure_indent_after_last_newline(text: &str) -> u32 {
