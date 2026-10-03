@@ -98,24 +98,34 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Cache indented-Sass corpora
+      - name: Cache SCSS and indented-Sass corpora
         uses: actions/cache@v4
         with:
           path: |
+            test-corpus/bootstrap
+            test-corpus/foundation
+            test-corpus/primer
+            test-corpus/bulma
+            test-corpus/angular-material
             test-corpus/bulma-sass
             test-corpus/vuetify
             test-corpus/quasar
-          key: sass-corpus-${{ hashFiles('test-corpus/download.sh') }}
+          key: corpora-${{ hashFiles('test-corpus/download.sh') }}
       - name: Download corpora
-        run: bash test-corpus/download.sh bulma-sass vuetify quasar
+        run: >-
+          bash test-corpus/download.sh bootstrap foundation primer bulma angular-material
+          bulma-sass vuetify quasar
+      # Runs both sass_corpora_match_baseline and scss_corpora_match_baseline. Each
+      # fails on any per-file difference (errors or tree shape) and then writes a
+      # .actual sibling instead of the tracked baseline.
       - name: Parse the corpora
-        run: cargo test -p sass-parser --test corpus_test -- --ignored sass_corpora_match_baseline --nocapture
+        run: cargo test -p sass-parser --test corpus_test -- --ignored corpora_match_baseline --nocapture
       - name: Fail on baseline drift
         run: |
-          if ! git diff --exit-code -- test-corpus/sass-corpus-baseline.txt; then
-            echo "::error::indented-Sass corpus results changed. If files now parse, \
-          commit the regenerated baseline; if more fail, that is a regression; if the \
-          failing count stayed the same but the file list changed, one file started \
-          parsing while another stopped — review the diff before committing either way."
+          if ! git diff --exit-code -- test-corpus/sass-corpus-baseline.txt \
+                                        test-corpus/scss-corpus-baseline.txt; then
+            echo "::error::a corpus baseline was rewritten with different content \
+          although every record matched (a header change, or a baseline file missing \
+          from the commit). Commit the regenerated file after reviewing the diff."
             exit 1
           fi
