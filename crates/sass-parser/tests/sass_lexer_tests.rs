@@ -1,9 +1,19 @@
 use expect_test::{Expect, expect};
 use sass_parser::syntax::SassLanguage;
 
+#[path = "common/line_facts.rs"]
+mod line_facts;
+
 // ── Helpers ──────────────────────────────────────────────────────────
 
+/// Also cross-checks the input's layout facts against the legacy lexer, so that every
+/// input here is covered by that check too.
 fn check_parse(source: &str) -> String {
+    let mismatches = line_facts::line_fact_mismatches(source);
+    assert!(
+        mismatches.is_empty(),
+        "layout facts disagree with the legacy lexer: {mismatches:#?}"
+    );
     let (green, errs) = sass_parser::parse_sass(source);
     let tree = rowan::SyntaxNode::<SassLanguage>::new_root(green);
     assert_eq!(

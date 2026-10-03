@@ -13,6 +13,9 @@ use std::path::{Path, PathBuf};
 use sass_parser::syntax::{SyntaxNode, debug_tree};
 use sass_parser::syntax_kind::SyntaxKind;
 
+#[path = "common/line_facts.rs"]
+mod line_facts;
+
 fn corpus_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test-corpus")
 }
@@ -444,6 +447,49 @@ fn sass_corpora_match_baseline() {
 #[ignore = "requires downloading test corpus"]
 fn scss_corpora_match_baseline() {
     run_gate(&SCSS_GATE);
+}
+
+/// Every file of the indented corpora, `.scss` ones included, has layout facts that
+/// reproduce the indentation the legacy indented lexer measures at each newline.
+#[test]
+#[ignore = "requires downloading test corpus"]
+fn sass_corpora_line_facts_match_legacy() {
+    let mut files = 0;
+    let mut newlines = 0;
+    let mut mismatches = Vec::new();
+    for (name, subdir) in SASS_GATE.corpora {
+        let dir = corpus_root().join(subdir);
+        assert!(
+            dir.exists(),
+            "{name} corpus not found at {}. Run: cd test-corpus && bash download.sh",
+            dir.display()
+        );
+        for path in collect_source_files(&dir) {
+            let source = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+            files += 1;
+            newlines += sass_parser::sass_lexer::newline_indents(&source).len();
+            let rel = path
+                .strip_prefix(&dir)
+                .unwrap_or(&path)
+                .display()
+                .to_string();
+            mismatches.extend(
+                line_facts::line_fact_mismatches(&source)
+                    .into_iter()
+                    .map(|m| format!("{name}/{rel} {m}")),
+            );
+        }
+    }
+    eprintln!(
+        "\nline facts vs legacy: {files} files, {newlines} newlines checked, {} mismatches",
+        mismatches.len(),
+    );
+    assert!(
+        mismatches.is_empty(),
+        "layout facts disagree with the legacy lexer: {:#?}",
+        &mismatches[..mismatches.len().min(20)],
+    );
 }
 
 #[test]

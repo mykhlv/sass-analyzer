@@ -3,6 +3,9 @@ use std::fmt::Write;
 use sass_parser::syntax::{GreenNode, SyntaxNode, debug_tree};
 use sass_parser::text_range::TextRange;
 
+#[path = "common/line_facts.rs"]
+mod line_facts;
+
 type ParseFn = fn(&str) -> (GreenNode, Vec<(String, TextRange)>);
 
 /// The tree and errors rendered together, so one comparison covers both.
@@ -27,6 +30,11 @@ fn check_same(source: &str) {
         render(sass_parser::parse_sass_legacy, source),
         render(sass_parser::parse_sass, source),
         "parse_sass_legacy and parse_sass disagree on {source:?}",
+    );
+    let mismatches = line_facts::line_fact_mismatches(source);
+    assert!(
+        mismatches.is_empty(),
+        "layout facts disagree with the legacy lexer on {source:?}: {mismatches:#?}",
     );
 }
 
