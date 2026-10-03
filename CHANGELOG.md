@@ -122,6 +122,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now a selector colon. A value written without a space after the colon, such as
   `color:red *` with its operand on the next line, consequently no longer continues — Dart
   Sass reads that line as a selector as well
+- Indented Sass: a loud comment that starts a line now ends where Dart Sass ends it — at
+  the first following line indented no deeper than the comment — and needs no closing
+  `*/`, as the Sass documentation shows. An unclosed `/* …` ran to the end of the file, so
+  every rule after it was **silently** swallowed into the comment: sass-spec's `loud.hrx`
+  produced 2 comments instead of 8. A `*/` on a line not indented under its comment now
+  reports an error, as in Dart Sass
+- Parser: a `//` comment ends at any line break, `\r` and form feed included, as in CSS and
+  Dart Sass. In a file with lone `\r` line endings it ran to the end of the file, in both
+  syntaxes. In indented Sass, a `//` comment also continues over every indented line
+  separated by `\r\n` line breaks, where it stopped after the first
+- Indented Sass: a quote or an unclosed `/*` on a line that continues a `//` comment no
+  longer swallows the rest of the file, and an unclosed `url(` there no longer breaks the
+  lines below. The continuation line was lexed as code and only then marked as comment, so
+  `it's` opened a string that ran to the next `'` anywhere below; as in Dart Sass, such a
+  line now ends where the line ends
 
 ### Documentation
 - Corrected the 0.3.3 indented-Sass compliance figure: it reported 100% (346/346), the
@@ -138,6 +153,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   swallows the line below it. Dart Sass continues the expression too and then reports an
   error; sass-analyzer produces one merged declaration with no diagnostic. This form occurs
   zero times across the Bulma, Vuetify and Quasar corpora
+- In indented Sass, a `//` comment stops at a blank line, while Dart Sass continues it
+  over the blank line onto the more deeply indented lines below; such a line is parsed as a
+  statement with no diagnostic. Text indented under a closed `/* … */`, and an unclosed
+  `/*` after other content on its line, are accepted without the error Dart Sass reports.
+  None of these occurs in the Bulma, Vuetify and Quasar corpora
 
 ## 0.3.4 — 2026-03-31
 

@@ -1,5 +1,29 @@
 use crate::syntax_kind::SyntaxKind;
 
+mod indented;
+
+pub use indented::IndentedLexer;
+pub(crate) use indented::{contains_newline, indent_after_last_newline};
+
+/// A stream of tokens ending in `EOF`, as [`Lexer`] and [`IndentedLexer`] produce.
+pub trait TokenSource<'src> {
+    fn next_token(&mut self) -> (SyntaxKind, &'src str);
+}
+
+impl<'src> TokenSource<'src> for Lexer<'src> {
+    #[inline]
+    fn next_token(&mut self) -> (SyntaxKind, &'src str) {
+        Lexer::next_token(self)
+    }
+}
+
+impl<'src> TokenSource<'src> for IndentedLexer<'src> {
+    #[inline]
+    fn next_token(&mut self) -> (SyntaxKind, &'src str) {
+        IndentedLexer::next_token(self)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LexContext {
     Interpolation { brace_depth: u32 },
@@ -64,7 +88,7 @@ impl<'src> Lexer<'src> {
             // ── Comments & slash ───────────────────────────────────
             b'/' => match self.peek() {
                 Some(b'/') => {
-                    self.eat_while(|b| b != b'\n');
+                    self.eat_while(|b| !matches!(b, b'\n' | b'\r' | b'\x0C'));
                     SyntaxKind::SINGLE_LINE_COMMENT
                 }
                 Some(b'*') => {
@@ -218,6 +242,13 @@ impl<'src> Lexer<'src> {
         };
 
         (kind, &self.input[start..self.pos])
+    }
+
+    /// Forget any string, interpolation or `url(` being lexed, so that lexing resumes as
+    /// at the start of a line.
+    fn reset_context(&mut self) {
+        self.context_stack.clear();
+        self.pending_url_context = false;
     }
 
     // ── Token-specific helpers ────────────────────────────────────────

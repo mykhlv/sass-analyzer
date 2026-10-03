@@ -772,8 +772,32 @@ fn comment_with_crlf() {
     assert_eq!(
         lex("// hi\r\nx"),
         vec![
-            (SINGLE_LINE_COMMENT, "// hi\r"),
-            (WHITESPACE, "\n"),
+            (SINGLE_LINE_COMMENT, "// hi"),
+            (WHITESPACE, "\r\n"),
+            (IDENT, "x"),
+        ]
+    );
+}
+
+#[test]
+fn comment_ends_at_a_lone_carriage_return() {
+    assert_eq!(
+        lex("// hi\rx"),
+        vec![
+            (SINGLE_LINE_COMMENT, "// hi"),
+            (WHITESPACE, "\r"),
+            (IDENT, "x"),
+        ]
+    );
+}
+
+#[test]
+fn comment_ends_at_a_form_feed() {
+    assert_eq!(
+        lex("// hi\x0cx"),
+        vec![
+            (SINGLE_LINE_COMMENT, "// hi"),
+            (WHITESPACE, "\x0c"),
             (IDENT, "x"),
         ]
     );
