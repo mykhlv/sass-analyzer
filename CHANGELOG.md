@@ -112,6 +112,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`a:hover`, `font:bold`) can be a selector. This resolves the known issue recorded for
   the nested-selector fix above, and a custom property whose value contains braces
   (`--c: a {b}`) is now a custom property rather than a rule set
+- Indented Sass: a selector that combines a pseudo-class with a trailing universal selector
+  no longer swallows the block indented under it — `.a:hover > *`, `.a:not(.b) *`, and
+  `.a:focus,` with `.b *` on the next line of the same selector list. The pseudo-class
+  colon was taken for the start of a value, so the trailing `*` read as multiplication and
+  the declaration below was **silently** absorbed into the selector as a pseudo-class
+  (`color: red` became `:red`). `.a:hover .not` absorbed its block the same way. As in Dart
+  Sass, a colon followed directly by an identifier (`a:hover`, `a:-webkit-x`, `a:#{$p}`) is
+  now a selector colon. A value written without a space after the colon, such as
+  `color:red *` with its operand on the next line, consequently no longer continues — Dart
+  Sass reads that line as a selector as well
 
 ### Documentation
 - Corrected the 0.3.3 indented-Sass compliance figure: it reported 100% (346/346), the
@@ -124,20 +134,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `engines.vscode` floor instead of drifting above it on every dependency update
 
 ### Known issues
-- In indented Sass, a selector that combines a pseudo-class with a trailing universal
-  selector still swallows the block indented under it — `.a:hover > *`, `.a:not(.b) *`.
-  A pseudo-class colon is indistinguishable from a declaration colon at the lexer level,
-  so it is read as the start of a value and the trailing `*` as multiplication. Two
-  things worth knowing about this one: the misparse is usually **silent** — no
-  diagnostic, just a declaration absorbed into the selector — and it becomes loud only
-  when the swallowed value cannot pass for a pseudo-class (`opacity: 0` errors,
-  `color: red` does not). And the pseudo-class need not share a line with the `*`: a
-  comma-continued selector list is a single statement, so `.a:focus,` on one line poisons
-  `.b *` on the next. The same over-approximation affects the boolean operators, not just
-  `*`: `.a:hover .not` followed by an indented declaration absorbs it the same way, and a
-  declaration value ending in a bare `and`/`or`/`not` (`content: not`) swallows the line
-  below it. All of these forms occur zero times across the Bulma, Vuetify and Quasar
-  corpora, which is the only reason they are acceptable to ship
+- In indented Sass, a declaration value ending in a bare `and`/`or`/`not` (`content: not`)
+  swallows the line below it. Dart Sass continues the expression too and then reports an
+  error; sass-analyzer produces one merged declaration with no diagnostic. This form occurs
+  zero times across the Bulma, Vuetify and Quasar corpora
 
 ## 0.3.4 — 2026-03-31
 
