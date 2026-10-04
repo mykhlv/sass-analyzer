@@ -147,10 +147,10 @@ pub fn allow_list() -> Vec<Allowed> {
         Allowed {
             input: ".a\n  content: not\n  b: c\n",
             change: "legacy continues the line after a value ending in `not` and silently \
-                     takes `b: c` into it; the layout frontend ends the declaration there, \
-                     so `b: c` is a declaration of its own (Dart reports `expected \
-                     newline.`; reporting it here needs `not` to be an operator in CSS \
-                     values, which would change SCSS)",
+                     takes `b: c` into it; the layout frontend goes on after `not` only \
+                     into a line that could be its operand, so `b: c` is a declaration of \
+                     its own (Dart reports `expected newline.`; reporting it here needs \
+                     `not` to be an operator in CSS values, which would change SCSS)",
             expected: expect![[r#"
                 SOURCE_FILE@0..25
                   RULE_SET@0..24
@@ -170,6 +170,134 @@ pub fn allow_list() -> Vec<Allowed> {
                           VALUE@13..17
                             WHITESPACE@13..14 " "
                             IDENT@14..17 "not"
+                        SEMICOLON@17..17 ""
+                      DECLARATION@17..24
+                        PROPERTY@17..21
+                          WHITESPACE@17..20 "\n  "
+                          IDENT@20..21 "b"
+                        COLON@21..22 ":"
+                        VALUE@22..24
+                          VALUE@22..24
+                            WHITESPACE@22..23 " "
+                            IDENT@23..24 "c"
+                        SEMICOLON@24..24 ""
+                      RBRACE@24..24 ""
+                  WHITESPACE@24..25 "\n"
+            "#]],
+        },
+        Allowed {
+            input: ".a\n  b: c and\n    d: e\n",
+            change: "legacy continues the line after a value ending in `and` and silently \
+                     takes `d: e` into it; the layout frontend goes on after `and` or `or` \
+                     only into a line that could be its operand, so the deeper `d: e` is a \
+                     nested declaration, as without the `and` (Dart reports `expected \
+                     newline.`, as for `not`)",
+            expected: expect![[r#"
+                SOURCE_FILE@0..23
+                  RULE_SET@0..22
+                    SELECTOR_LIST@0..2
+                      SELECTOR@0..2
+                        SIMPLE_SELECTOR@0..2
+                          DOT@0..1 "."
+                          IDENT@1..2 "a"
+                    BLOCK@2..22
+                      LBRACE@2..2 ""
+                      NESTED_PROPERTY@2..22
+                        PROPERTY@2..6
+                          WHITESPACE@2..5 "\n  "
+                          IDENT@5..6 "b"
+                        COLON@6..7 ":"
+                        VALUE@7..13
+                          VALUE@7..9
+                            WHITESPACE@7..8 " "
+                            IDENT@8..9 "c"
+                          VALUE@9..13
+                            WHITESPACE@9..10 " "
+                            IDENT@10..13 "and"
+                        BLOCK@13..22
+                          LBRACE@13..13 ""
+                          DECLARATION@13..22
+                            PROPERTY@13..19
+                              WHITESPACE@13..18 "\n    "
+                              IDENT@18..19 "d"
+                            COLON@19..20 ":"
+                            VALUE@20..22
+                              VALUE@20..22
+                                WHITESPACE@20..21 " "
+                                IDENT@21..22 "e"
+                            SEMICOLON@22..22 ""
+                          RBRACE@22..22 ""
+                      RBRACE@22..22 ""
+                  WHITESPACE@22..23 "\n"
+            "#]],
+        },
+        Allowed {
+            input: ".a\n  b: c or\n  d: e\n",
+            change: "legacy continues the line after a value ending in `or` and silently \
+                     takes `d: e` into it; the layout frontend ends the declaration there, \
+                     so `d: e` is a declaration of its own (Dart reports `expected \
+                     newline.`, as for `not`)",
+            expected: expect![[r#"
+                SOURCE_FILE@0..20
+                  RULE_SET@0..19
+                    SELECTOR_LIST@0..2
+                      SELECTOR@0..2
+                        SIMPLE_SELECTOR@0..2
+                          DOT@0..1 "."
+                          IDENT@1..2 "a"
+                    BLOCK@2..19
+                      LBRACE@2..2 ""
+                      DECLARATION@2..12
+                        PROPERTY@2..6
+                          WHITESPACE@2..5 "\n  "
+                          IDENT@5..6 "b"
+                        COLON@6..7 ":"
+                        VALUE@7..12
+                          VALUE@7..9
+                            WHITESPACE@7..8 " "
+                            IDENT@8..9 "c"
+                          VALUE@9..12
+                            WHITESPACE@9..10 " "
+                            IDENT@10..12 "or"
+                        SEMICOLON@12..12 ""
+                      DECLARATION@12..19
+                        PROPERTY@12..16
+                          WHITESPACE@12..15 "\n  "
+                          IDENT@15..16 "d"
+                        COLON@16..17 ":"
+                        VALUE@17..19
+                          VALUE@17..19
+                            WHITESPACE@17..18 " "
+                            IDENT@18..19 "e"
+                        SEMICOLON@19..19 ""
+                      RBRACE@19..19 ""
+                  WHITESPACE@19..20 "\n"
+            "#]],
+        },
+        Allowed {
+            input: ".a\n  content: and\n  b: c\n",
+            change: "legacy continues the line after any value ending in `and` and silently \
+                     takes `b: c` into it; with no operand before it `and` is a plain word, \
+                     so the layout frontend ends the declaration there (Dart: same)",
+            expected: expect![[r#"
+                SOURCE_FILE@0..25
+                  RULE_SET@0..24
+                    SELECTOR_LIST@0..2
+                      SELECTOR@0..2
+                        SIMPLE_SELECTOR@0..2
+                          DOT@0..1 "."
+                          IDENT@1..2 "a"
+                    BLOCK@2..24
+                      LBRACE@2..2 ""
+                      DECLARATION@2..17
+                        PROPERTY@2..12
+                          WHITESPACE@2..5 "\n  "
+                          IDENT@5..12 "content"
+                        COLON@12..13 ":"
+                        VALUE@13..17
+                          VALUE@13..17
+                            WHITESPACE@13..14 " "
+                            IDENT@14..17 "and"
                         SEMICOLON@17..17 ""
                       DECLARATION@17..24
                         PROPERTY@17..21

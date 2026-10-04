@@ -62,6 +62,31 @@ fn known_difference(source: &str, legacy: &str, layout: &str) -> bool {
         || silent_comment_crosses_a_blank_line(source)
         || operator_ends_a_line_legacy_ended(source, legacy)
         || stray_colon_ends_a_variable_line(source)
+        || word_operator_ends_a_line_layout_ended(source)
+}
+
+/// Legacy continues every line that ends in `and`, `or` or `not`; the layout frontend
+/// only where Dart Sass reads the word as an operator with an operand on the next line,
+/// so not into a line that starts like a declaration, nor after `and` or `or` with no
+/// operand before it. Spelled differently, the words make no difference.
+fn word_operator_ends_a_line_layout_ended(source: &str) -> bool {
+    let mut changed = false;
+    let respelled: String = source
+        .split_inclusive('\n')
+        .map(|line| {
+            let body = line.trim_end_matches(['\n', '\r', '\x0c', ' ', '\t']);
+            for word in ["and", "or", "not"] {
+                if let Some(head) = body.strip_suffix(word)
+                    && !head.ends_with(|c: char| c.is_alphanumeric() || c == '-' || c == '_')
+                {
+                    changed = true;
+                    return format!("{head}x{}", &line[head.len() + 1..]);
+                }
+            }
+            line.to_owned()
+        })
+        .collect();
+    changed && differs(&respelled).is_none()
 }
 
 /// Legacy continues any line that starts with `$` and ends with a colon; the layout

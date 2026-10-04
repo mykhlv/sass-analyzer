@@ -154,6 +154,77 @@ fn an_operator_at_the_end_of_a_line_continues_the_expression() {
     );
 }
 
+/// A declaration's value reads `and`, `or` and `not` as words, but Dart Sass reads them
+/// as operators: after `and` or `or` with an operand before it, or after `not`, the value
+/// goes on on the next line, as it did in legacy.
+#[test]
+fn a_word_operator_at_the_end_of_a_value_continues_it() {
+    for source in [
+        ".a\n  b: c and\n    d\n",
+        ".a\n  b: c and\n  d\n",
+        ".a\n  b: c or\n    d\n",
+        ".a\n  b: 1 and\n    2\n",
+        ".a\n  b: c not\n    d\n",
+        ".a\n  content: not\n    d\n",
+        ".a\n  b: c and\n    d e\n",
+        ".a\n  b: c, d and\n  e\n",
+        ".a\n  b: c and\n    d\n  e: f\n",
+    ] {
+        let tree = check_same(source);
+        assert!(!tree.contains("\nerror "), "{source:?}:\n{tree}");
+    }
+    check(
+        ".a\n  b: c and\n    d\n",
+        expect![[r#"
+            SOURCE_FILE@0..20
+              RULE_SET@0..19
+                SELECTOR_LIST@0..2
+                  SELECTOR@0..2
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "a"
+                BLOCK@2..19
+                  LBRACE@2..2 ""
+                  DECLARATION@2..19
+                    PROPERTY@2..6
+                      WHITESPACE@2..5 "\n  "
+                      IDENT@5..6 "b"
+                    COLON@6..7 ":"
+                    VALUE@7..19
+                      VALUE@7..9
+                        WHITESPACE@7..8 " "
+                        IDENT@8..9 "c"
+                      VALUE@9..13
+                        WHITESPACE@9..10 " "
+                        IDENT@10..13 "and"
+                      VALUE@13..19
+                        WHITESPACE@13..18 "\n    "
+                        IDENT@18..19 "d"
+                    SEMICOLON@19..19 ""
+                  RBRACE@19..19 ""
+              WHITESPACE@19..20 "\n"
+        "#]],
+    );
+}
+
+/// The failing cases: a line that starts like a declaration is no operand, and `and` or
+/// `or` with nothing before it is a plain word. Both end the value, and the next line
+/// has a property of its own, with no diagnostic yet (Dart reports `expected newline.`
+/// for the first).
+#[test]
+fn a_word_operator_does_not_take_a_declaration_into_the_value() {
+    for source in [
+        ".a\n  b: c and\n    d: e\n",
+        ".a\n  b: c or\n  d: e\n",
+        ".a\n  content: not\n  b: c\n",
+        ".a\n  content: and\n  b: c\n",
+    ] {
+        let tree = render(parse_sass_layout, source);
+        assert_eq!(tree.matches(" PROPERTY@").count(), 2, "{source:?}:\n{tree}");
+        assert!(!tree.contains("\nerror "), "{source:?}:\n{tree}");
+    }
+}
+
 #[test]
 fn a_blank_line_ends_a_continued_expression() {
     check(
