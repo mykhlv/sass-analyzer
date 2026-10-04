@@ -380,12 +380,12 @@ fn string_with_escaped_backslash() {
 
 #[test]
 fn unterminated_double_string() {
-    assert_eq!(lex("\"hello"), vec![(ERROR, "\"hello")]);
+    assert_eq!(lex("\"hello"), vec![(QUOTED_STRING, "\"hello")]);
 }
 
 #[test]
 fn unterminated_single_string() {
-    assert_eq!(lex("'hello"), vec![(ERROR, "'hello")]);
+    assert_eq!(lex("'hello"), vec![(QUOTED_STRING, "'hello")]);
 }
 
 #[test]
@@ -419,7 +419,7 @@ fn escaped_hash_non_brace() {
 
 #[test]
 fn unterminated_string_trailing_backslash() {
-    assert_eq!(lex("\"hello\\"), vec![(ERROR, "\"hello\\")]);
+    assert_eq!(lex("\"hello\\"), vec![(QUOTED_STRING, "\"hello\\")]);
 }
 
 #[test]
@@ -622,7 +622,7 @@ fn unterminated_string_after_interpolation() {
             (DOLLAR, "$"),
             (IDENT, "x"),
             (RBRACE, "}"),
-            (ERROR, " oops"),
+            (STRING_END, " oops"),
         ]
     );
 }
@@ -1330,10 +1330,89 @@ fn unterminated_block_comment_then_valid() {
 }
 
 #[test]
-fn unterminated_string_consumes_to_eof() {
-    // SCSS strings can span lines, so an unterminated string consumes to EOF
-    let tokens = lex("\"oops\na: b;");
-    assert_eq!(tokens, vec![(ERROR, "\"oops\na: b;")]);
+fn unterminated_string_ends_at_newline() {
+    // As a CSS bad string: the unescaped newline ends it and is not part of it.
+    for newline in ["\n", "\r\n", "\r", "\x0C"] {
+        let input = format!("\"oops{newline}a: b;");
+        assert_eq!(
+            lex(&input),
+            vec![
+                (QUOTED_STRING, "\"oops"),
+                (WHITESPACE, newline),
+                (IDENT, "a"),
+                (COLON, ":"),
+                (WHITESPACE, " "),
+                (IDENT, "b"),
+                (SEMICOLON, ";"),
+            ],
+            "{newline:?}"
+        );
+    }
+}
+
+#[test]
+fn escaped_newline_continues_string() {
+    for newline in ["\n", "\r\n", "\r", "\x0C"] {
+        let input = format!("'a\\{newline}b' c");
+        let string = format!("'a\\{newline}b'");
+        assert_eq!(
+            lex(&input),
+            vec![
+                (QUOTED_STRING, string.as_str()),
+                (WHITESPACE, " "),
+                (IDENT, "c")
+            ],
+            "{newline:?}"
+        );
+    }
+}
+
+#[test]
+fn unterminated_string_tail_ends_at_newline() {
+    assert_eq!(
+        lex("\"#{$x} oops\nb"),
+        vec![
+            (STRING_START, "\""),
+            (HASH_LBRACE, "#{"),
+            (DOLLAR, "$"),
+            (IDENT, "x"),
+            (RBRACE, "}"),
+            (STRING_END, " oops"),
+            (WHITESPACE, "\n"),
+            (IDENT, "b"),
+        ]
+    );
+    // Nothing of the string is left after the interpolation: no token for it.
+    assert_eq!(
+        lex("\"#{$x}\nb"),
+        vec![
+            (STRING_START, "\""),
+            (HASH_LBRACE, "#{"),
+            (DOLLAR, "$"),
+            (IDENT, "x"),
+            (RBRACE, "}"),
+            (WHITESPACE, "\n"),
+            (IDENT, "b"),
+        ]
+    );
+}
+
+#[test]
+fn unterminated_string_ends_what_it_is_nested_in() {
+    // The interpolation and the outer string end with the inner string, so `}` on the
+    // next line is a plain brace and what follows lexes as usual.
+    assert_eq!(
+        lex("\"a #{\"b\n}\nc"),
+        vec![
+            (STRING_START, "\"a "),
+            (HASH_LBRACE, "#{"),
+            (QUOTED_STRING, "\"b"),
+            (WHITESPACE, "\n"),
+            (RBRACE, "}"),
+            (WHITESPACE, "\n"),
+            (IDENT, "c"),
+        ]
+    );
 }
 
 #[test]

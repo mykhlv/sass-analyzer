@@ -60,6 +60,14 @@ pub struct Parser<'src> {
     last_virtual: (usize, u32),
     /// Layout state of [`Layout::Indented`]; unused when braced.
     indented: IndentedState,
+    /// Strings reported unclosed so far; see [`Parser::unclosed_strings`].
+    unclosed_strings: u32,
+    /// The cursor right after the last of them; see [`Parser::at_unclosed_string_break`].
+    unclosed_string_end: usize,
+    /// Where each interpolated string bumped and not yet ended starts. One the lexer ended
+    /// unclosed right after an interpolation never sees its `STRING_END`, and stays: it
+    /// lies below every string opened after it, so it is never taken for one of them.
+    open_strings: Vec<TextSize>,
 }
 
 impl<'src> Parser<'src> {
@@ -84,6 +92,9 @@ impl<'src> Parser<'src> {
             transparent: 0,
             last_virtual: (usize::MAX, 0),
             indented: IndentedState::new(),
+            unclosed_strings: 0,
+            unclosed_string_end: usize::MAX,
+            open_strings: Vec::new(),
         };
         if layout == Layout::Indented {
             parser.find_line_start(0);
@@ -198,6 +209,68 @@ impl<'src> Parser<'src> {
         let range = self.input.range(self.pos);
         self.events.push(Event::Token { kind, range });
         self.pos += 1;
+        match kind {
+            SyntaxKind::QUOTED_STRING => {
+                let text = &self.source[range];
+                self.check_string_end(range.start(), &text[1..], range.end());
+            }
+            SyntaxKind::STRING_START => self.open_strings.push(range.start()),
+            SyntaxKind::STRING_END => {
+                if let Some(start) = self.open_strings.pop() {
+                    self.check_string_end(start, &self.source[range], range.end());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Report the string from `start` to `end` if `end_text`, its end, lacks the closing
+    /// quote: the lexer ended it at a newline or at the end of input instead. That is the
+    /// only trace such a string leaves, as it lexes as an ordinary string otherwise.
+    fn check_string_end(&mut self, start: TextSize, end_text: &str, end: TextSize) {
+        let quote = self.source.as_bytes()[usize::from(start)];
+        if !crate::lexer::closes_string(end_text, quote) {
+            self.unclosed_string(TextRange::new(start, end));
+        }
+    }
+
+    /// Report the interpolated string that the token before the cursor, the `}` of an
+    /// interpolation, ends: the lexer ended it at the newline or end of input right after.
+    pub fn error_unclosed_string(&mut self) {
+        if let Some(prev) = self.pos.checked_sub(1)
+            && let Some(start) = self.open_strings.pop()
+        {
+            self.unclosed_string(TextRange::new(start, self.input.range(prev).end()));
+        }
+    }
+
+    /// How many strings have been reported unclosed so far. The lexer ends everything a
+    /// string is nested in — an interpolation, an enclosing string — together with it, so
+    /// a construct inside which this count grew will never see its closing token.
+    pub fn unclosed_strings(&self) -> u32 {
+        self.unclosed_strings
+    }
+
+    /// Whether the cursor is inside brackets, right after a string left unclosed. Its line
+    /// break most likely stands for the comma that the string swallowed with the rest of
+    /// its line: `(a: "x,` / `b: 2)`.
+    pub fn at_unclosed_string_break(&self) -> bool {
+        self.transparent > 0 && self.pos == self.unclosed_string_end
+    }
+
+    /// Take the line break at [`Parser::at_unclosed_string_break`] as a comma, once.
+    pub fn eat_unclosed_string_break(&mut self) -> bool {
+        let at = self.at_unclosed_string_break();
+        if at {
+            self.unclosed_string_end = usize::MAX;
+        }
+        at
+    }
+
+    fn unclosed_string(&mut self, range: TextRange) {
+        self.unclosed_strings += 1;
+        self.unclosed_string_end = self.pos;
+        self.error_at(range, "unterminated string");
     }
 
     /// Bump the current token as `kind` rather than the kind it was lexed as.

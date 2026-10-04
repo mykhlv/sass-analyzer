@@ -245,7 +245,7 @@ fn lexing_errors_do_not_disturb_the_facts() {
             EOF
         "#]],
     );
-    // Newlines inside an error token are not line breaks either.
+    // A string left unclosed ends at its line's end, and the line break after it is one.
     check(
         ".a\n  b: \"open\n  c: d\n",
         expect![[r#"
@@ -253,8 +253,26 @@ fn lexing_errors_do_not_disturb_the_facts() {
             IDENT "a"
             IDENT "b" <- 2 spaces
             COLON ":"
-            ERROR "\"open\n  c: d\n"
-            EOF
+            QUOTED_STRING "\"open"
+            IDENT "c" <- 2 spaces
+            COLON ":"
+            IDENT "d"
+            EOF <- 0
+        "#]],
+    );
+    // An escaped newline inside a string is not a line break.
+    check(
+        ".a\n  b: \"x\\\n  y\"\n  c: d\n",
+        expect![[r#"
+            DOT "."
+            IDENT "a"
+            IDENT "b" <- 2 spaces
+            COLON ":"
+            QUOTED_STRING "\"x\\\n  y\""
+            IDENT "c" <- 2 spaces
+            COLON ":"
+            IDENT "d"
+            EOF <- 0
         "#]],
     );
 }

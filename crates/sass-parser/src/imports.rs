@@ -70,14 +70,11 @@ fn collect_rec(node: &SyntaxNode, out: &mut Vec<ImportRef>) {
                 .filter_map(rowan::NodeOrToken::into_token)
             {
                 if token.kind() == SyntaxKind::QUOTED_STRING {
-                    let text = token.text();
-                    if let Some(unquoted) = text.get(1..text.len().saturating_sub(1)) {
-                        out.push(ImportRef {
-                            kind: ImportKind::Import,
-                            path: unquoted.to_owned(),
-                            range: node.text_range(),
-                        });
-                    }
+                    out.push(ImportRef {
+                        kind: ImportKind::Import,
+                        path: crate::ast::unquote(token.text()).to_owned(),
+                        range: node.text_range(),
+                    });
                 }
             }
         }

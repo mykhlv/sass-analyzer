@@ -36,6 +36,9 @@ pub struct Lexer<'src> {
     pos: usize,
     context_stack: Vec<LexContext>,
     pending_url_context: bool,
+    /// A string left unclosed has just ended the strings, interpolations and `url(` it
+    /// was nested in; see [`Lexer::take_unwound`].
+    unwound: bool,
 }
 
 impl<'src> Lexer<'src> {
@@ -45,6 +48,7 @@ impl<'src> Lexer<'src> {
             pos: 0,
             context_stack: Vec::new(),
             pending_url_context: false,
+            unwound: false,
         }
     }
 
@@ -251,6 +255,20 @@ impl<'src> Lexer<'src> {
         self.pending_url_context = false;
     }
 
+    /// A string ends unclosed at a newline or the end of input, and with it everything it
+    /// is nested in, so that the next line is not lexed as the inside of an interpolation
+    /// that will never be closed.
+    fn end_unclosed_string(&mut self) {
+        self.unwound |= !self.context_stack.is_empty();
+        self.reset_context();
+    }
+
+    /// Whether the token just lexed ended a string left unclosed inside an interpolation,
+    /// an interpolated string or `url(`, which ended with it. Clears the flag.
+    pub(crate) fn take_unwound(&mut self) -> bool {
+        std::mem::take(&mut self.unwound)
+    }
+
     // ── Token-specific helpers ────────────────────────────────────────
 
     fn lex_block_comment(&mut self) -> SyntaxKind {
@@ -269,10 +287,17 @@ impl<'src> Lexer<'src> {
         }
     }
 
+    /// A quoted string, up to its closing quote or, as CSS reads a bad string, up to the
+    /// unescaped newline or end of input that ends it unclosed. An unclosed string is still a
+    /// `QUOTED_STRING` (or `STRING_END`), just without the closing quote; the parser reports
+    /// it.
     fn lex_string(&mut self, start: usize, quote: u8) -> (SyntaxKind, &'src str) {
         loop {
             match self.peek() {
-                None => return (SyntaxKind::ERROR, &self.input[start..self.pos]),
+                None | Some(b'\n' | b'\r' | b'\x0C') => {
+                    self.end_unclosed_string();
+                    return (SyntaxKind::QUOTED_STRING, &self.input[start..self.pos]);
+                }
                 Some(b) if b == quote => {
                     self.pos += 1;
                     return (SyntaxKind::QUOTED_STRING, &self.input[start..self.pos]);
@@ -283,7 +308,7 @@ impl<'src> Lexer<'src> {
                 }
                 Some(b'\\') => {
                     self.pos += 1;
-                    self.skip_escape_char();
+                    self.skip_string_escape();
                 }
                 _ => {
                     self.pos += 1;
@@ -304,9 +329,13 @@ impl<'src> Lexer<'src> {
         let start = self.pos;
         loop {
             match self.peek() {
-                None => {
-                    self.context_stack.pop();
-                    return (SyntaxKind::ERROR, &self.input[start..self.pos]);
+                None | Some(b'\n' | b'\r' | b'\x0C') => {
+                    self.end_unclosed_string();
+                    if self.pos == start {
+                        // Nothing is left of the string to make a token of.
+                        return self.next_token();
+                    }
+                    return (SyntaxKind::STRING_END, &self.input[start..self.pos]);
                 }
                 Some(b) if b == quote => {
                     self.pos += 1;
@@ -318,12 +347,22 @@ impl<'src> Lexer<'src> {
                 }
                 Some(b'\\') => {
                     self.pos += 1;
-                    self.skip_escape_char();
+                    self.skip_string_escape();
                 }
                 _ => {
                     self.pos += 1;
                 }
             }
+        }
+    }
+
+    /// The escape after a `\` in a string. An escaped newline continues the string on the
+    /// next line, as in CSS and Dart Sass; `\r\n` is one newline.
+    fn skip_string_escape(&mut self) {
+        match self.peek() {
+            Some(b'\r') if self.peek_at(1) == Some(b'\n') => self.pos += 2,
+            Some(b'\n' | b'\r' | b'\x0C') => self.pos += 1,
+            _ => self.skip_escape_char(),
         }
     }
 
@@ -573,6 +612,16 @@ fn is_ident_start_char(ch: char) -> bool {
 #[inline]
 fn is_ident_continue_char(ch: char) -> bool {
     ch >= '\u{80}' || ch.is_alphanumeric() || ch == '_' || ch == '-'
+}
+
+/// Whether `text`, the end of a string opened with `quote`, ends with its closing quote:
+/// that is, a `quote` not escaped by an odd run of backslashes before it. A string the lexer
+/// ended at a newline or at the end of input does not.
+pub(crate) fn closes_string(text: &str, quote: u8) -> bool {
+    let Some((&last, body)) = text.as_bytes().split_last() else {
+        return false;
+    };
+    last == quote && body.iter().rev().take_while(|&&b| b == b'\\').count() % 2 == 0
 }
 
 /// Collect all tokens from `input`, excluding the final `EOF`.

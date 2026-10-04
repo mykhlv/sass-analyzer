@@ -231,11 +231,7 @@ fn try_goto_import(
     ) {
         return None;
     }
-    let text = token.text();
-    if text.len() < 2 {
-        return None;
-    }
-    let spec = &text[1..text.len() - 1];
+    let spec = sass_parser::ast::unquote(token.text());
     let target_uri = module_graph.resolve_import(uri, spec)?;
     let range = tower_lsp_server::ls_types::Range::default();
     Some(GotoDefinitionResponse::Scalar(Location {
@@ -273,11 +269,7 @@ pub(crate) fn handle_document_link(
             continue;
         };
 
-        let text = string_token.text();
-        if text.len() < 2 {
-            continue;
-        }
-        let spec = &text[1..text.len() - 1];
+        let spec = sass_parser::ast::unquote(string_token.text());
 
         let Some(target_uri) = module_graph.resolve_import(&uri, spec) else {
             continue;

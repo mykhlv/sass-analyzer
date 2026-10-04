@@ -72,7 +72,12 @@ pub fn expr(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarker> {
 /// Extra values become siblings (no wrapper node).
 pub(crate) fn sass_value(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarker> {
     let cm = expr(p, ctx)?;
-    while !at_value_end(p) && !p.at(COMMA) && !p.at(RPAREN) && !p.at(RBRACKET) {
+    while !at_value_end(p)
+        && !p.at(COMMA)
+        && !p.at(RPAREN)
+        && !p.at(RBRACKET)
+        && !p.at_unclosed_string_break()
+    {
         if p.at(SLASH) {
             // CSS separator: `11px/1.5`, `font: 12px/1.4 sans-serif`
             p.bump();
@@ -106,6 +111,12 @@ pub(crate) fn sass_value_list(p: &mut Parser<'_>, ctx: ParseContext) -> Option<C
         }
     }
     Some(m.complete(p, LIST_EXPR))
+}
+
+/// The comma between the items of a parenthesized or bracketed list, a map or an argument
+/// list, or the line break after a string left unclosed there, which swallowed it.
+pub(super) fn eat_comma(p: &mut Parser<'_>) -> bool {
+    p.eat(COMMA) || p.eat_unclosed_string_break()
 }
 
 fn at_value_end(p: &Parser<'_>) -> bool {
@@ -223,6 +234,7 @@ pub fn variable_declaration(p: &mut Parser<'_>) {
 pub fn interpolation(p: &mut Parser<'_>) -> CompletedMarker {
     assert!(p.at(HASH_LBRACE));
     let m = p.start();
+    let unclosed_strings = p.unclosed_strings();
     {
         let mut g = p.transparent_guard();
         g.bump(); // #{
@@ -231,7 +243,10 @@ pub fn interpolation(p: &mut Parser<'_>) -> CompletedMarker {
         } else if !g.at_end() {
             sass_value_list(&mut g, ParseContext::SassScript);
         }
-        g.expect(RBRACE);
+        // A string left unclosed inside ended the interpolation too, already reported.
+        if g.unclosed_strings() == unclosed_strings {
+            g.expect(RBRACE);
+        }
     }
     m.complete(p, INTERPOLATION)
 }

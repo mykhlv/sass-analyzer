@@ -12,6 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without a changelog entry.
 
 ### Fixed
+- Parser: an unterminated quoted string is now reported as "unterminated string" and ends
+  at the end of its line, as in CSS and Dart Sass, in both SCSS and indented Sass. It used
+  to swallow the rest of the file without a diagnostic of its own, hiding every symbol and
+  error below a single stray quote. An escaped newline still continues a string. Inside a
+  map, list or argument list spanning lines, the next line is read as the next item, since
+  the string most likely took the comma with it; an unclosed `@use` or `@import` path still
+  resolves to its module
 - Parser: nested selector lists containing an attribute selector or a pseudo-class with
   arguments are no longer misparsed as nested properties — `p:nth-child(2) { }` inside a
   rule was silently turned into a property, and `button:hover, [type="b"] { }` produced a

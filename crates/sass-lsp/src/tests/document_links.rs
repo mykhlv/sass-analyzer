@@ -203,3 +203,69 @@ async fn rename_updates_forward_show_clause() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test]
+async fn document_link_for_use_rule_with_unclosed_path() {
+    let dir = std::env::temp_dir().join(format!("sass_doclink_unclosed_{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+
+    let (mut reader, mut writer) = spawn_server();
+    do_initialize_with_root(&mut reader, &mut writer, &file_uri(&dir)).await;
+
+    let colors_path = dir.join("_colors.scss");
+    let main_path = dir.join("main.sass");
+    let main_sass = "@use 'colors\n.a\n  b: c\n";
+    std::fs::write(&colors_path, "$c: red;\n").unwrap();
+    std::fs::write(&main_path, main_sass).unwrap();
+
+    let main_uri = file_uri(&main_path);
+
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": main_uri,
+                    "languageId": "sass",
+                    "version": 1,
+                    "text": main_sass
+                }
+            }
+        }),
+    )
+    .await;
+    let diag = recv_msg(&mut reader, &mut writer).await;
+    let messages: Vec<&str> = diag["params"]["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["message"].as_str().unwrap())
+        .collect();
+    assert_eq!(messages, ["unterminated string"]);
+
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 91,
+            "method": "textDocument/documentLink",
+            "params": {
+                "textDocument": { "uri": main_uri }
+            }
+        }),
+    )
+    .await;
+
+    let resp = recv_msg(&mut reader, &mut writer).await;
+    let links = resp["result"].as_array().unwrap();
+    assert_eq!(links.len(), 1, "expected 1 document link for @use");
+    assert!(
+        links[0]["target"]
+            .as_str()
+            .unwrap()
+            .ends_with("_colors.scss")
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
