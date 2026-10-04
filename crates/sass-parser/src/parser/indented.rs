@@ -645,14 +645,13 @@ impl<'src> Parser<'src> {
     }
 
     /// A `/*` that does not start its line and is never closed runs to the end of the
-    /// input as an `ERROR` token, the last one; the braced layout's missing `}` reports
-    /// that, but here nothing else would.
+    /// input as an `ERROR` token, which the input keeps as its last trivia; the braced
+    /// layout's missing `}` reports that, but here nothing else would.
     pub(super) fn report_unterminated_comment(&mut self) {
-        let Some(last) = self.input.len().checked_sub(1) else {
-            return;
-        };
-        if self.input.kind(last) == SyntaxKind::ERROR && self.token_text(last).starts_with("/*") {
-            self.error_at(self.input.range(last), "unterminated comment");
+        if let Some(&(SyntaxKind::ERROR, range)) = self.input.trailing_trivia().last()
+            && self.source[range].starts_with("/*")
+        {
+            self.error_at(range, "unterminated comment");
         }
     }
 

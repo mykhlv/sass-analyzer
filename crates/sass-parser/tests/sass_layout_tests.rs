@@ -76,6 +76,12 @@ fn allow_listed_defects_report_what_they_should() {
     let tree = render(parse_sass_layout, source);
     assert_eq!(tree.matches("RULE_SET@").count(), 3, "{tree}");
     assert_eq!(tree.matches("DECLARATION@").count(), 3, "{tree}");
+    // An unterminated loud comment: the error before it, and the comment itself.
+    assert_eq!(
+        error_count("$a: 1 +\n  /* c\n    d\n    2\n.b\n  c: $a\n"),
+        2
+    );
+    assert_eq!(error_count(".a /* x\n  y\n.b\n  c: d\n"), 1);
     // The loud comments of sass-spec's `loud.hrx`.
     let loud = layout_allow_list::allow_list()
         .into_iter()

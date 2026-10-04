@@ -994,11 +994,9 @@ pub fn allow_list() -> Vec<Allowed> {
                         SIMPLE_SELECTOR@0..2
                           DOT@0..1 "."
                           IDENT@1..2 "a"
-                  ERROR@2..22
-                    WHITESPACE@2..3 " "
-                    ERROR@3..22 "/* x\n  y\n.b\n  c: d\n"
+                  WHITESPACE@2..3 " "
+                  ERROR@3..22 "/* x\n  y\n.b\n  c: d\n"
                   SEMICOLON@22..22 ""
-                error 3..22: expected rule
                 error 3..22: unterminated comment
             "#]],
         },
@@ -1021,15 +1019,42 @@ pub fn allow_list() -> Vec<Allowed> {
                           WHITESPACE@2..5 "\n  "
                           IDENT@5..6 "b"
                         COLON@6..7 ":"
-                        VALUE@7..33
+                        VALUE@7..9
                           VALUE@7..9
                             WHITESPACE@7..8 " "
                             IDENT@8..9 "c"
-                          WHITESPACE@9..10 " "
-                          ERROR@10..33 "/* never closed\n  d: e\n"
+                        WHITESPACE@9..10 " "
+                        ERROR@10..33 "/* never closed\n  d: e\n"
                         SEMICOLON@33..33 ""
                       RBRACE@33..33 ""
                 error 10..33: unterminated comment
+            "#]],
+        },
+        Allowed {
+            input: "$a: 1 +\n  /* c\n    d\n    2\n.b\n  c: $a\n",
+            change: "a loud comment on a continued line is an ordinary one, so one that \
+                     never closes runs to the end of the file; legacy took it as a comment, \
+                     silently but for the missing operand; the layout frontend reports the \
+                     missing operand and the unterminated comment, and nothing else, as the \
+                     statement ends where the comment starts (Dart: `expected more \
+                     input.`)",
+            expected: expect![[r#"
+                SOURCE_FILE@0..38
+                  VARIABLE_DECL@0..38
+                    DOLLAR@0..1 "$"
+                    IDENT@1..2 "a"
+                    COLON@2..3 ":"
+                    BINARY_EXPR@3..7
+                      NUMBER_LITERAL@3..5
+                        WHITESPACE@3..4 " "
+                        NUMBER@4..5 "1"
+                      WHITESPACE@5..6 " "
+                      PLUS@6..7 "+"
+                    WHITESPACE@7..10 "\n  "
+                    ERROR@10..38 "/* c\n    d\n    2\n.b\n  c: $a\n"
+                    SEMICOLON@38..38 ""
+                error 38..38: expected expression
+                error 10..38: unterminated comment
             "#]],
         },
         Allowed {
@@ -1051,12 +1076,12 @@ pub fn allow_list() -> Vec<Allowed> {
                           WHITESPACE@1..4 "\n  "
                           IDENT@4..5 "b"
                         COLON@5..6 ":"
-                        VALUE@6..14
+                        VALUE@6..8
                           VALUE@6..8
                             WHITESPACE@6..7 " "
                             IDENT@7..8 "c"
-                          WHITESPACE@8..9 " "
-                          ERROR@9..14 "/* d\n"
+                        WHITESPACE@8..9 " "
+                        ERROR@9..14 "/* d\n"
                         SEMICOLON@14..14 ""
                       RBRACE@14..14 ""
                 error 9..14: unterminated comment

@@ -242,7 +242,6 @@ fn lexing_errors_do_not_disturb_the_facts() {
             IDENT "b" <- 2 spaces
             COLON ":"
             IDENT "c"
-            ERROR "/* never closed\n  d: e\n"
             EOF
         "#]],
     );

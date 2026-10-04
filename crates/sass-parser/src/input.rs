@@ -172,7 +172,8 @@ impl Input {
     /// Lex indented-Sass source and build `Input` with its layout facts.
     ///
     /// The tokens are those of [`Input::from_source`] except where a comment reaches over
-    /// the lines indented beneath it (see [`lexer::IndentedLexer::crossing_blank_lines`]).
+    /// the lines indented beneath it (see [`lexer::IndentedLexer::crossing_blank_lines`]),
+    /// and that a loud comment never closed is trivia, not a significant `ERROR`.
     /// The facts are gathered in the same pass, and only here: `from_source` compiles
     /// without that code.
     pub fn from_source_indented(source: &str) -> Self {
@@ -237,6 +238,21 @@ impl Input {
         if LAYOUT {
             line_break_starts.push(pending_line_break_start);
             line_break_starts.push(line_breaks.len() as u32);
+            // Nothing follows such a comment, not even trivia: it becomes the trailing
+            // trivia's last token, and the breaks before it the end of input's.
+            if let (Some(&kind), Some(&range)) = (kinds.last(), ranges.last())
+                && is_unterminated_comment(
+                    kind,
+                    &source[range],
+                    range.end() == TextSize::of(source),
+                )
+            {
+                kinds.pop();
+                ranges.pop();
+                trivia_starts.pop();
+                line_break_starts.pop();
+                all_trivia.push((kind, range));
+            }
         }
 
         Self {
@@ -313,7 +329,8 @@ impl Input {
         let mut pending_line_break_start = self.line_break_starts[k0];
         let mut depth = 0u32;
         for &(kind, range) in segment {
-            if kind.is_trivia() {
+            let ends_input = range.end() == TextSize::of(source);
+            if kind.is_trivia() || is_unterminated_comment(kind, &source[range], ends_input) {
                 if kind == SyntaxKind::WHITESPACE
                     && let Some(mut line_break) = LineBreak::measure(&source[range])
                 {
@@ -754,6 +771,14 @@ thread_local! {
 fn count_relex_work() {
     #[cfg(test)]
     RELEX_WORK.set(RELEX_WORK.get() + 1);
+}
+
+/// A loud comment that is never closed: it runs to the end of the input, as an `ERROR`
+/// token. Indented input keeps it as trivia — the last of all — so that the statement it
+/// follows ends there, as at the end of the input, rather than at an unexpected token;
+/// the parser reports it once, as unterminated.
+fn is_unterminated_comment(kind: SyntaxKind, text: &str, ends_input: bool) -> bool {
+    kind == SyntaxKind::ERROR && ends_input && text.starts_with("/*")
 }
 
 /// Bracket depth after a significant token, counted as the indented lexer counts it for
