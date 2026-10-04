@@ -138,66 +138,40 @@ fn block_item(p: &mut Parser<'_>) {
 /// - `IDENT COLON LBRACE` — nested property
 /// - `HASH_LBRACE ... RBRACE [fragments] COLON` — interpolated property name
 /// - `IDENT("--") HASH_LBRACE ... RBRACE [fragments] COLON` — custom property with interpolation
+/// - any of these behind a property hack: `*width: 1px`, `.width: 1px`, `#width`, `:width`
 ///
 /// The scan reads on across the line breaks the grammar will absorb (after a comma or an
 /// operator), so that it sees the whole statement in the indented syntax too.
 fn looks_like_declaration(p: &Parser<'_>) -> bool {
     let j = p.joined(lines::LINE_JOINS);
-    if p.at(HASH_LBRACE) {
-        return looks_like_interpolated_declaration(p, j);
-    }
-    // `-#{"foo"}-bar: b` — property name starting with hyphen then interpolation
-    if p.at(MINUS) && p.nth_joined(j, 1) == HASH_LBRACE {
-        return scan_past_interpolated_name(p, j, 1).is_some_and(|offset| {
-            if p.nth_joined(j, offset) != COLON {
-                return false;
-            }
-            if p.nth_joined(j, offset + 1) == LBRACE {
-                return true;
-            }
-            scan_for_declaration_end(p, j, offset + 1)
-        });
-    }
-    // IE star-hack: `*width: 100px`
-    if p.at(STAR) && p.nth_joined(j, 1) == IDENT && p.nth_joined(j, 2) == COLON {
-        return scan_for_declaration_end(p, j, 3);
-    }
-    if !p.at(IDENT) {
+    let hack = matches!(p.current(), STAR | DOT | HASH | COLON)
+        && matches!(p.nth_joined(j, 1), IDENT | HASH_LBRACE);
+    let name = usize::from(hack);
+    let colon = match p.nth_joined(j, name) {
+        HASH_LBRACE => scan_past_interpolated_name(p, j, name),
+        // `-#{"foo"}-bar: b` — property name starting with hyphen then interpolation
+        MINUS if p.nth_joined(j, name + 1) == HASH_LBRACE => {
+            scan_past_interpolated_name(p, j, name + 1)
+        }
+        // `margin-#{$side}: val`, `--#{$prefix}name: val`
+        IDENT if p.nth_joined(j, name + 1) == HASH_LBRACE => {
+            scan_past_interpolated_name(p, j, name + 1)
+        }
+        IDENT => Some(name + 1),
+        _ => None,
+    };
+    let Some(colon) = colon.filter(|&colon| p.nth_joined(j, colon) == COLON) else {
         return false;
-    }
-    // Property with interpolation in name: `margin-#{$side}: val`, `--#{$prefix}name: val`
-    if p.nth_joined(j, 1) == HASH_LBRACE {
-        return scan_past_interpolated_name(p, j, 1).is_some_and(|offset| {
-            if p.nth_joined(j, offset) != COLON {
-                return false;
-            }
-            if p.nth_joined(j, offset + 1) == LBRACE {
-                return true; // nested property: #{$prop}: { sub: val }
-            }
-            scan_for_declaration_end(p, j, offset + 1)
-        });
-    }
-    if p.nth_joined(j, 1) != COLON {
-        return false;
-    }
-    // 2.10: IDENT COLON LBRACE → nested property
-    if p.nth_joined(j, 2) == LBRACE {
+    };
+    // 2.10: `name: {` → nested property
+    if p.nth_joined(j, colon + 1) == LBRACE {
         return true;
     }
-    scan_for_declaration_end(p, j, 2)
-}
-
-/// Check if `#{...}[fragments]COLON` looks like a declaration with interpolated property.
-fn looks_like_interpolated_declaration(p: &Parser<'_>, j: Joined) -> bool {
-    scan_past_interpolated_name(p, j, 0).is_some_and(|offset| {
-        if p.nth_joined(j, offset) != COLON {
-            return false;
-        }
-        if p.nth_joined(j, offset + 1) == LBRACE {
-            return true; // nested property: #{$prop}: { sub: val }
-        }
-        scan_for_declaration_end(p, j, offset + 1)
-    })
+    // Dart reads `.a:b` as a selector in the indented syntax, a hack declaration in SCSS.
+    if hack && !p.braced() && could_start_pseudo_class(p, j, colon + 1) {
+        return false;
+    }
+    scan_for_declaration_end(p, j, colon + 1)
 }
 
 /// Scan past `HASH_LBRACE ... RBRACE [IDENT|MINUS|HASH_LBRACE...]` starting at `start`
@@ -272,11 +246,13 @@ fn scan_past_interpolated_name(p: &Parser<'_>, j: Joined, start: usize) -> Optio
 ///
 /// Otherwise, scan for `{`, `;`, or `}` at depth 0: `;`/`}`/EOF first means a declaration,
 /// `{` first a selector — unless an unambiguously-value token (`NUMBER`, `QUOTED_STRING`,
-/// `DOLLAR`, etc.) precedes the `{`. Scan is bounded to avoid O(n²) behavior on
-/// pathological inputs.
+/// `DOLLAR`, etc.) precedes the `{`. A declaration whose value Dart cannot parse is a
+/// selector after all, so a selector-only token (see `is_selector_only_token`) before
+/// `;`/`}`/EOF makes it one: `div:hover .x` is a rule missing its block. Scan is bounded to
+/// avoid O(n²) behavior on pathological inputs.
 fn scan_for_declaration_end(p: &Parser<'_>, j: Joined, start: usize) -> bool {
     const MAX_SCAN: usize = 100;
-    if !could_start_pseudo_class(p, j, start) {
+    if !could_start_pseudo_class(p, j, start) || is_progid(p, j, start) {
         return true;
     }
     let mut depth: u32 = 0;
@@ -287,6 +263,7 @@ fn scan_for_declaration_end(p: &Parser<'_>, j: Joined, start: usize) -> bool {
     // Disambiguates `p:hover { }` (selector) from `margin: 0 { top: 20px; }` (declaration).
     // Only counted at bracket depth 0 — see the match arm below.
     let mut has_value_only_token = false;
+    let mut has_selector_only_token = false;
     loop {
         if offset >= limit {
             // Exceeded scan budget — guess declaration to avoid misparse as selector
@@ -304,11 +281,11 @@ fn scan_for_declaration_end(p: &Parser<'_>, j: Joined, start: usize) -> bool {
             continue;
         }
         match p.nth_joined(j, offset) {
-            EOF => return true,
+            EOF => return !has_selector_only_token,
             HASH_LBRACE => brace_depth += 1,
             LBRACE if depth == 0 => return has_value_only_token,
-            RBRACE if depth == 0 => return true,
-            SEMICOLON if depth == 0 => return true,
+            RBRACE | SEMICOLON if depth == 0 => return !has_selector_only_token,
+            _ if is_selector_only_token(p, j, offset, depth) => has_selector_only_token = true,
             LPAREN | LBRACKET => depth += 1,
             RPAREN | RBRACKET => depth = depth.saturating_sub(1),
             // Tokens that can only appear in values, never in selectors — but only
@@ -321,6 +298,32 @@ fn scan_for_declaration_end(p: &Parser<'_>, j: Joined, start: usize) -> bool {
         }
         offset += 1;
     }
+}
+
+/// Whether the token at `offset`, `depth` brackets deep, has no place in a declaration
+/// value but does in a selector: a `.` that does not join two names, as in `math.div`,
+/// `map.$x` or IE's `expression(this.value)`, or a `:`, `::` or `~` outside brackets.
+fn is_selector_only_token(p: &Parser<'_>, j: Joined, offset: usize, depth: u32) -> bool {
+    match p.nth_joined(j, offset) {
+        DOT => {
+            let joins_names = offset > 0
+                && p.nth_joined(j, offset - 1) == IDENT
+                && !p.nth_has_whitespace_before_joined(j, offset)
+                && matches!(p.nth_joined(j, offset + 1), IDENT | DOLLAR)
+                && !p.nth_has_whitespace_before_joined(j, offset + 1);
+            !joins_names
+        }
+        COLON | COLON_COLON | TILDE => depth == 0,
+        _ => false,
+    }
+}
+
+/// Whether a value starts at `offset` with IE's `progid:`, whose `:` and dotted names Dart
+/// reads as part of the value: `filter:progid:DXImageTransform.Microsoft.Alpha(…)`.
+fn is_progid(p: &Parser<'_>, j: Joined, offset: usize) -> bool {
+    p.nth_joined(j, offset) == IDENT
+        && p.nth_text_joined(j, offset).eq_ignore_ascii_case("progid")
+        && p.nth_joined(j, offset + 1) == COLON
 }
 
 /// Whether the token at `offset`, right after a colon, could be a pseudo-class name.
@@ -346,11 +349,95 @@ fn rule_set(p: &mut Parser<'_>) {
         return;
     };
     let m = g.start();
+    let errors = g.error_count();
     selectors::selector_list(&mut g);
     if g.at(LBRACE) {
         block(&mut g);
+    } else if g.braced() {
+        let selector_reported = g.error_count() > errors;
+        missing_rule_block(&mut g, selector_reported);
     }
     let _ = m.complete(&mut g, RULE_SET);
+}
+
+/// Report a braced rule's missing `{`. Where the statement ends, or the next one starts,
+/// the error goes right after the selector, unless the selector has reported one of its
+/// own already, such as an unclosed `(`. Tokens the selector stopped at are skipped as
+/// one error up to the next `{`, `;` or `}`, and a block there is still the rule's.
+fn missing_rule_block(p: &mut Parser<'_>, selector_reported: bool) {
+    // The selector consumes every selector-start token, unless one begins a declaration
+    // (see `declaration_interrupts_selector`): a statement of its own.
+    if p.at_end()
+        || p.at(SEMICOLON)
+        || p.at(RBRACE)
+        || p.at(AT)
+        || p.at(DOLLAR)
+        || p.at_ts(selectors::SELECTOR_START)
+    {
+        if !selector_reported {
+            p.error_after_prev("expected `{`");
+        }
+        return;
+    }
+    let m = p.start();
+    p.error("expected `{`");
+    let mut interpolation: u32 = 0;
+    while !p.at_end() {
+        match p.current() {
+            LBRACE | RBRACE | SEMICOLON if interpolation == 0 => break,
+            HASH_LBRACE | LBRACE => interpolation += 1,
+            RBRACE => interpolation -= 1,
+            _ => {}
+        }
+        p.bump();
+    }
+    let _ = m.complete(p, SyntaxKind::ERROR);
+    if p.at(LBRACE) {
+        block(p);
+    }
+}
+
+/// In a braced selector, whether the compound at the cursor starts a declaration instead:
+/// `name:` where the colon cannot begin a pseudo-class, or whose statement ends at `;` or
+/// `}` before any `{` with nothing only a selector holds. Only a rule missing its `{` gets
+/// here with one, as in `.a { .b  color: red; }`; ending the selector before it keeps the
+/// declaration.
+pub(crate) fn declaration_interrupts_selector(p: &Parser<'_>) -> bool {
+    const MAX_SCAN: usize = 100;
+    if !p.at(IDENT) || p.nth(1) != COLON || p.nth_has_whitespace_before(1) {
+        return false;
+    }
+    let j = p.joined(lines::LINE_JOINS);
+    if !could_start_pseudo_class(p, j, 2) || is_progid(p, j, 2) {
+        return true;
+    }
+    // Budget and EOF read as a selector: a valid one must not be cut short.
+    let mut depth: u32 = 0;
+    let mut interpolation: u32 = 0;
+    let mut has_selector_only_token = false;
+    for offset in 2..MAX_SCAN {
+        let kind = p.nth_joined(j, offset);
+        if interpolation > 0 {
+            match kind {
+                EOF => return false,
+                HASH_LBRACE | LBRACE => interpolation += 1,
+                RBRACE => interpolation -= 1,
+                _ => {}
+            }
+            continue;
+        }
+        match kind {
+            EOF => return false,
+            HASH_LBRACE => interpolation += 1,
+            LBRACE if depth == 0 => return false,
+            SEMICOLON | RBRACE if depth == 0 => return !has_selector_only_token,
+            _ if is_selector_only_token(p, j, offset, depth) => has_selector_only_token = true,
+            LPAREN | LBRACKET | LBRACE => depth += 1,
+            RPAREN | RBRACKET | RBRACE => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    false
 }
 
 /// Skip tokens until `}` or EOF, consuming a balanced `{ ... }` block if present.

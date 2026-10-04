@@ -102,7 +102,7 @@ pub fn parse_sass(source: &str) -> (rowan::GreenNode, Vec<(String, TextRange)>) 
 pub fn parse_sass_legacy(source: &str) -> (rowan::GreenNode, Vec<(String, TextRange)>) {
     let tokens = sass_lexer::sass_tokenize(source);
     let input = input::Input::from_tokens(&tokens);
-    let mut parser = parser::Parser::new(input, source);
+    let mut parser = parser::Parser::with_layout(input, source, parser::Layout::LegacyIndented);
     grammar::source_file(&mut parser);
     let (events, errors, input, src) = parser.finish();
     build_tree(events, &errors, &input, src)

@@ -1235,57 +1235,62 @@ fn in_an_attribute_selector() {
         error 3..6: unterminated string
     "#]],
     );
-    // The string takes ` {` too, so the rule has no block: one more error at its `}`.
+    // The string takes ` {` too, so the rule has no block, and `c: d;` is a rule of its
+    // own missing its `{`: one error for it and one at the stray `}`.
     common::check(
         "[a=\"b] {\n  c: d;\n}\n.e { f: g; }\n",
         expect![[r#"
-        SOURCE_FILE@0..32
-          RULE_SET@0..15
-            SELECTOR_LIST@0..15
-              SELECTOR@0..15
-                ATTR_SELECTOR@0..8
-                  LBRACKET@0..1 "["
-                  IDENT@1..2 "a"
-                  EQ@2..3 "="
-                  QUOTED_STRING@3..8 "\"b] {"
-                SIMPLE_SELECTOR@8..12
-                  WHITESPACE@8..11 "\n  "
-                  IDENT@11..12 "c"
-                PSEUDO_SELECTOR@12..15
-                  COLON@12..13 ":"
-                  WHITESPACE@13..14 " "
-                  IDENT@14..15 "d"
-          SEMICOLON@15..16 ";"
-          ERROR@16..18
-            WHITESPACE@16..17 "\n"
-            RBRACE@17..18 "}"
-          RULE_SET@18..31
-            SELECTOR_LIST@18..21
-              SELECTOR@18..21
-                SIMPLE_SELECTOR@18..21
-                  WHITESPACE@18..19 "\n"
-                  DOT@19..20 "."
-                  IDENT@20..21 "e"
-            BLOCK@21..31
-              WHITESPACE@21..22 " "
-              LBRACE@22..23 "{"
-              DECLARATION@23..29
-                PROPERTY@23..25
-                  WHITESPACE@23..24 " "
-                  IDENT@24..25 "f"
-                COLON@25..26 ":"
-                VALUE@26..28
-                  VALUE@26..28
-                    WHITESPACE@26..27 " "
-                    IDENT@27..28 "g"
-                SEMICOLON@28..29 ";"
-              WHITESPACE@29..30 " "
-              RBRACE@30..31 "}"
-          WHITESPACE@31..32 "\n"
-        errors:
-          3..8: unterminated string
-          17..18: expected rule
-    "#]],
+            SOURCE_FILE@0..32
+              RULE_SET@0..8
+                SELECTOR_LIST@0..8
+                  SELECTOR@0..8
+                    ATTR_SELECTOR@0..8
+                      LBRACKET@0..1 "["
+                      IDENT@1..2 "a"
+                      EQ@2..3 "="
+                      QUOTED_STRING@3..8 "\"b] {"
+              RULE_SET@8..15
+                SELECTOR_LIST@8..15
+                  SELECTOR@8..15
+                    SIMPLE_SELECTOR@8..12
+                      WHITESPACE@8..11 "\n  "
+                      IDENT@11..12 "c"
+                    PSEUDO_SELECTOR@12..15
+                      COLON@12..13 ":"
+                      WHITESPACE@13..14 " "
+                      IDENT@14..15 "d"
+              SEMICOLON@15..16 ";"
+              ERROR@16..18
+                WHITESPACE@16..17 "\n"
+                RBRACE@17..18 "}"
+              RULE_SET@18..31
+                SELECTOR_LIST@18..21
+                  SELECTOR@18..21
+                    SIMPLE_SELECTOR@18..21
+                      WHITESPACE@18..19 "\n"
+                      DOT@19..20 "."
+                      IDENT@20..21 "e"
+                BLOCK@21..31
+                  WHITESPACE@21..22 " "
+                  LBRACE@22..23 "{"
+                  DECLARATION@23..29
+                    PROPERTY@23..25
+                      WHITESPACE@23..24 " "
+                      IDENT@24..25 "f"
+                    COLON@25..26 ":"
+                    VALUE@26..28
+                      VALUE@26..28
+                        WHITESPACE@26..27 " "
+                        IDENT@27..28 "g"
+                    SEMICOLON@28..29 ";"
+                  WHITESPACE@29..30 " "
+                  RBRACE@30..31 "}"
+              WHITESPACE@31..32 "\n"
+            errors:
+              3..8: unterminated string
+              15..15: expected `{`
+              17..18: expected rule
+        "#]],
     );
 }
 

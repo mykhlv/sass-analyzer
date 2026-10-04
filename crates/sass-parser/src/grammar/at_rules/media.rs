@@ -109,6 +109,7 @@ pub fn keyframes_rule(p: &mut Parser<'_>) {
 /// Parse a keyframe block: `from { }`, `to { }`, `50% { }`, `10%, 20% { }`
 fn keyframe_block(p: &mut Parser<'_>) {
     let m = p.start();
+    let errors = p.error_count();
 
     // Parse keyframe selector(s)
     keyframe_selector(p);
@@ -119,6 +120,8 @@ fn keyframe_block(p: &mut Parser<'_>) {
 
     if p.at(LBRACE) {
         super::block(p);
+    } else if p.braced() && p.error_count() == errors {
+        p.error_after_prev("expected `{`");
     }
     // The outer KEYFRAME_SELECTOR wraps selector + block
     let _ = m.complete(p, KEYFRAME_SELECTOR);
