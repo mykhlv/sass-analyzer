@@ -123,7 +123,14 @@ fn value(p: &mut Parser<'_>) {
     // The last item was an operand, which `and` or `or` after it would combine.
     let mut operand_before = false;
     loop {
-        if p.at(SEMICOLON) || p.at(RBRACE) || p.at(LBRACE) || p.at_end() {
+        // A string left unclosed ends the declaration at its line break: it most likely
+        // took the `;`, and if not, the next line is still more likely a new statement.
+        if p.at(SEMICOLON)
+            || p.at(RBRACE)
+            || p.at(LBRACE)
+            || p.at_end()
+            || p.at_unclosed_string_break()
+        {
             break;
         }
         // Break for `!important` only when it's at the END of the value
@@ -213,6 +220,11 @@ fn custom_property_value(p: &mut Parser<'_>) {
     let mut brace_depth: u32 = 0;
     loop {
         let at_depth_zero = paren_depth == 0 && bracket_depth == 0 && brace_depth == 0;
+        // At the line break after a string left unclosed, as `value` does, inside brackets
+        // too: the string most likely took their ends with the `;`, `--a: f("x);`.
+        if p.at_unclosed_string_break() {
+            break;
+        }
         match p.current() {
             EOF => break,
             SEMICOLON if at_depth_zero => break,
