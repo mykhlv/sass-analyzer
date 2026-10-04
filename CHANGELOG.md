@@ -19,8 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   map, list or argument list spanning lines, the next line is read as the next item, since
   the string most likely took the comma with it. A string that took the end of its call,
   as in `@include m("x);`, ends the call there with no further diagnostics, and the next
-  line parses as a statement of its own. An unclosed `@use` or `@import` path still
-  resolves to its module
+  line parses as a statement of its own. In SCSS, a string that took the `}` closing its
+  block, as in `.a { b: "x }`, or the `{` opening a body, as in `@include m("x) {`, has
+  that brace put back where the indentation of the next line agrees, so the rules after
+  it keep their nesting. An unclosed `@use` or `@import` path still resolves to its module
 - Parser: nested selector lists containing an attribute selector or a pseudo-class with
   arguments are no longer misparsed as nested properties — `p:nth-child(2) { }` inside a
   rule was silently turned into a property, and `button:hover, [type="b"] { }` produced a

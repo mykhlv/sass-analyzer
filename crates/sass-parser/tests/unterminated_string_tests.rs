@@ -1274,6 +1274,374 @@ fn that_took_the_line_before_a_closing_token() {
 }
 
 #[test]
+fn that_took_the_end_of_its_block() {
+    // The block ends at the line break, with a `}` of no width, as the next line is no
+    // deeper than the line the block opened on.
+    common::check(
+        ".a { b: \"x }\n.c { d: e; }\n",
+        expect![[r#"
+            SOURCE_FILE@0..26
+              RULE_SET@0..12
+                SELECTOR_LIST@0..2
+                  SELECTOR@0..2
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "a"
+                BLOCK@2..12
+                  WHITESPACE@2..3 " "
+                  LBRACE@3..4 "{"
+                  DECLARATION@4..12
+                    PROPERTY@4..6
+                      WHITESPACE@4..5 " "
+                      IDENT@5..6 "b"
+                    COLON@6..7 ":"
+                    VALUE@7..12
+                      STRING_LITERAL@7..12
+                        WHITESPACE@7..8 " "
+                        QUOTED_STRING@8..12 "\"x }"
+                  RBRACE@12..12 ""
+              RULE_SET@12..25
+                SELECTOR_LIST@12..15
+                  SELECTOR@12..15
+                    SIMPLE_SELECTOR@12..15
+                      WHITESPACE@12..13 "\n"
+                      DOT@13..14 "."
+                      IDENT@14..15 "c"
+                BLOCK@15..25
+                  WHITESPACE@15..16 " "
+                  LBRACE@16..17 "{"
+                  DECLARATION@17..23
+                    PROPERTY@17..19
+                      WHITESPACE@17..18 " "
+                      IDENT@18..19 "d"
+                    COLON@19..20 ":"
+                    VALUE@20..22
+                      VALUE@20..22
+                        WHITESPACE@20..21 " "
+                        IDENT@21..22 "e"
+                    SEMICOLON@22..23 ";"
+                  WHITESPACE@23..24 " "
+                  RBRACE@24..25 "}"
+              WHITESPACE@25..26 "\n"
+            errors:
+              8..12: unterminated string
+        "#]],
+    );
+    // A block opened on an earlier line, an inner one, the end of input, and a string
+    // that ends after an interpolation.
+    for (source, rules) in [
+        (
+            "a {\n  b: f(f(\"x), 2); }\n.c { d: e; }\n",
+            &["a", ".c"][..],
+        ),
+        (".a {\n  b: \"x; }\n.c { d: e; }\n", &[".a", ".c"]),
+        (".a {\n  .b { c: \"x }\n}\n.c { d: e; }\n", &[".a", ".c"]),
+        (
+            ".a {\n  .b { c: \"x }\n  .d { e: f; }\n}\n.c { d: e; }\n",
+            &[".a", ".c"],
+        ),
+        (".a {\n  --b: \"x }\n.c { d: e; }\n", &[".a", ".c"]),
+        (".a {\n  b: \"x }", &[".a"]),
+        (".a { b: \"#{$x} }\n.c { d: e; }\n", &[".a", ".c"]),
+    ] {
+        assert_eq!(
+            errors(parse_scss, source),
+            ["unterminated string"],
+            "{source:?}"
+        );
+        assert_eq!(top_level_rules(parse_scss, source), rules, "{source:?}");
+    }
+}
+
+#[test]
+fn that_took_a_closing_brace_its_block_goes_on_past() {
+    // A `}` level with the line the block opened on closes it as written: the string's
+    // was text.
+    common::check(
+        ".a {\n  content: \"}\n}\n.c { d: e; }\n",
+        expect![[r#"
+            SOURCE_FILE@0..34
+              RULE_SET@0..20
+                SELECTOR_LIST@0..2
+                  SELECTOR@0..2
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "a"
+                BLOCK@2..20
+                  WHITESPACE@2..3 " "
+                  LBRACE@3..4 "{"
+                  DECLARATION@4..18
+                    PROPERTY@4..14
+                      WHITESPACE@4..7 "\n  "
+                      IDENT@7..14 "content"
+                    COLON@14..15 ":"
+                    VALUE@15..18
+                      STRING_LITERAL@15..18
+                        WHITESPACE@15..16 " "
+                        QUOTED_STRING@16..18 "\"}"
+                  WHITESPACE@18..19 "\n"
+                  RBRACE@19..20 "}"
+              RULE_SET@20..33
+                SELECTOR_LIST@20..23
+                  SELECTOR@20..23
+                    SIMPLE_SELECTOR@20..23
+                      WHITESPACE@20..21 "\n"
+                      DOT@21..22 "."
+                      IDENT@22..23 "c"
+                BLOCK@23..33
+                  WHITESPACE@23..24 " "
+                  LBRACE@24..25 "{"
+                  DECLARATION@25..31
+                    PROPERTY@25..27
+                      WHITESPACE@25..26 " "
+                      IDENT@26..27 "d"
+                    COLON@27..28 ":"
+                    VALUE@28..30
+                      VALUE@28..30
+                        WHITESPACE@28..29 " "
+                        IDENT@29..30 "e"
+                    SEMICOLON@30..31 ";"
+                  WHITESPACE@31..32 " "
+                  RBRACE@32..33 "}"
+              WHITESPACE@33..34 "\n"
+            errors:
+              16..18: unterminated string
+        "#]],
+    );
+    for source in [
+        // The next line is deeper, still inside the block.
+        ".a {\n  b: \"x }\n  c: d;\n}\n.c { d: e; }\n",
+        // As many braces opened as closed in what the string took.
+        ".a {\n  @include m(\"x) { a: b; }\n}\n.c { d: e; }\n",
+        // No block to close.
+        "$a: \"x }\n.c { d: e; }\n",
+    ] {
+        assert_eq!(
+            errors(parse_scss, source),
+            ["unterminated string"],
+            "{source:?}"
+        );
+        assert_eq!(
+            top_level_rules(parse_scss, source)
+                .last()
+                .map(String::as_str),
+            Some(".c"),
+            "{source:?}"
+        );
+    }
+    // The `}` of an interpolation is the interpolation's: the block stays open.
+    assert_eq!(
+        errors(parse_scss, ".a { b: #{\"x }\n.c { d: e; }\n"),
+        ["unterminated string", "expected RBRACE"]
+    );
+    // The indented syntax has no braces to put back.
+    check_sass(
+        ".a\n  b: \"x }\n.c\n  d: e\n",
+        expect![[r#"
+        SOURCE_FILE@0..23
+          RULE_SET@0..12
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            BLOCK@2..12
+              LBRACE@2..2 ""
+              DECLARATION@2..12
+                PROPERTY@2..6
+                  WHITESPACE@2..5 "\n  "
+                  IDENT@5..6 "b"
+                COLON@6..7 ":"
+                VALUE@7..12
+                  STRING_LITERAL@7..12
+                    WHITESPACE@7..8 " "
+                    QUOTED_STRING@8..12 "\"x }"
+                SEMICOLON@12..12 ""
+              RBRACE@12..12 ""
+          RULE_SET@12..22
+            SELECTOR_LIST@12..15
+              SELECTOR@12..15
+                SIMPLE_SELECTOR@12..15
+                  WHITESPACE@12..13 "\n"
+                  DOT@13..14 "."
+                  IDENT@14..15 "c"
+            BLOCK@15..22
+              LBRACE@15..15 ""
+              DECLARATION@15..22
+                PROPERTY@15..19
+                  WHITESPACE@15..18 "\n  "
+                  IDENT@18..19 "d"
+                COLON@19..20 ":"
+                VALUE@20..22
+                  VALUE@20..22
+                    WHITESPACE@20..21 " "
+                    IDENT@21..22 "e"
+                SEMICOLON@22..22 ""
+              RBRACE@22..22 ""
+          WHITESPACE@22..23 "\n"
+        error 8..12: unterminated string
+    "#]],
+    );
+}
+
+#[test]
+fn that_took_the_start_of_its_block() {
+    // The body indented beneath the line opens with a `{` of no width, and its `}` closes
+    // it.
+    common::check(
+        "@include m(\"x) {\n  a: b;\n}\n.c { d: e; }\n",
+        expect![[r#"
+            SOURCE_FILE@0..40
+              INCLUDE_RULE@0..26
+                AT@0..1 "@"
+                IDENT@1..8 "include"
+                WHITESPACE@8..9 " "
+                IDENT@9..10 "m"
+                ARG_LIST@10..16
+                  LPAREN@10..11 "("
+                  ARG@11..16
+                    STRING_LITERAL@11..16
+                      QUOTED_STRING@11..16 "\"x) {"
+                BLOCK@16..26
+                  LBRACE@16..16 ""
+                  DECLARATION@16..24
+                    PROPERTY@16..20
+                      WHITESPACE@16..19 "\n  "
+                      IDENT@19..20 "a"
+                    COLON@20..21 ":"
+                    VALUE@21..23
+                      VALUE@21..23
+                        WHITESPACE@21..22 " "
+                        IDENT@22..23 "b"
+                    SEMICOLON@23..24 ";"
+                  WHITESPACE@24..25 "\n"
+                  RBRACE@25..26 "}"
+              RULE_SET@26..39
+                SELECTOR_LIST@26..29
+                  SELECTOR@26..29
+                    SIMPLE_SELECTOR@26..29
+                      WHITESPACE@26..27 "\n"
+                      DOT@27..28 "."
+                      IDENT@28..29 "c"
+                BLOCK@29..39
+                  WHITESPACE@29..30 " "
+                  LBRACE@30..31 "{"
+                  DECLARATION@31..37
+                    PROPERTY@31..33
+                      WHITESPACE@31..32 " "
+                      IDENT@32..33 "d"
+                    COLON@33..34 ":"
+                    VALUE@34..36
+                      VALUE@34..36
+                        WHITESPACE@34..35 " "
+                        IDENT@35..36 "e"
+                    SEMICOLON@36..37 ";"
+                  WHITESPACE@37..38 " "
+                  RBRACE@38..39 "}"
+              WHITESPACE@39..40 "\n"
+            errors:
+              11..16: unterminated string
+        "#]],
+    );
+    for source in [
+        ".a:not(\"x) {\n  a: b;\n}\n.c { d: e; }\n",
+        ".a, .b[c=\"x] {\n  a: b;\n}\n.c { d: e; }\n",
+        "@if $a == \"x {\n  a: b;\n} @else {\n  c: d;\n}\n.c { d: e; }\n",
+        "@each $a in \"x {\n  a: b;\n}\n.c { d: e; }\n",
+        "@mixin m($a: \"x) {\n  a: b;\n}\n.c { d: e; }\n",
+        ".a {\n  @include m(\"x) {\n    a: b;\n  }\n}\n.c { d: e; }\n",
+        ".a {\n  b: \"x {\n    c: d;\n  }\n}\n.c { d: e; }\n",
+        // An empty body: its `}` is level with the line.
+        "@include m(\"x) {\n}\n.c { d: e; }\n",
+    ] {
+        assert_eq!(
+            errors(parse_scss, source),
+            ["unterminated string"],
+            "{source:?}"
+        );
+        assert_eq!(
+            top_level_rules(parse_scss, source)
+                .last()
+                .map(String::as_str),
+            Some(".c"),
+            "{source:?}"
+        );
+    }
+    // A body that the end of input cuts short still misses its `}`.
+    assert_eq!(
+        errors(parse_scss, "@include m(\"x) {\n  a: b;\n"),
+        ["unterminated string", "expected RBRACE"]
+    );
+}
+
+#[test]
+fn that_took_an_opening_brace_with_nothing_beneath() {
+    // A `}` less indented than the line closes an outer block: the string's `{` was text.
+    common::check(
+        ".a {\n  b: \"x {\n}\n.c { d: e; }\n",
+        expect![[r#"
+        SOURCE_FILE@0..30
+          RULE_SET@0..16
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            BLOCK@2..16
+              WHITESPACE@2..3 " "
+              LBRACE@3..4 "{"
+              DECLARATION@4..14
+                PROPERTY@4..8
+                  WHITESPACE@4..7 "\n  "
+                  IDENT@7..8 "b"
+                COLON@8..9 ":"
+                VALUE@9..14
+                  STRING_LITERAL@9..14
+                    WHITESPACE@9..10 " "
+                    QUOTED_STRING@10..14 "\"x {"
+              WHITESPACE@14..15 "\n"
+              RBRACE@15..16 "}"
+          RULE_SET@16..29
+            SELECTOR_LIST@16..19
+              SELECTOR@16..19
+                SIMPLE_SELECTOR@16..19
+                  WHITESPACE@16..17 "\n"
+                  DOT@17..18 "."
+                  IDENT@18..19 "c"
+            BLOCK@19..29
+              WHITESPACE@19..20 " "
+              LBRACE@20..21 "{"
+              DECLARATION@21..27
+                PROPERTY@21..23
+                  WHITESPACE@21..22 " "
+                  IDENT@22..23 "d"
+                COLON@23..24 ":"
+                VALUE@24..26
+                  VALUE@24..26
+                    WHITESPACE@24..25 " "
+                    IDENT@25..26 "e"
+                SEMICOLON@26..27 ";"
+              WHITESPACE@27..28 " "
+              RBRACE@28..29 "}"
+          WHITESPACE@29..30 "\n"
+        errors:
+          10..14: unterminated string
+    "#]],
+    );
+    for source in [
+        ".a {\n  b: \"x {\n  c: d;\n}\n.c { d: e; }\n",
+        "@include m(\"x) { a: b; }\n.c { d: e; }\n",
+        "@include m(\"x) {",
+    ] {
+        assert_eq!(
+            errors(parse_scss, source),
+            ["unterminated string"],
+            "{source:?}"
+        );
+    }
+}
+
+#[test]
 fn that_took_a_comma() {
     // A comma inside what the string took does not make its line break one.
     check_sass(
@@ -1786,13 +2154,12 @@ fn in_an_attribute_selector() {
         error 3..6: unterminated string
     "#]],
     );
-    // The string takes ` {` too, so the rule has no block, and `c: d;` is a rule of its
-    // own missing its `{`: one error for it and one at the stray `}`.
+    // The string takes ` {` too, which the line indented beneath it puts back.
     common::check(
         "[a=\"b] {\n  c: d;\n}\n.e { f: g; }\n",
         expect![[r#"
             SOURCE_FILE@0..32
-              RULE_SET@0..8
+              RULE_SET@0..18
                 SELECTOR_LIST@0..8
                   SELECTOR@0..8
                     ATTR_SELECTOR@0..8
@@ -1800,20 +2167,20 @@ fn in_an_attribute_selector() {
                       IDENT@1..2 "a"
                       EQ@2..3 "="
                       QUOTED_STRING@3..8 "\"b] {"
-              RULE_SET@8..15
-                SELECTOR_LIST@8..15
-                  SELECTOR@8..15
-                    SIMPLE_SELECTOR@8..12
+                BLOCK@8..18
+                  LBRACE@8..8 ""
+                  DECLARATION@8..16
+                    PROPERTY@8..12
                       WHITESPACE@8..11 "\n  "
                       IDENT@11..12 "c"
-                    PSEUDO_SELECTOR@12..15
-                      COLON@12..13 ":"
-                      WHITESPACE@13..14 " "
-                      IDENT@14..15 "d"
-              SEMICOLON@15..16 ";"
-              ERROR@16..18
-                WHITESPACE@16..17 "\n"
-                RBRACE@17..18 "}"
+                    COLON@12..13 ":"
+                    VALUE@13..15
+                      VALUE@13..15
+                        WHITESPACE@13..14 " "
+                        IDENT@14..15 "d"
+                    SEMICOLON@15..16 ";"
+                  WHITESPACE@16..17 "\n"
+                  RBRACE@17..18 "}"
               RULE_SET@18..31
                 SELECTOR_LIST@18..21
                   SELECTOR@18..21
@@ -1839,8 +2206,6 @@ fn in_an_attribute_selector() {
               WHITESPACE@31..32 "\n"
             errors:
               3..8: unterminated string
-              15..15: expected `{`
-              17..18: expected rule
         "#]],
     );
 }

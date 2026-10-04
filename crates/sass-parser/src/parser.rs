@@ -14,7 +14,8 @@ const MAX_DEPTH: u32 = 256;
 /// How blocks and statements are delimited in the source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Layout {
-    /// By real `{`, `}` and `;` tokens. The only fence is the end of input.
+    /// By real `{`, `}` and `;` tokens. Besides the end of input, the only fence is a
+    /// brace that a string left unclosed swallowed, put back at its line break.
     Braced,
     /// By line breaks and indentation, as in indented Sass. A line break the grammar
     /// does not absorb ends the statement before it, and its indentation opens or
@@ -77,6 +78,8 @@ pub struct Parser<'src> {
     /// unclosed right after an interpolation never sees its `STRING_END`, and stays: it
     /// lies below every string opened after it, so it is never taken for one of them.
     open_strings: Vec<TextSize>,
+    /// In the braced layout, where each `{` and `#{` not yet closed starts, innermost last.
+    open_braces: Vec<TextSize>,
 }
 
 impl<'src> Parser<'src> {
@@ -107,6 +110,7 @@ impl<'src> Parser<'src> {
             unclosed_string_start: TextSize::from(0),
             unclosed_string_tail: StringTail::Plain,
             open_strings: Vec::new(),
+            open_braces: Vec::new(),
         };
         if layout == Layout::Indented {
             parser.find_line_start(0);
@@ -240,6 +244,12 @@ impl<'src> Parser<'src> {
                     self.check_string_end(start, &self.source[range], range.end());
                 }
             }
+            SyntaxKind::LBRACE | SyntaxKind::HASH_LBRACE if self.layout == Layout::Braced => {
+                self.open_braces.push(range.start());
+            }
+            SyntaxKind::RBRACE if self.layout == Layout::Braced => {
+                self.open_braces.pop();
+            }
             _ => {}
         }
     }
@@ -332,7 +342,63 @@ impl<'src> Parser<'src> {
         } else {
             StringTail::Plain
         };
+        if let Some(kind) = self.swallowed_brace(tail, range.start()) {
+            #[allow(clippy::cast_possible_truncation)]
+            let trivia = self.input.trivia_start_index(self.pos) as u32;
+            self.fence = Fence {
+                index: self.pos,
+                kind,
+                trivia,
+            };
+        }
         self.error_at(range, "unterminated string");
+    }
+
+    /// The brace that a string left unclosed, starting at `start` and ending in `tail`,
+    /// swallowed with the rest of its line, to put back at the line break as a virtual
+    /// token; braced layout only. A `}` most likely closed the innermost block,
+    /// `.a { b: "x }`, and a `{` opened a body, `@include m("x) {`. The next line has the
+    /// last word, by its indentation: a body is indented beneath the line that opens it
+    /// and ends in a `}` level with it, while a closed block's next line is no deeper than
+    /// the line it opened on, nor a `}` level with that line, which would close it as
+    /// written. A brace inside an interpolation is the interpolation's.
+    fn swallowed_brace(&self, tail: &str, start: TextSize) -> Option<SyntaxKind> {
+        if self.layout != Layout::Braced {
+            return None;
+        }
+        let innermost = self.open_braces.last().copied();
+        if innermost.is_some_and(|at| self.source[usize::from(at)..].starts_with("#{")) {
+            return None;
+        }
+        let opens = tail.matches('{').count();
+        let closes = tail.matches('}').count();
+        let next = (self.pos < self.input.len()).then(|| {
+            let indent = self.line_indent(self.input.range(self.pos).start());
+            (self.input.kind(self.pos), indent)
+        });
+        if tail.ends_with('}') && closes > opens {
+            let block = self.line_indent(innermost?);
+            match next {
+                None => Some(SyntaxKind::RBRACE),
+                Some((kind, indent)) => (indent < block
+                    || indent == block && kind != SyntaxKind::RBRACE)
+                    .then_some(SyntaxKind::RBRACE),
+            }
+        } else if tail.ends_with('{') && opens > closes {
+            let (kind, indent) = next?;
+            let header = self.line_indent(start);
+            (indent > header || indent == header && kind == SyntaxKind::RBRACE)
+                .then_some(SyntaxKind::LBRACE)
+        } else {
+            None
+        }
+    }
+
+    /// The width of the indentation of the line that `offset` lies on.
+    fn line_indent(&self, offset: TextSize) -> usize {
+        let before = &self.source[..usize::from(offset)];
+        let line = &before[before.rfind('\n').map_or(0, |i| i + 1)..];
+        line.len() - line.trim_start_matches([' ', '\t']).len()
     }
 
     /// Bump the current token as `kind` rather than the kind it was lexed as.
@@ -353,6 +419,16 @@ impl<'src> Parser<'src> {
         } = self.fence;
         assert!(kind != SyntaxKind::EOF, "bump at end of input");
         debug_assert_eq!(index, self.pos);
+        if self.layout == Layout::Braced {
+            // A brace put back after a string left unclosed, past which the string's
+            // construct has ended.
+            self.unclosed_string_end = usize::MAX;
+            if kind == SyntaxKind::LBRACE {
+                self.open_braces.push(self.virtual_offset());
+            } else {
+                self.open_braces.pop();
+            }
+        }
         self.events.push(Event::Virtual { kind, trivia });
         self.last_virtual = (index, trivia);
         if self.layout == Layout::Indented {
@@ -383,7 +459,8 @@ impl<'src> Parser<'src> {
             return true;
         }
         // Swallowed by a string left unclosed, already reported. A `}` is not: the block
-        // it closes spans lines, so a missing one is a separate mistake.
+        // it closes spans lines, so a missing one is a separate mistake, unless the string
+        // swallowed it on the line it ends, which puts it back: see `swallowed_brace`.
         if matches!(
             kind,
             SyntaxKind::RPAREN | SyntaxKind::RBRACKET | SyntaxKind::SEMICOLON
