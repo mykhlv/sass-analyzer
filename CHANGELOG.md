@@ -28,6 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cache evicts them, which silently produced a file with no declarations
 - LSP: find-references and rename no longer re-parse every file in the workspace, which
   also thrashed the tree cache on large projects
+- LSP: code actions write indented syntax into indented `.sass` files. "Extract to mixin"
+  inserted a braced `@mixin new-mixin { … }`, which neither our parser nor Dart Sass
+  accepts there; it now writes an indented mixin body using the file's own indentation
+  unit, keeps nested and continuation lines at their relative depth, and uses the `=`/`+`
+  shorthands when the file already does. "Extract to variable" and the auto-import quick
+  fix no longer end the inserted `$new-variable: …` and `@use "…"` with a semicolon
 - LSP: folding in indented `.sass` files now hides a block's last body line — it was kept
   visible as if it held a closing `}`, so a block with a single body line could not be
   folded at all. The same applies to a `/*` comment that ends at a dedent

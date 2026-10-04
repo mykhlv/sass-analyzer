@@ -510,3 +510,39 @@ async fn rename_no_conflict_different_kind() {
     let edits = changes.as_array().unwrap();
     assert!(edits.len() >= 2, "expected at least 2 edits (decl + ref)");
 }
+
+#[tokio::test]
+async fn rename_mixin_shorthand_in_sass() {
+    // In `=btn` and `+btn` the sigil is a separate token; only the name is renamed.
+    let uri = "file:///rename_shorthand.sass";
+    let source = "=btn\n  width: 1px\n.a\n  +btn\n  @include btn\n";
+
+    let (mut reader, mut writer) = spawn_server();
+    do_initialize(&mut reader, &mut writer).await;
+    open_document(&mut writer, uri, source).await;
+    let _diag = recv_msg(&mut reader, &mut writer).await;
+
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 48,
+            "method": "textDocument/rename",
+            "params": {
+                "textDocument": { "uri": uri },
+                "position": { "line": 3, "character": 3 },
+                "newName": "button"
+            }
+        }),
+    )
+    .await;
+
+    let resp = recv_response(&mut reader, &mut writer, 48).await;
+    let edits = resp["result"]["changes"][uri].as_array().unwrap();
+    let result = apply_lsp_edits(source, edits);
+    assert_eq!(
+        result,
+        "=button\n  width: 1px\n.a\n  +button\n  @include button\n"
+    );
+    assert_parses_as_sass(&result);
+}
