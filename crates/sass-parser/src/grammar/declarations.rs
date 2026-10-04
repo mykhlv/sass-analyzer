@@ -34,10 +34,16 @@ pub(crate) fn declaration(p: &mut Parser<'_>) {
 
     // Check for !important after the value
     if p.at(BANG) {
-        let flag_text = if p.nth(1) == IDENT { p.nth_text(1) } else { "" };
+        let joined = p.joined(super::lines::LINE_JOINS);
+        let flag_text = if p.nth_joined(joined, 1) == IDENT {
+            p.nth_text_joined(joined, 1)
+        } else {
+            ""
+        };
         if flag_text == "important" {
             let fm = p.start();
             p.bump(); // !
+            p.continue_line();
             p.bump(); // important
             let _ = fm.complete(p, IMPORTANT);
         }
@@ -116,31 +122,35 @@ fn value(p: &mut Parser<'_>) {
         }
         // Break for `!important` only when it's at the END of the value
         if p.at(BANG) {
-            if p.nth(1) == IDENT && p.nth_text(1) == "important" {
-                let after = p.nth(2);
+            let joined = p.joined(super::lines::LINE_JOINS);
+            if p.nth_joined(joined, 1) == IDENT && p.nth_text_joined(joined, 1) == "important" {
+                let after = p.nth_joined(joined, 2);
                 if after == SEMICOLON || after == RBRACE || after == LBRACE || after == EOF {
                     break;
                 }
             }
             // Not end-of-value !important — consume as value content
             p.bump();
+            p.continue_line();
             has_content = true;
             continue;
         }
         // In CssValue context, `/` is a separator — just consume it
         if p.at(SLASH) {
             p.bump();
+            p.continue_line();
             has_content = true;
             continue;
         }
         if p.at(COMMA) {
             p.bump();
+            p.continue_line_across_blank();
             has_content = true;
             continue;
         }
         if !p.at_ts(expressions::EXPR_START) {
             // Unknown token in value position — bump for progress
-            p.bump();
+            super::lines::bump_in_run(p);
             has_content = true;
             continue;
         }
@@ -152,7 +162,7 @@ fn value(p: &mut Parser<'_>) {
     }
 
     if !has_content && !p.at(SEMICOLON) && !p.at(RBRACE) && !p.at(LBRACE) && !p.at_end() {
-        p.err_and_bump("expected value");
+        super::lines::err_and_bump(p, "expected value");
     }
 
     let _ = m.complete(p, VALUE);
@@ -216,7 +226,7 @@ fn custom_property_value(p: &mut Parser<'_>) {
             HASH_LBRACE => {
                 let _ = selectors::interpolation(p);
             }
-            _ => p.bump(),
+            _ => super::lines::bump_in_run(p),
         }
     }
     let _ = m.complete(p, VALUE);

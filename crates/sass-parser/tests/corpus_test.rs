@@ -13,6 +13,10 @@ use std::path::{Path, PathBuf};
 use sass_parser::syntax::{SyntaxNode, debug_tree};
 use sass_parser::syntax_kind::SyntaxKind;
 
+#[path = "common/layout_allow_list.rs"]
+mod layout_allow_list;
+#[path = "common/layout_differential.rs"]
+mod layout_differential;
 #[path = "common/line_facts.rs"]
 mod line_facts;
 #[path = "common/virtual_tokens.rs"]
@@ -528,6 +532,180 @@ fn sass_corpora_virtual_tokens_match_legacy() {
         "Event::Virtual disagrees with the legacy lexer: {:#?}",
         &mismatches[..mismatches.len().min(3)],
     );
+}
+
+/// Every file of the indented corpora, `.scss` ones included, parses to the same tree
+/// and errors with the layout frontend as with legacy, unless it is on the allow-list.
+#[test]
+#[ignore = "requires downloading test corpus"]
+fn sass_corpora_layout_matches_legacy() {
+    let mut files = 0;
+    let mut allowed = 0;
+    let mut mismatches = Vec::new();
+    for (name, subdir) in SASS_GATE.corpora {
+        let dir = corpus_root().join(subdir);
+        assert!(
+            dir.exists(),
+            "{name} corpus not found at {}. Run: cd test-corpus && bash download.sh",
+            dir.display()
+        );
+        for path in collect_source_files(&dir) {
+            let source = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+            files += 1;
+            let Some((legacy, layout)) = layout_differential::layout_mismatch(&source) else {
+                continue;
+            };
+            if layout_allow_list::allowed(&source).is_some() {
+                allowed += 1;
+                continue;
+            }
+            let rel = path.strip_prefix(&dir).unwrap_or(&path).display();
+            mismatches.push(format!(
+                "{name}/{rel}\n{}",
+                layout_differential::first_difference(&legacy, &layout)
+            ));
+        }
+    }
+    eprintln!(
+        "\nparse_sass_layout vs parse_sass_legacy: {files} files, {allowed} allow-listed \
+         differences, {} other",
+        mismatches.len(),
+    );
+    assert!(
+        mismatches.is_empty(),
+        "parse_sass_layout disagrees with parse_sass_legacy:\n{}",
+        mismatches[..mismatches.len().min(3)].join("\n"),
+    );
+}
+
+/// The fuzz corpora of `fuzz_sass_parser_crash` and `fuzz_sass_parser_roundtrip`, which
+/// exist only where the fuzz targets have been run, through both indented frontends.
+/// They differ on far more inputs than the allow-list names: almost all of those inputs
+/// are not Sass, and an unclosed bracket in them, now recovered from, is the commonest
+/// difference. So every difference is tracked in a list of its own, which a run must
+/// reproduce exactly: a new one or a vanished one fails, and writes the `.actual`
+/// sibling to review and copy over it.
+#[test]
+#[ignore = "requires the fuzz corpora from a local fuzzing run"]
+fn fuzz_corpora_layout_differences_are_known() {
+    let fuzz = Path::new(env!("CARGO_MANIFEST_DIR")).join("fuzz/corpus");
+    let mut lines = Vec::new();
+    let mut inputs = 0;
+    for target in ["fuzz_sass_parser_crash", "fuzz_sass_parser_roundtrip"] {
+        let Ok(entries) = std::fs::read_dir(fuzz.join(target)) else {
+            eprintln!("no fuzz corpus at {}, skipped", fuzz.join(target).display());
+            return;
+        };
+        for entry in entries.flatten() {
+            let Ok(source) = String::from_utf8(std::fs::read(entry.path()).unwrap_or_default())
+            else {
+                continue;
+            };
+            inputs += 1;
+            if let Some((_, layout)) = layout_differential::layout_mismatch(&source) {
+                let class = fuzz_difference_class(&source, &layout);
+                let name = entry.file_name().to_string_lossy().into_owned();
+                lines.push(format!("{target}/{name}\t{class}"));
+            }
+        }
+    }
+    lines.sort();
+    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+    for line in &lines {
+        *counts
+            .entry(line.rsplit('\t').next().unwrap_or(""))
+            .or_default() += 1;
+    }
+    let mut out = String::from(
+        "# Inputs of the local fuzz corpora on which parse_sass_layout differs from\n\
+         # parse_sass_legacy, each with the kind of difference. Checked with:\n\
+         #   cargo test -p sass-parser --test corpus_test -- --ignored fuzz_corpora\n\
+         # A run that differs writes sass-layout-fuzz-differences.actual.txt instead.\n",
+    );
+    let _ = writeln!(out, "# inputs: {inputs}, differences: {}", lines.len());
+    for (class, count) in &counts {
+        let _ = writeln!(out, "# {class}: {count}");
+    }
+    for line in &lines {
+        out.push_str(line);
+        out.push('\n');
+    }
+    eprintln!(
+        "\nfuzz corpora: {inputs} inputs, {} differences: {counts:?}",
+        lines.len()
+    );
+
+    let tracked = corpus_root().join("sass-layout-fuzz-differences.txt");
+    let actual = corpus_root().join("sass-layout-fuzz-differences.actual.txt");
+    let known: Vec<String> = std::fs::read_to_string(&tracked)
+        .unwrap_or_default()
+        .lines()
+        .filter(|l| !l.starts_with('#'))
+        .map(str::to_owned)
+        .collect();
+    if known != lines {
+        std::fs::write(&actual, &out).expect("write actual");
+        let new: Vec<&String> = lines.iter().filter(|l| !known.contains(l)).collect();
+        let gone: Vec<&String> = known.iter().filter(|l| !lines.contains(l)).collect();
+        panic!(
+            "the fuzz-corpus differences no longer match {}: {} new, {} gone, e.g. \
+             new {:?}, gone {:?}. Review {} and copy it over the list if every change is \
+             intended.",
+            tracked.display(),
+            new.len(),
+            gone.len(),
+            &new[..new.len().min(3)],
+            &gone[..gone.len().min(3)],
+            actual.display(),
+        );
+    }
+    let _ = std::fs::remove_file(&actual);
+}
+
+/// What kind of known defect a fuzz-corpus difference is, as far as the trees show it.
+fn fuzz_difference_class(source: &str, layout: &str) -> &'static str {
+    let trimmed = source.trim_end_matches([' ', '\t']);
+    if trimmed.len() < source.len()
+        && trimmed.ends_with(['\n', '\r', '\x0c'])
+        && layout_differential::layout_mismatch(trimmed).is_none()
+    {
+        "trailing-indentation"
+    } else if layout.contains("unterminated comment") {
+        "unterminated-comment"
+    } else if [
+        "inconsistent indentation",
+        "may not be mixed",
+        "expected tabs",
+        "expected spaces",
+    ]
+    .iter()
+    .any(|message| layout.contains(message))
+    {
+        "indentation"
+    } else if recovers_from_bracket_errors(source) {
+        "bracket-recovery"
+    } else if !line_facts::line_fact_mismatches(source).is_empty() {
+        // A silent comment across a blank line, which the layout lexer reads as Dart does.
+        "comment-extent"
+    } else {
+        "other"
+    }
+}
+
+/// Whether the layout frontend reports an error inside a bracket on `source`, and so
+/// ends that bracket early or, unclosed, lets the lines after it count again.
+fn recovers_from_bracket_errors(source: &str) -> bool {
+    let input = sass_parser::input::Input::from_source_indented(source);
+    let mut parser = sass_parser::parser::Parser::with_layout(
+        input,
+        source,
+        sass_parser::parser::Layout::Indented,
+    );
+    sass_parser::grammar::source_file(&mut parser);
+    let recovered = parser.recovered_from_bracket_errors();
+    let _ = parser.finish();
+    recovered
 }
 
 #[test]

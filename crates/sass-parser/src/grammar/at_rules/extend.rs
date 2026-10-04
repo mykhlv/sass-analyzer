@@ -7,6 +7,7 @@ pub fn extend_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // extend
+    p.continue_header(&super::lines::EXTEND);
 
     // Parse selector(s) — comma-separated simple/compound selectors
     // @extend only allows simple/compound selectors (no descendant combinators)
@@ -21,6 +22,7 @@ pub fn extend_rule(p: &mut Parser<'_>) {
             // Comma separates multiple selectors: `@extend .a, .b;`
             has_selector_token = false;
             p.bump();
+            p.continue_line_across_blank();
             continue;
         }
         if p.at(HASH_LBRACE) {
@@ -43,7 +45,7 @@ pub fn extend_rule(p: &mut Parser<'_>) {
                 }
             }
             has_selector_token = true;
-            p.bump();
+            super::lines::bump_in_run(p);
         }
     }
 

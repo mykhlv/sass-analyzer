@@ -1,6 +1,10 @@
 use expect_test::{Expect, expect};
 use sass_parser::syntax::SassLanguage;
 
+#[path = "common/layout_allow_list.rs"]
+mod layout_allow_list;
+#[path = "common/layout_differential.rs"]
+mod layout_differential;
 #[path = "common/line_facts.rs"]
 mod line_facts;
 #[path = "common/virtual_tokens.rs"]
@@ -9,7 +13,8 @@ mod virtual_tokens;
 // ── Helpers ──────────────────────────────────────────────────────────
 
 /// Also cross-checks the input's layout facts and the placement of `Event::Virtual`
-/// against the legacy lexer, so that every input here is covered by those checks too.
+/// against the legacy lexer, and the layout frontend's tree against legacy's, so that
+/// every input here is covered by those checks too.
 fn check_parse(source: &str) -> String {
     let mismatches = line_facts::line_fact_mismatches(source);
     assert!(
@@ -22,7 +27,20 @@ fn check_parse(source: &str) -> String {
     parse_tree(source)
 }
 
+/// `parse_sass_layout` gives legacy's tree, or the input is on the allow-list.
+fn check_layout(source: &str) {
+    if let Some((legacy, layout)) = layout_differential::layout_mismatch(source) {
+        assert!(
+            layout_allow_list::allowed(source).is_some(),
+            "parse_sass_layout disagrees with parse_sass_legacy on {source:?}, which is not \
+             on the allow-list:\n{}",
+            layout_differential::first_difference(&legacy, &layout),
+        );
+    }
+}
+
 fn parse_tree(source: &str) -> String {
+    check_layout(source);
     let (green, errs) = sass_parser::parse_sass(source);
     let tree = rowan::SyntaxNode::<SassLanguage>::new_root(green);
     assert_eq!(
@@ -47,12 +65,24 @@ fn check_tree(source: &str, expect: Expect) {
 
 /// For a comment that starts a line continuing the one above. Only the legacy lexer,
 /// which tracks continuations, sees that such a comment does not start a statement; the
-/// layout alone reads it as one, so the cross-check must disagree here.
+/// layout alone reads it as one, so the cross-check must disagree here. The layout
+/// frontend re-lexes the comment once the parser has continued the line.
 #[allow(clippy::needless_pass_by_value)]
 fn check_tree_on_a_continued_line(source: &str, expect: Expect) {
     assert!(
         !line_facts::line_fact_mismatches(source).is_empty(),
         "the layout alone already agrees with the legacy lexer on {source:?}"
+    );
+    expect.assert_eq(&parse_tree(source));
+}
+
+/// For a silent comment followed by a blank line and a deeper line, which the layout
+/// frontend's lexer takes into the comment, as Dart Sass does, and legacy does not.
+#[allow(clippy::needless_pass_by_value)]
+fn check_tree_across_a_blank_line(source: &str, expect: Expect) {
+    assert!(
+        !line_facts::line_fact_mismatches(source).is_empty(),
+        "the layout lexer already agrees with the legacy lexer on {source:?}"
     );
     expect.assert_eq(&parse_tree(source));
 }
@@ -5499,7 +5529,7 @@ fn silent_comment_continuation_line_with_an_unclosed_url() {
 /// file compiles to `.a { b: c }`.
 #[test]
 fn blank_line_ending_a_silent_comment_is_a_known_limitation() {
-    check_tree(
+    check_tree_across_a_blank_line(
         "// c\n\n  more\n.a\n  b: c\n",
         expect![[r#"
         SOURCE_FILE@0..23

@@ -90,6 +90,20 @@ pub fn parse_sass(source: &str) -> (rowan::GreenNode, Vec<(String, TextRange)>) 
     parse_sass_legacy(source)
 }
 
+/// Indented Sass parsed by layout: the parser itself decides where statements end and
+/// blocks open, from the line breaks and indentation of the source, with no virtual
+/// tokens from the lexer. Meant to replace [`parse_sass_legacy()`] behind
+/// [`parse_sass()`]; until then a differential test holds the two to the same trees.
+/// Not part of the supported API.
+#[doc(hidden)]
+pub fn parse_sass_layout(source: &str) -> (rowan::GreenNode, Vec<(String, TextRange)>) {
+    let input = input::Input::from_source_indented(source);
+    let mut parser = parser::Parser::with_layout(input, source, parser::Layout::Indented);
+    grammar::source_file(&mut parser);
+    let (events, errors, input, src) = parser.finish();
+    build_tree(events, &errors, &input, src)
+}
+
 /// The indented-Sass pipeline built on [`sass_lexer::sass_tokenize()`], callable
 /// under its own name so that it stays available as the reference when
 /// [`parse_sass()`] moves to a different frontend: a differential test compares

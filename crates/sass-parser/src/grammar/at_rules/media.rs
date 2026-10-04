@@ -7,6 +7,7 @@ pub fn media_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // media
+    p.continue_header(&super::lines::QUERY);
 
     // Media query list — opaque until `;` or `{`
     media_query_list(p);
@@ -34,6 +35,7 @@ pub fn supports_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // supports
+    p.continue_header(&super::lines::QUERY);
 
     supports_condition(p);
 
@@ -71,7 +73,7 @@ pub fn keyframes_rule(p: &mut Parser<'_>) {
 
     // Tolerate extra tokens between name and block (e.g., `@keyframes name line 429 { }`)
     while !p.at(LBRACE) && !p.at(SEMICOLON) && !p.at(RBRACE) && !p.at_end() {
-        p.bump();
+        super::lines::bump_in_run(p);
     }
 
     if !p.at(LBRACE) {
@@ -97,7 +99,7 @@ pub fn keyframes_rule(p: &mut Parser<'_>) {
             // Allow nested at-rules (e.g., @at-root inside keyframes)
             super::at_rule(p);
         } else {
-            p.err_and_bump("expected keyframe selector");
+            super::lines::err_and_bump(p, "expected keyframe selector");
         }
     }
     p.expect(RBRACE);
@@ -111,6 +113,7 @@ fn keyframe_block(p: &mut Parser<'_>) {
     // Parse keyframe selector(s)
     keyframe_selector(p);
     while p.eat(COMMA) {
+        p.continue_line_across_blank();
         keyframe_selector(p);
     }
 

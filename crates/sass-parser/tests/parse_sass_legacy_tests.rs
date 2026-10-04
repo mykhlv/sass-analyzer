@@ -3,6 +3,10 @@ use std::fmt::Write;
 use sass_parser::syntax::{GreenNode, SyntaxNode, debug_tree};
 use sass_parser::text_range::TextRange;
 
+#[path = "common/layout_allow_list.rs"]
+mod layout_allow_list;
+#[path = "common/layout_differential.rs"]
+mod layout_differential;
 #[path = "common/line_facts.rs"]
 mod line_facts;
 
@@ -36,6 +40,13 @@ fn check_same(source: &str) {
         mismatches.is_empty(),
         "layout facts disagree with the legacy lexer on {source:?}: {mismatches:#?}",
     );
+    if let Some((legacy, layout)) = layout_differential::layout_mismatch(source) {
+        assert!(
+            layout_allow_list::allowed(source).is_some(),
+            "parse_sass_layout disagrees with parse_sass_legacy on {source:?}:\n{}",
+            layout_differential::first_difference(&legacy, &layout),
+        );
+    }
 }
 
 #[test]

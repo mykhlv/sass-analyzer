@@ -23,6 +23,7 @@ pub fn selector_list(p: &mut Parser<'_>) {
     selector(p);
     while p.at(COMMA) {
         p.bump(); // ,
+        p.continue_line_across_blank();
         if p.at_ts(SELECTOR_START) || p.at_ts(COMBINATOR_TOKEN) {
             selector(p);
         }
@@ -41,9 +42,14 @@ fn selector(p: &mut Parser<'_>) {
     }
     // Leading combinator in nested context: `> .child`, `+ .sibling`
     if p.at_ts(COMBINATOR_TOKEN) {
+        // A combinator alone on its line is the whole selector, not an unfinished one.
+        let alone = p.at_statement_start();
         let cm = p.start();
         p.bump();
         let _ = cm.complete(p, COMBINATOR);
+        if !alone {
+            p.continue_line();
+        }
     }
     if p.at_ts(SELECTOR_START) {
         compound_selector(p);
@@ -53,6 +59,7 @@ fn selector(p: &mut Parser<'_>) {
             let cm = p.start();
             p.bump();
             let _ = cm.complete(p, COMBINATOR);
+            p.continue_line();
             if p.at_ts(SELECTOR_START) {
                 compound_selector(p);
             }
@@ -75,7 +82,7 @@ fn compound_selector(p: &mut Parser<'_>) {
             simple_selector(p);
         } else if p.at(MINUS) || p.at(NUMBER) || p.at(SyntaxKind::ERROR) {
             // Hyphen/number/escape connecting selector parts: `.col#{$infix}-1`, `\.5`
-            p.bump();
+            super::lines::bump_in_run(p);
         } else {
             break;
         }
@@ -118,7 +125,7 @@ fn simple_selector(p: &mut Parser<'_>) {
                 let _ = interpolation(p);
             } else if p.at(MINUS) && !p.has_whitespace_before() {
                 // `.-#{$name}` — class name starting with hyphen
-                p.bump(); // -
+                super::lines::bump_in_run(p); // -
                 if p.at(HASH_LBRACE) && !p.has_whitespace_before() {
                     let _ = interpolation(p);
                 }
@@ -146,14 +153,14 @@ fn simple_selector(p: &mut Parser<'_>) {
             p.bump(); // &
             // Optional suffix: &-suffix, &__suffix (no whitespace)
             if !p.has_whitespace_before() && (p.at(IDENT) || p.at(MINUS)) {
-                p.bump();
+                super::lines::bump_in_run(p);
             }
             let _ = m.complete(p, SIMPLE_SELECTOR);
         }
         PERCENT => {
             // %placeholder selector (2.11)
             let m = p.start();
-            p.bump(); // %
+            super::lines::bump_in_run(p); // %
             if p.at(HASH_LBRACE) {
                 let _ = interpolation(p);
             } else {
@@ -200,7 +207,7 @@ fn simple_selector(p: &mut Parser<'_>) {
             let _ = interpolation(p);
         }
         _ => {
-            p.err_and_bump("expected selector");
+            super::lines::err_and_bump(p, "expected selector");
         }
     }
 }
@@ -213,6 +220,7 @@ pub fn interpolation(p: &mut Parser<'_>) -> CompletedMarker {
 /// Consume `(...)` balanced parentheses, treating content as opaque.
 fn eat_balanced_parens(p: &mut Parser<'_>) {
     assert!(p.at(LPAREN));
+    let p = &mut *p.transparent_guard();
     p.bump(); // (
     let mut depth: u32 = 1;
     while !p.at_end() && depth > 0 {
@@ -233,6 +241,7 @@ fn eat_balanced_parens(p: &mut Parser<'_>) {
 /// Consume `[...]` balanced brackets, treating content as opaque.
 fn eat_balanced_brackets(p: &mut Parser<'_>) {
     assert!(p.at(LBRACKET));
+    let p = &mut *p.transparent_guard();
     p.bump(); // [
     let mut depth: u32 = 1;
     while !p.at_end() && depth > 0 {

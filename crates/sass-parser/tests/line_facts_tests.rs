@@ -3,6 +3,10 @@ use std::fmt::Write;
 use expect_test::{Expect, expect};
 use sass_parser::input::{IndentKind, Input, LineBreak};
 
+#[path = "common/layout_allow_list.rs"]
+mod layout_allow_list;
+#[path = "common/layout_differential.rs"]
+mod layout_differential;
 #[path = "common/line_facts.rs"]
 mod line_facts;
 #[path = "common/virtual_tokens.rs"]
@@ -27,7 +31,10 @@ fn describe(line_break: LineBreak) -> String {
 
 /// One line per significant token, then EOF, each with the line breaks before it.
 fn render(source: &str) -> String {
-    let input = Input::from_source_indented(source);
+    render_input(&Input::from_source_indented(source), source)
+}
+
+fn render_input(input: &Input, source: &str) -> String {
     let mut buf = String::new();
     for pos in 0..=input.len() {
         let token = if pos < input.len() {
@@ -56,6 +63,19 @@ fn check(source: &str, expect: Expect) {
     expect.assert_eq(&render(source));
     let mismatches = line_facts::line_fact_mismatches(source);
     assert!(mismatches.is_empty(), "{source:?}: {mismatches:#?}");
+    assert_layout_matches_legacy(source);
+}
+
+/// `parse_sass_layout` gives legacy's tree, or the input is on the allow-list.
+#[track_caller]
+fn assert_layout_matches_legacy(source: &str) {
+    if let Some((legacy, layout)) = layout_differential::layout_mismatch(source) {
+        assert!(
+            layout_allow_list::allowed(source).is_some(),
+            "parse_sass_layout disagrees with parse_sass_legacy on {source:?}:\n{}",
+            layout_differential::first_difference(&legacy, &layout),
+        );
+    }
 }
 
 // ── Facts ────────────────────────────────────────────────────────────
@@ -287,6 +307,33 @@ fn the_layout_alone_reads_a_comment_on_a_continued_line_as_a_statement() {
     .assert_debug_eq(&mismatches);
 }
 
+/// Once the parser knows the line goes on, re-lexing it reads the comment as an ordinary
+/// one: the lines below are tokens again, and the facts are rebuilt with them.
+#[test]
+fn relexing_a_continued_line_ends_its_comment_with_the_line() {
+    let source = ".a,\n// c\n  .b\n    x: y\n";
+    let mut input = Input::from_source_indented(source);
+    assert_eq!(input.len(), 3, "`.b` and `x: y` are inside the comment");
+    let (first_break, _) = input.line_break_range(2);
+    assert!(input.relex_continued(source, first_break, true));
+    expect![[r#"
+        DOT "."
+        IDENT "a"
+        COMMA ","
+        DOT "." <- 0, 2 spaces
+        IDENT "b"
+        IDENT "x" <- 4 spaces
+        COLON ":"
+        IDENT "y"
+        EOF <- 0
+    "#]]
+    .assert_eq(&render_input(&input, source));
+    assert!(
+        !input.relex_continued(source, first_break, true),
+        "a second pass changes nothing",
+    );
+}
+
 #[test]
 fn tokens_are_those_of_the_braced_input_where_no_comment_reaches_further() {
     let source = ".a\n  b: c\n  // x\n  @include d(1,\n    2)\n";
@@ -389,6 +436,13 @@ fn facts_match_legacy_on_layout_inputs() {
         })
         .collect();
     assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+fn layout_frontend_matches_legacy_on_layout_inputs() {
+    for source in LAYOUT_INPUTS {
+        assert_layout_matches_legacy(source);
+    }
 }
 
 #[test]

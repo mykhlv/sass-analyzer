@@ -43,6 +43,10 @@ pub enum IndentKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LineBreak {
     column: u32,
+    /// Index in [`Input::all_trivia`] of the WHITESPACE token.
+    trivia: u32,
+    /// Brackets open at the break; see [`LineBreak::depth`].
+    depth: u16,
     flags: u8,
 }
 
@@ -88,6 +92,8 @@ impl LineBreak {
         let blank = if line_feeds >= 2 { Self::BLANK_LINE } else { 0 };
         Some(Self {
             column,
+            trivia: 0,
+            depth: 0,
             flags: indent | blank,
         })
     }
@@ -103,6 +109,19 @@ impl LineBreak {
     #[inline]
     pub fn is_blank_line(self) -> bool {
         self.flags & Self::BLANK_LINE != 0
+    }
+
+    /// Index in [`Input::all_trivia`] of the whitespace this break is in.
+    #[inline]
+    pub fn trivia(self) -> u32 {
+        self.trivia
+    }
+
+    /// Number of brackets — `(`, `[`, `#{`, and `{` inside one of those — open at this
+    /// break. Inside a bracket a line break is plain whitespace, not layout.
+    #[inline]
+    pub fn depth(self) -> u16 {
+        self.depth
     }
 
     #[inline]
@@ -153,10 +172,11 @@ impl Input {
     /// Lex indented-Sass source and build `Input` with its layout facts.
     ///
     /// The tokens are those of [`Input::from_source`] except where a comment reaches over
-    /// the lines indented beneath it (see [`lexer::IndentedLexer`]). The facts are gathered
-    /// in the same pass, and only here: `from_source` compiles without that code.
+    /// the lines indented beneath it (see [`lexer::IndentedLexer::crossing_blank_lines`]).
+    /// The facts are gathered in the same pass, and only here: `from_source` compiles
+    /// without that code.
     pub fn from_source_indented(source: &str) -> Self {
-        Self::lex::<true>(source, lexer::IndentedLexer::new(source))
+        Self::lex::<true>(source, lexer::IndentedLexer::crossing_blank_lines(source))
     }
 
     #[allow(clippy::cast_possible_truncation)]
@@ -178,6 +198,7 @@ impl Input {
         let mut offset = 0u32;
         let mut pending_trivia_start = 0u32;
         let mut pending_line_break_start = 0u32;
+        let mut depth = 0u32;
 
         loop {
             let (kind, text) = lexer.next_token();
@@ -188,19 +209,22 @@ impl Input {
             let range = TextRange::new(TextSize::from(offset), TextSize::from(offset + len));
 
             if kind.is_trivia() {
-                all_trivia.push((kind, range));
                 if LAYOUT
                     && kind == SyntaxKind::WHITESPACE
-                    && let Some(line_break) = LineBreak::measure(text)
+                    && let Some(mut line_break) = LineBreak::measure(text)
                 {
+                    line_break.trivia = all_trivia.len() as u32;
+                    line_break.depth = u16::try_from(depth).unwrap_or(u16::MAX);
                     line_breaks.push(line_break);
                 }
+                all_trivia.push((kind, range));
             } else {
                 trivia_starts.push(pending_trivia_start);
                 pending_trivia_start = all_trivia.len() as u32;
                 if LAYOUT {
                     line_break_starts.push(pending_line_break_start);
                     pending_line_break_start = line_breaks.len() as u32;
+                    depth = bracket_depth_after(depth, kind);
                 }
                 kinds.push(kind);
                 ranges.push(range);
@@ -223,6 +247,150 @@ impl Input {
             line_breaks,
             line_break_starts,
         }
+    }
+
+    /// Lex again from line break `from` on, as on lines that continue the statement
+    /// above it: a comment that starts such a line is an ordinary comment, not one that
+    /// reaches over the lines indented beneath it. That holds up to the next significant
+    /// token, and past a blank line only if `across_blank`. Only the parser knows which
+    /// lines continue a statement, so [`Input::from_source_indented`] reads every comment
+    /// that starts a line as starting a statement.
+    ///
+    /// Returns whether any token changed. The tokens before the line break never do.
+    pub fn relex_continued(&mut self, source: &str, from: u32, across_blank: bool) -> bool {
+        let line_break = self.line_breaks[from as usize];
+        if line_break.depth != 0 {
+            // Inside brackets no comment starts a statement in the first place.
+            return false;
+        }
+        let start = self.all_trivia[line_break.trivia as usize].1.start();
+        let Some((segment, resume)) = self.relexed_segment(source, start, across_blank) else {
+            return false;
+        };
+        let old: Vec<(SyntaxKind, TextRange)> = self.tokens_in_order().collect();
+        let replay = old
+            .iter()
+            .copied()
+            .take_while(|(_, range)| range.start() < start)
+            .chain(segment)
+            .chain(
+                old.iter()
+                    .copied()
+                    .skip_while(|(_, range)| range.start() < resume),
+            )
+            .map(|(kind, range)| (kind, &source[range]));
+        *self = Self::lex::<true>(source, Replay(replay));
+        true
+    }
+
+    /// The tokens from `start` up to the first point where lexing as continued lines
+    /// meets the existing tokens again, and that point; `None` if they are the same.
+    fn relexed_segment(
+        &self,
+        source: &str,
+        start: TextSize,
+        across_blank: bool,
+    ) -> Option<(Vec<(SyntaxKind, TextRange)>, TextSize)> {
+        let mut lexer = lexer::IndentedLexer::resume(source, usize::from(start));
+        let mut continued = true;
+        let mut segment: Vec<(SyntaxKind, TextRange)> = Vec::new();
+        let mut depth = 0u32;
+        let mut offset = start;
+        loop {
+            let (kind, text) = lexer.next_token_where(!continued);
+            if kind == SyntaxKind::EOF {
+                break;
+            }
+            #[allow(clippy::cast_possible_truncation)]
+            let range = TextRange::at(offset, TextSize::from(text.len() as u32));
+            if kind == SyntaxKind::WHITESPACE
+                && !continued
+                && lexer.is_clean()
+                && LineBreak::measure(text).is_some()
+                && self.meets_again(&segment, range, depth)
+            {
+                return self
+                    .differs(&segment, start, range.start())
+                    .then_some((segment, range.start()));
+            }
+            if !kind.is_trivia() {
+                continued = false;
+                depth = bracket_depth_after(depth, kind);
+            } else if kind == SyntaxKind::WHITESPACE
+                && !across_blank
+                && LineBreak::measure(text).is_some_and(LineBreak::is_blank_line)
+            {
+                continued = false;
+            }
+            segment.push((kind, range));
+            offset = range.end();
+        }
+        let end = TextSize::of(source);
+        self.differs(&segment, start, end).then_some((segment, end))
+    }
+
+    /// Whether the existing tokens have the line break `range` too, at bracket depth
+    /// `depth`, after the same token as `segment` ends with: lexing from there on goes as
+    /// it went before.
+    fn meets_again(
+        &self,
+        segment: &[(SyntaxKind, TextRange)],
+        range: TextRange,
+        depth: u32,
+    ) -> bool {
+        let Some(&(prev_kind, prev_range)) = segment.last() else {
+            return false;
+        };
+        if prev_kind == SyntaxKind::SINGLE_LINE_COMMENT {
+            return false;
+        }
+        let index = self
+            .all_trivia
+            .partition_point(|(_, r)| r.start() < range.start());
+        if self.all_trivia.get(index) != Some(&(SyntaxKind::WHITESPACE, range)) {
+            return false;
+        }
+        let Ok(trivia) = u32::try_from(index) else {
+            return false;
+        };
+        let Ok(line_break) = self.line_breaks.binary_search_by_key(&trivia, |b| b.trivia) else {
+            return false;
+        };
+        if u32::from(self.line_breaks[line_break].depth) != depth {
+            return false;
+        }
+        // The token before it, trivia or not, is the same one.
+        let owner = self.trivia_starts.partition_point(|&start| start <= trivia) - 1;
+        let prev = if (self.trivia_starts[owner] as usize) < index {
+            Some(self.all_trivia[index - 1])
+        } else {
+            owner
+                .checked_sub(1)
+                .map(|token| (self.kinds[token], self.ranges[token]))
+        };
+        prev == Some((prev_kind, prev_range))
+    }
+
+    /// Whether `segment` differs from the existing tokens between `start` and `end`.
+    fn differs(&self, segment: &[(SyntaxKind, TextRange)], start: TextSize, end: TextSize) -> bool {
+        !self
+            .tokens_in_order()
+            .skip_while(|(_, r)| r.start() < start)
+            .take_while(|(_, r)| r.start() < end)
+            .eq(segment.iter().copied())
+    }
+
+    /// Every token, trivia included, in source order.
+    fn tokens_in_order(&self) -> impl Iterator<Item = (SyntaxKind, TextRange)> + '_ {
+        (0..=self.len()).flat_map(move |pos| {
+            let trivia = if pos < self.len() {
+                self.trivia_before(pos)
+            } else {
+                self.trailing_trivia()
+            };
+            let token = (pos < self.len()).then(|| (self.kinds[pos], self.ranges[pos]));
+            trivia.iter().copied().chain(token)
+        })
     }
 
     /// Build `Input` from raw lexer tokens.
@@ -383,6 +551,36 @@ impl Input {
         &self.line_breaks[start..end]
     }
 
+    /// The line breaks before the token at `pos` as indices into the whole sequence of
+    /// line breaks, for [`Input::line_break`]; `pos == len()` gives those before EOF.
+    #[inline]
+    pub fn line_break_range(&self, pos: usize) -> (u32, u32) {
+        (self.line_break_starts[pos], self.line_break_starts[pos + 1])
+    }
+
+    /// The `index`th line break of the input.
+    #[inline]
+    pub fn line_break(&self, index: u32) -> LineBreak {
+        self.line_breaks[index as usize]
+    }
+
+    /// Number of line breaks in the input.
+    #[inline]
+    pub fn line_break_count(&self) -> u32 {
+        #[allow(clippy::cast_possible_truncation)]
+        let count = self.line_breaks.len() as u32;
+        count
+    }
+
+    /// The token (or `len()` for EOF) that the `index`th line break comes before.
+    pub fn line_break_owner(&self, index: u32) -> usize {
+        // `line_break_starts` is non-decreasing; the owner is the last token whose
+        // breaks start at or before `index`.
+        self.line_break_starts
+            .partition_point(|&start| start <= index)
+            - 1
+    }
+
     /// The line break that puts the token at `pos` at the start of its line: the last
     /// one before it. A token with no newline-bearing whitespace before it, the first
     /// token of the file included, does not start a line.
@@ -394,5 +592,27 @@ impl Input {
     #[inline]
     pub fn starts_line(&self, pos: usize) -> bool {
         !self.line_breaks_before(pos).is_empty()
+    }
+}
+
+/// Tokens lexed before, fed back through [`Input::lex`].
+struct Replay<I>(I);
+
+impl<'src, I: Iterator<Item = (SyntaxKind, &'src str)>> lexer::TokenSource<'src> for Replay<I> {
+    fn next_token(&mut self) -> (SyntaxKind, &'src str) {
+        self.0.next().unwrap_or((SyntaxKind::EOF, ""))
+    }
+}
+
+/// Bracket depth after a significant token, counted as the indented lexer counts it for
+/// comment extent: `(`, `[` and `#{` open, `{` opens only inside another bracket (a map
+/// or an interpolation's braces), and a closer never takes the depth below zero.
+#[inline]
+pub(crate) fn bracket_depth_after(depth: u32, kind: SyntaxKind) -> u32 {
+    match kind {
+        SyntaxKind::LPAREN | SyntaxKind::LBRACKET | SyntaxKind::HASH_LBRACE => depth + 1,
+        SyntaxKind::LBRACE if depth > 0 => depth + 1,
+        SyntaxKind::RPAREN | SyntaxKind::RBRACKET | SyntaxKind::RBRACE => depth.saturating_sub(1),
+        _ => depth,
     }
 }

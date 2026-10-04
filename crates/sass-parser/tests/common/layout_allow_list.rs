@@ -1,0 +1,840 @@
+//! The inputs on which `parse_sass_layout` may differ from `parse_sass_legacy`, each a
+//! known defect of the legacy indented frontend, with the tree the layout frontend gives
+//! instead. Any other difference is a regression of the layout frontend.
+//!
+//! An entry lists one defect, by what goes wrong in legacy, and the result checked
+//! against Dart Sass 1.105.1. Entries whose defect legacy has since been fixed stay as
+//! pins: there both frontends agree, and on the target.
+//!
+//! Included with `#[path]` by the test binaries that run it, rather than through
+//! `common/mod.rs`, so that binaries which do not are not left with dead code.
+
+use expect_test::{Expect, expect};
+
+// Each test binary reads only the fields it reports on.
+#[allow(dead_code)]
+pub struct Allowed {
+    pub input: &'static str,
+    /// What legacy does wrong here, and what the layout frontend does instead.
+    pub change: &'static str,
+    /// `parse_sass_layout`'s tree and errors.
+    pub expected: Expect,
+}
+
+/// The entry for `source`, if it is on the list.
+pub fn allowed(source: &str) -> Option<Allowed> {
+    allow_list().into_iter().find(|entry| entry.input == source)
+}
+
+#[allow(clippy::too_many_lines)]
+pub fn allow_list() -> Vec<Allowed> {
+    vec![
+        Allowed {
+            input: ".a:hover > *\n  color: red\n",
+            change: "a trailing universal selector after a pseudo-class used to read as \
+                     multiplication and take the declaration below into the selector; both \
+                     frontends now give the rule its declaration (Dart: same)",
+            expected: expect![[r#"
+                SOURCE_FILE@0..26
+                  RULE_SET@0..25
+                    SELECTOR_LIST@0..12
+                      SELECTOR@0..12
+                        SIMPLE_SELECTOR@0..2
+                          DOT@0..1 "."
+                          IDENT@1..2 "a"
+                        PSEUDO_SELECTOR@2..8
+                          COLON@2..3 ":"
+                          IDENT@3..8 "hover"
+                        COMBINATOR@8..10
+                          WHITESPACE@8..9 " "
+                          GT@9..10 ">"
+                        SIMPLE_SELECTOR@10..12
+                          WHITESPACE@10..11 " "
+                          STAR@11..12 "*"
+                    BLOCK@12..25
+                      LBRACE@12..12 ""
+                      DECLARATION@12..25
+                        PROPERTY@12..20
+                          WHITESPACE@12..15 "\n  "
+                          IDENT@15..20 "color"
+                        COLON@20..21 ":"
+                        VALUE@21..25
+                          VALUE@21..25
+                            WHITESPACE@21..22 " "
+                            IDENT@22..25 "red"
+                        SEMICOLON@25..25 ""
+                      RBRACE@25..25 ""
+                  WHITESPACE@25..26 "\n"
+            "#]],
+        },
+        Allowed {
+            input: ".a:focus,\n.b *\n  c: d\n",
+            change: "a pseudo-class on an earlier line of the selector list used to turn \
+                     a trailing `*` into an operator; both frontends now give the rule its \
+                     declaration (Dart: same)",
+            expected: expect![[r#"
+                SOURCE_FILE@0..22
+                  RULE_SET@0..21
+                    SELECTOR_LIST@0..14
+                      SELECTOR@0..8
+                        SIMPLE_SELECTOR@0..2
+                          DOT@0..1 "."
+                          IDENT@1..2 "a"
+                        PSEUDO_SELECTOR@2..8
+                          COLON@2..3 ":"
+                          IDENT@3..8 "focus"
+                      COMMA@8..9 ","
+                      SELECTOR@9..14
+                        SIMPLE_SELECTOR@9..12
+                          WHITESPACE@9..10 "\n"
+                          DOT@10..11 "."
+                          IDENT@11..12 "b"
+                        SIMPLE_SELECTOR@12..14
+                          WHITESPACE@12..13 " "
+                          STAR@13..14 "*"
+                    BLOCK@14..21
+                      LBRACE@14..14 ""
+                      DECLARATION@14..21
+                        PROPERTY@14..18
+                          WHITESPACE@14..17 "\n  "
+                          IDENT@17..18 "c"
+                        COLON@18..19 ":"
+                        VALUE@19..21
+                          VALUE@19..21
+                            WHITESPACE@19..20 " "
+                            IDENT@20..21 "d"
+                        SEMICOLON@21..21 ""
+                      RBRACE@21..21 ""
+                  WHITESPACE@21..22 "\n"
+            "#]],
+        },
+        Allowed {
+            input: ".a:hover .not\n  b: c\n",
+            change: "`not` ending a selector after a pseudo-class used to continue the line \
+                     as a boolean operator; both frontends now give the rule its \
+                     declaration (Dart: same)",
+            expected: expect![[r#"
+                SOURCE_FILE@0..21
+                  RULE_SET@0..20
+                    SELECTOR_LIST@0..13
+                      SELECTOR@0..13
+                        SIMPLE_SELECTOR@0..2
+                          DOT@0..1 "."
+                          IDENT@1..2 "a"
+                        PSEUDO_SELECTOR@2..8
+                          COLON@2..3 ":"
+                          IDENT@3..8 "hover"
+                        SIMPLE_SELECTOR@8..13
+                          WHITESPACE@8..9 " "
+                          DOT@9..10 "."
+                          IDENT@10..13 "not"
+                    BLOCK@13..20
+                      LBRACE@13..13 ""
+                      DECLARATION@13..20
+                        PROPERTY@13..17
+                          WHITESPACE@13..16 "\n  "
+                          IDENT@16..17 "b"
+                        COLON@17..18 ":"
+                        VALUE@18..20
+                          VALUE@18..20
+                            WHITESPACE@18..19 " "
+                            IDENT@19..20 "c"
+                        SEMICOLON@20..20 ""
+                      RBRACE@20..20 ""
+                  WHITESPACE@20..21 "\n"
+            "#]],
+        },
+        Allowed {
+            input: ".a\n  content: not\n  b: c\n",
+            change: "legacy continues the line after a value ending in `not` and silently \
+                     takes `b: c` into it; the layout frontend ends the declaration there, \
+                     so `b: c` is a declaration of its own (Dart reports `expected \
+                     newline.`; reporting it here needs `not` to be an operator in CSS \
+                     values, which would change SCSS)",
+            expected: expect![[r#"
+                SOURCE_FILE@0..25
+                  RULE_SET@0..24
+                    SELECTOR_LIST@0..2
+                      SELECTOR@0..2
+                        SIMPLE_SELECTOR@0..2
+                          DOT@0..1 "."
+                          IDENT@1..2 "a"
+                    BLOCK@2..24
+                      LBRACE@2..2 ""
+                      DECLARATION@2..17
+                        PROPERTY@2..12
+                          WHITESPACE@2..5 "\n  "
+                          IDENT@5..12 "content"
+                        COLON@12..13 ":"
+                        VALUE@13..17
+                          VALUE@13..17
+                            WHITESPACE@13..14 " "
+                            IDENT@14..17 "not"
+                        SEMICOLON@17..17 ""
+                      DECLARATION@17..24
+                        PROPERTY@17..21
+                          WHITESPACE@17..20 "\n  "
+                          IDENT@20..21 "b"
+                        COLON@21..22 ":"
+                        VALUE@22..24
+                          VALUE@22..24
+                            WHITESPACE@22..23 " "
+                            IDENT@23..24 "c"
+                        SEMICOLON@24..24 ""
+                      RBRACE@24..24 ""
+                  WHITESPACE@24..25 "\n"
+            "#]],
+        },
+        Allowed {
+            input: "/* loud\n  still comment\n.a\n  b: c\n.d\n  e: f\n",
+            change: "a loud comment that starts a statement ends at the first line no \
+                     deeper than its own, not at the end of the file; both frontends now \
+                     give one comment and two rules (Dart: same)",
+            expected: expect![[r#"
+                SOURCE_FILE@0..44
+                  RULE_SET@0..33
+                    SELECTOR_LIST@0..26
+                      SELECTOR@0..26
+                        SIMPLE_SELECTOR@0..26
+                          MULTI_LINE_COMMENT@0..23 "/* loud\n  still comment"
+                          WHITESPACE@23..24 "\n"
+                          DOT@24..25 "."
+                          IDENT@25..26 "a"
+                    BLOCK@26..33
+                      LBRACE@26..26 ""
+                      DECLARATION@26..33
+                        PROPERTY@26..30
+                          WHITESPACE@26..29 "\n  "
+                          IDENT@29..30 "b"
+                        COLON@30..31 ":"
+                        VALUE@31..33
+                          VALUE@31..33
+                            WHITESPACE@31..32 " "
+                            IDENT@32..33 "c"
+                        SEMICOLON@33..33 ""
+                      RBRACE@33..33 ""
+                  RULE_SET@33..43
+                    SELECTOR_LIST@33..36
+                      SELECTOR@33..36
+                        SIMPLE_SELECTOR@33..36
+                          WHITESPACE@33..34 "\n"
+                          DOT@34..35 "."
+                          IDENT@35..36 "d"
+                    BLOCK@36..43
+                      LBRACE@36..36 ""
+                      DECLARATION@36..43
+                        PROPERTY@36..40
+                          WHITESPACE@36..39 "\n  "
+                          IDENT@39..40 "e"
+                        COLON@40..41 ":"
+                        VALUE@41..43
+                          VALUE@41..43
+                            WHITESPACE@41..42 " "
+                            IDENT@42..43 "f"
+                        SEMICOLON@43..43 ""
+                      RBRACE@43..43 ""
+                  WHITESPACE@43..44 "\n"
+            "#]],
+        },
+        Allowed {
+            input: "/* Single-line\n\n/*\n  Multi\n  line\n\n/* Multiline starting on\n   the \
+                    first line\n\n/* Preserves\n\n   empty\n\n\n   lines\n\n/* Ignores comment \
+                    closer */\n\n/*\n  Handles\n         weird\n   indentation\n       \
+                    gracefully\n\n/* Even\n      when\n     it starts\n         on the\n       \
+                    first line\n\n/* Allows interpolation: #{1 + 1}\n",
+            change: "sass-spec `non_conformant/sass/comment/loud`: eight loud comments, each \
+                     ending by layout; both frontends now give all eight (Dart: same)",
+            expected: expect![[r#"
+                SOURCE_FILE@0..309
+                  MULTI_LINE_COMMENT@0..14 "/* Single-line"
+                  WHITESPACE@14..16 "\n\n"
+                  MULTI_LINE_COMMENT@16..33 "/*\n  Multi\n  line"
+                  WHITESPACE@33..35 "\n\n"
+                  MULTI_LINE_COMMENT@35..77 "/* Multiline starting on\n   the first line"
+                  WHITESPACE@77..79 "\n\n"
+                  MULTI_LINE_COMMENT@79..112 "/* Preserves\n\n   empty\n\n\n   lines"
+                  WHITESPACE@112..114 "\n\n"
+                  MULTI_LINE_COMMENT@114..142 "/* Ignores comment closer */"
+                  WHITESPACE@142..144 "\n\n"
+                  MULTI_LINE_COMMENT@144..204 "/*\n  Handles\n         weird\n   indentation\n       gracefully"
+                  WHITESPACE@204..206 "\n\n"
+                  MULTI_LINE_COMMENT@206..273 "/* Even\n      when\n     it starts\n         on the\n       first line"
+                  WHITESPACE@273..275 "\n\n"
+                  MULTI_LINE_COMMENT@275..308 "/* Allows interpolation: #{1 + 1}"
+                  WHITESPACE@308..309 "\n"
+            "#]],
+        },
+        Allowed {
+            input: ".a\n\tcolor: red\n        b: c\n",
+            change: "a line indented with spaces in a file indented with tabs: the layout \
+                     frontend reports it (Dart: `Expected tabs, was spaces.`)",
+            expected: expect![[r#"
+                SOURCE_FILE@0..28
+                  RULE_SET@0..27
+                    SELECTOR_LIST@0..2
+                      SELECTOR@0..2
+                        SIMPLE_SELECTOR@0..2
+                          DOT@0..1 "."
+                          IDENT@1..2 "a"
+                    BLOCK@2..27
+                      LBRACE@2..2 ""
+                      NESTED_PROPERTY@2..27
+                        PROPERTY@2..9
+                          WHITESPACE@2..4 "\n\t"
+                          IDENT@4..9 "color"
+                        COLON@9..10 ":"
+                        VALUE@10..14
+                          VALUE@10..14
+                            WHITESPACE@10..11 " "
+                            IDENT@11..14 "red"
+                        BLOCK@14..27
+                          LBRACE@14..14 ""
+                          DECLARATION@14..27
+                            PROPERTY@14..24
+                              WHITESPACE@14..23 "\n        "
+                              IDENT@23..24 "b"
+                            COLON@24..25 ":"
+                            VALUE@25..27
+                              VALUE@25..27
+                                WHITESPACE@25..26 " "
+                                IDENT@26..27 "c"
+                            SEMICOLON@27..27 ""
+                          RBRACE@27..27 ""
+                      RBRACE@27..27 ""
+                  WHITESPACE@27..28 "\n"
+                error 15..23: expected tabs, was spaces
+            "#]],
+        },
+        Allowed {
+            input: ".a\n  \tcolor: red\n  \tb: c\n",
+            change: "indentation mixing tabs and spaces: the layout frontend reports it, \
+                     once (Dart: `Tabs and spaces may not be mixed.`)",
+            expected: expect![[r#"
+                SOURCE_FILE@0..25
+                  RULE_SET@0..24
+                    SELECTOR_LIST@0..2
+                      SELECTOR@0..2
+                        SIMPLE_SELECTOR@0..2
+                          DOT@0..1 "."
+                          IDENT@1..2 "a"
+                    BLOCK@2..24
+                      LBRACE@2..2 ""
+                      DECLARATION@2..16
+                        PROPERTY@2..11
+                          WHITESPACE@2..6 "\n  \t"
+                          IDENT@6..11 "color"
+                        COLON@11..12 ":"
+                        VALUE@12..16
+                          VALUE@12..16
+                            WHITESPACE@12..13 " "
+                            IDENT@13..16 "red"
+                        SEMICOLON@16..16 ""
+                      DECLARATION@16..24
+                        PROPERTY@16..21
+                          WHITESPACE@16..20 "\n  \t"
+                          IDENT@20..21 "b"
+                        COLON@21..22 ":"
+                        VALUE@22..24
+                          VALUE@22..24
+                            WHITESPACE@22..23 " "
+                            IDENT@23..24 "c"
+                        SEMICOLON@24..24 ""
+                      RBRACE@24..24 ""
+                  WHITESPACE@24..25 "\n"
+                error 3..6: tabs and spaces may not be mixed
+            "#]],
+        },
+        Allowed {
+            input: ".a\n    .b\n      c: d\n  .e\n    f: g\n",
+            change: "a dedent to a column no open block has: the layout frontend reports \
+                     it and closes the blocks deeper than the line, as legacy silently did \
+                     (Dart: `Inconsistent indentation, expected 4 spaces.`)",
+            expected: expect![[r#"
+                SOURCE_FILE@0..35
+                  RULE_SET@0..20
+                    SELECTOR_LIST@0..2
+                      SELECTOR@0..2
+                        SIMPLE_SELECTOR@0..2
+                          DOT@0..1 "."
+                          IDENT@1..2 "a"
+                    BLOCK@2..20
+                      LBRACE@2..2 ""
+                      RULE_SET@2..20
+                        SELECTOR_LIST@2..9
+                          SELECTOR@2..9
+                            SIMPLE_SELECTOR@2..9
+                              WHITESPACE@2..7 "\n    "
+                              DOT@7..8 "."
+                              IDENT@8..9 "b"
+                        BLOCK@9..20
+                          LBRACE@9..9 ""
+                          DECLARATION@9..20
+                            PROPERTY@9..17
+                              WHITESPACE@9..16 "\n      "
+                              IDENT@16..17 "c"
+                            COLON@17..18 ":"
+                            VALUE@18..20
+                              VALUE@18..20
+                                WHITESPACE@18..19 " "
+                                IDENT@19..20 "d"
+                            SEMICOLON@20..20 ""
+                          RBRACE@20..20 ""
+                      RBRACE@20..20 ""
+                  RULE_SET@20..34
+                    SELECTOR_LIST@20..25
+                      SELECTOR@20..25
+                        SIMPLE_SELECTOR@20..25
+                          WHITESPACE@20..23 "\n  "
+                          DOT@23..24 "."
+                          IDENT@24..25 "e"
+                    BLOCK@25..34
+                      LBRACE@25..25 ""
+                      DECLARATION@25..34
+                        PROPERTY@25..31
+                          WHITESPACE@25..30 "\n    "
+                          IDENT@30..31 "f"
+                        COLON@31..32 ":"
+                        VALUE@32..34
+                          VALUE@32..34
+                            WHITESPACE@32..33 " "
+                            IDENT@33..34 "g"
+                        SEMICOLON@34..34 ""
+                      RBRACE@34..34 ""
+                  WHITESPACE@34..35 "\n"
+                error 21..23: inconsistent indentation, expected 4 spaces
+            "#]],
+        },
+        Allowed {
+            input: "a\n    b: c\n d: e\n",
+            change: "a dedent to a column no open block has, from sass-spec \
+                     `non_conformant/sass/indentation/error/inconsistent`: reported (Dart: \
+                     `Inconsistent indentation, expected 4 spaces.`)",
+            expected: expect![[r#"
+                SOURCE_FILE@0..17
+                  RULE_SET@0..10
+                    SELECTOR_LIST@0..1
+                      SELECTOR@0..1
+                        SIMPLE_SELECTOR@0..1
+                          IDENT@0..1 "a"
+                    BLOCK@1..10
+                      LBRACE@1..1 ""
+                      DECLARATION@1..10
+                        PROPERTY@1..7
+                          WHITESPACE@1..6 "\n    "
+                          IDENT@6..7 "b"
+                        COLON@7..8 ":"
+                        VALUE@8..10
+                          VALUE@8..10
+                            WHITESPACE@8..9 " "
+                            IDENT@9..10 "c"
+                        SEMICOLON@10..10 ""
+                      RBRACE@10..10 ""
+                  RULE_SET@10..16
+                    SELECTOR_LIST@10..16
+                      SELECTOR@10..16
+                        SIMPLE_SELECTOR@10..13
+                          WHITESPACE@10..12 "\n "
+                          IDENT@12..13 "d"
+                        PSEUDO_SELECTOR@13..16
+                          COLON@13..14 ":"
+                          WHITESPACE@14..15 " "
+                          IDENT@15..16 "e"
+                  SEMICOLON@16..16 ""
+                  WHITESPACE@16..17 "\n"
+                error 11..12: inconsistent indentation, expected 4 spaces
+            "#]],
+        },
+        Allowed {
+            input: "a\u{c}  b\r c",
+            change: "a dedent to a column no open block has, after a form feed and a \
+                     carriage return, from the line-facts tests: reported (Dart: \
+                     `Inconsistent indentation, expected 2 spaces.`)",
+            expected: expect![[r#"
+                SOURCE_FILE@0..8
+                  RULE_SET@0..5
+                    SELECTOR_LIST@0..1
+                      SELECTOR@0..1
+                        SIMPLE_SELECTOR@0..1
+                          IDENT@0..1 "a"
+                    BLOCK@1..5
+                      LBRACE@1..1 ""
+                      RULE_SET@1..5
+                        SELECTOR_LIST@1..5
+                          SELECTOR@1..5
+                            SIMPLE_SELECTOR@1..5
+                              WHITESPACE@1..4 "\u{c}  "
+                              IDENT@4..5 "b"
+                      SEMICOLON@5..5 ""
+                      RBRACE@5..5 ""
+                  RULE_SET@5..8
+                    SELECTOR_LIST@5..8
+                      SELECTOR@5..8
+                        SIMPLE_SELECTOR@5..8
+                          WHITESPACE@5..7 "\r "
+                          IDENT@7..8 "c"
+                  SEMICOLON@8..8 ""
+                error 6..7: inconsistent indentation, expected 2 spaces
+            "#]],
+        },
+        Allowed {
+            input: ".a\n\tb: c\n\t\t.d\n  \te: f\n",
+            change: "indentation mixing tabs and spaces, from the line-facts tests: \
+                     reported (Dart stops earlier, at `expected \":\".`)",
+            expected: expect![[r#"
+                SOURCE_FILE@0..22
+                  RULE_SET@0..21
+                    SELECTOR_LIST@0..2
+                      SELECTOR@0..2
+                        SIMPLE_SELECTOR@0..2
+                          DOT@0..1 "."
+                          IDENT@1..2 "a"
+                    BLOCK@2..21
+                      LBRACE@2..2 ""
+                      NESTED_PROPERTY@2..21
+                        PROPERTY@2..5
+                          WHITESPACE@2..4 "\n\t"
+                          IDENT@4..5 "b"
+                        COLON@5..6 ":"
+                        VALUE@6..8
+                          VALUE@6..8
+                            WHITESPACE@6..7 " "
+                            IDENT@7..8 "c"
+                        BLOCK@8..21
+                          LBRACE@8..8 ""
+                          RULE_SET@8..21
+                            SELECTOR_LIST@8..13
+                              SELECTOR@8..13
+                                SIMPLE_SELECTOR@8..13
+                                  WHITESPACE@8..11 "\n\t\t"
+                                  DOT@11..12 "."
+                                  IDENT@12..13 "d"
+                            BLOCK@13..21
+                              LBRACE@13..13 ""
+                              DECLARATION@13..21
+                                PROPERTY@13..18
+                                  WHITESPACE@13..17 "\n  \t"
+                                  IDENT@17..18 "e"
+                                COLON@18..19 ":"
+                                VALUE@19..21
+                                  VALUE@19..21
+                                    WHITESPACE@19..20 " "
+                                    IDENT@20..21 "f"
+                                SEMICOLON@21..21 ""
+                              RBRACE@21..21 ""
+                          RBRACE@21..21 ""
+                      RBRACE@21..21 ""
+                  WHITESPACE@21..22 "\n"
+                error 14..17: tabs and spaces may not be mixed
+            "#]],
+        },
+        Allowed {
+            input: ".a\n  b: c\n    ",
+            change: "whitespace indented deeper at the end of the input opened a block, \
+                     turning the declaration into a nested property; the input ends at \
+                     column 0, so it stays a declaration (Dart: `.a { b: c; }`)",
+            expected: expect![[r#"
+                SOURCE_FILE@0..14
+                  RULE_SET@0..14
+                    SELECTOR_LIST@0..2
+                      SELECTOR@0..2
+                        SIMPLE_SELECTOR@0..2
+                          DOT@0..1 "."
+                          IDENT@1..2 "a"
+                    BLOCK@2..14
+                      LBRACE@2..2 ""
+                      DECLARATION@2..9
+                        PROPERTY@2..6
+                          WHITESPACE@2..5 "\n  "
+                          IDENT@5..6 "b"
+                        COLON@6..7 ":"
+                        VALUE@7..9
+                          VALUE@7..9
+                            WHITESPACE@7..8 " "
+                            IDENT@8..9 "c"
+                        SEMICOLON@9..9 ""
+                      WHITESPACE@9..14 "\n    "
+                      RBRACE@14..14 ""
+            "#]],
+        },
+        Allowed {
+            input: "a {\n  b: c\n}\n  ",
+            change: "whitespace indented deeper at the end of the input, from sass-spec \
+                     `parser/indentation/error/mixed_syntax/block`: no block opens there \
+                     (Dart rejects the braces, as both frontends do)",
+            expected: expect![[r#"
+                SOURCE_FILE@0..15
+                  RULE_SET@0..10
+                    SELECTOR_LIST@0..1
+                      SELECTOR@0..1
+                        SIMPLE_SELECTOR@0..1
+                          IDENT@0..1 "a"
+                    BLOCK@1..10
+                      WHITESPACE@1..2 " "
+                      LBRACE@2..3 "{"
+                      ERROR@3..3
+                        LBRACE@3..3 ""
+                      DECLARATION@3..10
+                        PROPERTY@3..7
+                          WHITESPACE@3..6 "\n  "
+                          IDENT@6..7 "b"
+                        COLON@7..8 ":"
+                        VALUE@8..10
+                          VALUE@8..10
+                            WHITESPACE@8..9 " "
+                            IDENT@9..10 "c"
+                        SEMICOLON@10..10 ""
+                      RBRACE@10..10 ""
+                  ERROR@10..12
+                    WHITESPACE@10..11 "\n"
+                    RBRACE@11..12 "}"
+                  SEMICOLON@12..12 ""
+                  WHITESPACE@12..15 "\n  "
+                error 3..3: expected declaration or nested rule
+                error 11..12: expected rule
+            "#]],
+        },
+        Allowed {
+            input: "// c\n\n  more\n.a\n  b: c\n",
+            change: "a silent comment stopped at a blank line, so the deeper line after it \
+                     became a rule of its own; it now takes that line, as in Dart, which \
+                     compiles this to `.a { b: c; }`",
+            expected: expect![[r#"
+                SOURCE_FILE@0..23
+                  RULE_SET@0..22
+                    SELECTOR_LIST@0..15
+                      SELECTOR@0..15
+                        SIMPLE_SELECTOR@0..15
+                          SINGLE_LINE_COMMENT@0..4 "// c"
+                          WHITESPACE@4..8 "\n\n  "
+                          SINGLE_LINE_COMMENT@8..12 "more"
+                          WHITESPACE@12..13 "\n"
+                          DOT@13..14 "."
+                          IDENT@14..15 "a"
+                    BLOCK@15..22
+                      LBRACE@15..15 ""
+                      DECLARATION@15..22
+                        PROPERTY@15..19
+                          WHITESPACE@15..18 "\n  "
+                          IDENT@18..19 "b"
+                        COLON@19..20 ":"
+                        VALUE@20..22
+                          VALUE@20..22
+                            WHITESPACE@20..21 " "
+                            IDENT@21..22 "c"
+                        SEMICOLON@22..22 ""
+                      RBRACE@22..22 ""
+                  WHITESPACE@22..23 "\n"
+            "#]],
+        },
+        Allowed {
+            input: ".a /* x\n  y\n.b\n  c: d\n",
+            change: "a loud comment that does not start its line and never closes was \
+                     silently taken as a comment to the end of the file; it is now \
+                     reported (Dart: `expected more input.`)",
+            expected: expect![[r#"
+                SOURCE_FILE@0..22
+                  RULE_SET@0..2
+                    SELECTOR_LIST@0..2
+                      SELECTOR@0..2
+                        SIMPLE_SELECTOR@0..2
+                          DOT@0..1 "."
+                          IDENT@1..2 "a"
+                  ERROR@2..22
+                    WHITESPACE@2..3 " "
+                    ERROR@3..22 "/* x\n  y\n.b\n  c: d\n"
+                  SEMICOLON@22..22 ""
+                error 3..22: expected rule
+                error 3..22: unterminated comment
+            "#]],
+        },
+        Allowed {
+            input: ".a\n  b: c /* never closed\n  d: e\n",
+            change: "an unterminated loud comment after a value, from the line-facts \
+                     tests: reported (Dart: `expected more input.`)",
+            expected: expect![[r#"
+                SOURCE_FILE@0..33
+                  RULE_SET@0..33
+                    SELECTOR_LIST@0..2
+                      SELECTOR@0..2
+                        SIMPLE_SELECTOR@0..2
+                          DOT@0..1 "."
+                          IDENT@1..2 "a"
+                    BLOCK@2..33
+                      LBRACE@2..2 ""
+                      DECLARATION@2..33
+                        PROPERTY@2..6
+                          WHITESPACE@2..5 "\n  "
+                          IDENT@5..6 "b"
+                        COLON@6..7 ":"
+                        VALUE@7..33
+                          VALUE@7..9
+                            WHITESPACE@7..8 " "
+                            IDENT@8..9 "c"
+                          WHITESPACE@9..10 " "
+                          ERROR@10..33 "/* never closed\n  d: e\n"
+                        SEMICOLON@33..33 ""
+                      RBRACE@33..33 ""
+                error 10..33: unterminated comment
+            "#]],
+        },
+        Allowed {
+            input: "a\n  b: c /* d\n",
+            change: "an unterminated loud comment after a value, from sass-spec \
+                     `css/comment/error/loud/unterminated/sass`: reported (Dart: `expected \
+                     more input.`)",
+            expected: expect![[r#"
+                SOURCE_FILE@0..14
+                  RULE_SET@0..14
+                    SELECTOR_LIST@0..1
+                      SELECTOR@0..1
+                        SIMPLE_SELECTOR@0..1
+                          IDENT@0..1 "a"
+                    BLOCK@1..14
+                      LBRACE@1..1 ""
+                      DECLARATION@1..14
+                        PROPERTY@1..5
+                          WHITESPACE@1..4 "\n  "
+                          IDENT@4..5 "b"
+                        COLON@5..6 ":"
+                        VALUE@6..14
+                          VALUE@6..8
+                            WHITESPACE@6..7 " "
+                            IDENT@7..8 "c"
+                          WHITESPACE@8..9 " "
+                          ERROR@9..14 "/* d\n"
+                        SEMICOLON@14..14 ""
+                      RBRACE@14..14 ""
+                error 9..14: unterminated comment
+            "#]],
+        },
+        Allowed {
+            input: ".a\n  b: fn(1\n.c\n  d: e\n.f\n  g: h\n",
+            change: "an unclosed bracket made every later line break plain whitespace, so \
+                     the rest of the file joined the declaration; once its error is \
+                     reported, the bracket ends at the next line no deeper than the one it \
+                     opened on (Dart: one error, `Expected digit.`)",
+            expected: expect![[r#"
+                SOURCE_FILE@0..33
+                  RULE_SET@0..12
+                    SELECTOR_LIST@0..2
+                      SELECTOR@0..2
+                        SIMPLE_SELECTOR@0..2
+                          DOT@0..1 "."
+                          IDENT@1..2 "a"
+                    BLOCK@2..12
+                      LBRACE@2..2 ""
+                      DECLARATION@2..12
+                        PROPERTY@2..6
+                          WHITESPACE@2..5 "\n  "
+                          IDENT@5..6 "b"
+                        COLON@6..7 ":"
+                        VALUE@7..12
+                          FUNCTION_CALL@7..12
+                            WHITESPACE@7..8 " "
+                            IDENT@8..10 "fn"
+                            ARG_LIST@10..12
+                              LPAREN@10..11 "("
+                              ARG@11..12
+                                NUMBER_LITERAL@11..12
+                                  NUMBER@11..12 "1"
+                        SEMICOLON@12..12 ""
+                      RBRACE@12..12 ""
+                  RULE_SET@12..22
+                    SELECTOR_LIST@12..15
+                      SELECTOR@12..15
+                        SIMPLE_SELECTOR@12..15
+                          WHITESPACE@12..13 "\n"
+                          DOT@13..14 "."
+                          IDENT@14..15 "c"
+                    BLOCK@15..22
+                      LBRACE@15..15 ""
+                      DECLARATION@15..22
+                        PROPERTY@15..19
+                          WHITESPACE@15..18 "\n  "
+                          IDENT@18..19 "d"
+                        COLON@19..20 ":"
+                        VALUE@20..22
+                          VALUE@20..22
+                            WHITESPACE@20..21 " "
+                            IDENT@21..22 "e"
+                        SEMICOLON@22..22 ""
+                      RBRACE@22..22 ""
+                  RULE_SET@22..32
+                    SELECTOR_LIST@22..25
+                      SELECTOR@22..25
+                        SIMPLE_SELECTOR@22..25
+                          WHITESPACE@22..23 "\n"
+                          DOT@23..24 "."
+                          IDENT@24..25 "f"
+                    BLOCK@25..32
+                      LBRACE@25..25 ""
+                      DECLARATION@25..32
+                        PROPERTY@25..29
+                          WHITESPACE@25..28 "\n  "
+                          IDENT@28..29 "g"
+                        COLON@29..30 ":"
+                        VALUE@30..32
+                          VALUE@30..32
+                            WHITESPACE@30..31 " "
+                            IDENT@31..32 "h"
+                        SEMICOLON@32..32 ""
+                      RBRACE@32..32 ""
+                  WHITESPACE@32..33 "\n"
+                error 13..14: expected RPAREN
+            "#]],
+        },
+        Allowed {
+            input: ".a\n  b: fn(1\n.c\n  d: e\n",
+            change: "an unclosed bracket, as above, from the `parse_sass_legacy` tests",
+            expected: expect![[r#"
+                SOURCE_FILE@0..23
+                  RULE_SET@0..12
+                    SELECTOR_LIST@0..2
+                      SELECTOR@0..2
+                        SIMPLE_SELECTOR@0..2
+                          DOT@0..1 "."
+                          IDENT@1..2 "a"
+                    BLOCK@2..12
+                      LBRACE@2..2 ""
+                      DECLARATION@2..12
+                        PROPERTY@2..6
+                          WHITESPACE@2..5 "\n  "
+                          IDENT@5..6 "b"
+                        COLON@6..7 ":"
+                        VALUE@7..12
+                          FUNCTION_CALL@7..12
+                            WHITESPACE@7..8 " "
+                            IDENT@8..10 "fn"
+                            ARG_LIST@10..12
+                              LPAREN@10..11 "("
+                              ARG@11..12
+                                NUMBER_LITERAL@11..12
+                                  NUMBER@11..12 "1"
+                        SEMICOLON@12..12 ""
+                      RBRACE@12..12 ""
+                  RULE_SET@12..22
+                    SELECTOR_LIST@12..15
+                      SELECTOR@12..15
+                        SIMPLE_SELECTOR@12..15
+                          WHITESPACE@12..13 "\n"
+                          DOT@13..14 "."
+                          IDENT@14..15 "c"
+                    BLOCK@15..22
+                      LBRACE@15..15 ""
+                      DECLARATION@15..22
+                        PROPERTY@15..19
+                          WHITESPACE@15..18 "\n  "
+                          IDENT@18..19 "d"
+                        COLON@19..20 ":"
+                        VALUE@20..22
+                          VALUE@20..22
+                            WHITESPACE@20..21 " "
+                            IDENT@21..22 "e"
+                        SEMICOLON@22..22 ""
+                      RBRACE@22..22 ""
+                  WHITESPACE@22..23 "\n"
+                error 13..14: expected RPAREN
+            "#]],
+        },
+    ]
+}
