@@ -7,6 +7,8 @@ use expect_test::{Expect, expect};
 
 #[path = "common/layout_allow_list.rs"]
 mod layout_allow_list;
+#[path = "common/layout_classes.rs"]
+mod layout_classes;
 #[path = "common/layout_differential.rs"]
 mod layout_differential;
 
@@ -90,6 +92,52 @@ fn allow_listed_defects_report_what_they_should() {
     let tree = render(parse_sass_layout, loud.input);
     assert_eq!(tree.matches("MULTI_LINE_COMMENT@").count(), 8, "{tree}");
     assert_eq!(error_count(loud.input), 0);
+}
+
+// ── Kinds of difference ──────────────────────────────────────────────
+
+/// The kinds the differences on the fuzz corpora must be of, each told on a small input
+/// that makes it; all of these but the comment across a blank line are inputs Dart Sass
+/// rejects. An input can make several, found one after another.
+#[test]
+fn differences_are_told_apart_by_kind() {
+    use layout_classes::Class::{
+        BracketRecovery, CommentAcrossBlankLine, IndentationDiagnostics, OperatorContinuesALine,
+        OperatorOrColonEndsALine, StrayColonEndsALine, TrailingIndentation, UnbalancedBrackets,
+        UnterminatedComment, VariableNamedLikeAHeaderWord, WordOperatorBeforeAStatement,
+    };
+    for (source, kinds) in [
+        (".a\n  b: c\n    ", vec![TrailingIndentation]),
+        (".a\n  b: c /* d\n", vec![UnterminatedComment]),
+        (
+            ".a\n  b: c /* d\n  ",
+            vec![TrailingIndentation, UnterminatedComment],
+        ),
+        (
+            ".a\n    .b\n      c: d\n  .e\n    f: g\n",
+            vec![IndentationDiagnostics],
+        ),
+        (
+            ".a\n  b: c and\n    d: e\n",
+            vec![WordOperatorBeforeAStatement],
+        ),
+        (
+            ".x\n  @if $and\n    a: b\n",
+            vec![VariableNamedLikeAHeaderWord],
+        ),
+        (".a\n  b: fn(1\n.c\n  d: e\n", vec![BracketRecovery]),
+        ("\x0e[:\n}+\n0", vec![UnbalancedBrackets]),
+        ("$||{z:\x0c,,", vec![UnbalancedBrackets]),
+        ("//\n\n //\n 4", vec![CommentAcrossBlankLine]),
+        ("$0*\n", vec![OperatorContinuesALine]),
+        ("$||:\x0c", vec![StrayColonEndsALine]),
+        (":*\n", vec![OperatorOrColonEndsALine]),
+        ("=\n\n\t//\n", vec![OperatorOrColonEndsALine]),
+        ("$+*//\n", vec![OperatorOrColonEndsALine]),
+    ] {
+        assert_eq!(layout_classes::classify(source), kinds, "{source:?}");
+    }
+    assert!(layout_classes::classify(".a\n  b: c\n").is_empty());
 }
 
 // ── Forms Dart Sass accepts ──────────────────────────────────────────
