@@ -439,6 +439,81 @@ fn a_comment_on_a_continued_line_is_an_ordinary_comment() {
     );
 }
 
+/// A header goes on after one of its words at the end of a line; a variable named like
+/// one is no such word, and the line below is the rule's body, as in Dart Sass.
+#[test]
+fn a_variable_named_like_a_header_word_ends_the_header() {
+    check_same(".x\n  @for $i from 1 through\n    3\n    a: $i\n");
+    check_same(".x\n  @each $v in\n    1 2\n    a: $v\n");
+    for (source, rule) in [
+        (".x\n  @for $i from 1 through $to\n    a: $i\n", "FOR_RULE@"),
+        (".x\n  @for $i from 1 to $through\n    a: $i\n", "FOR_RULE@"),
+        (
+            ".x\n  @for $i from $from through $to\n    a: $i\n",
+            "FOR_RULE@",
+        ),
+        (".x\n  @each $v in $in\n    a: $v\n", "EACH_RULE@"),
+        (".x\n  @if $and\n    a: b\n", "IF_RULE@"),
+        (".x\n  @if true and $or\n    a: b\n", "IF_RULE@"),
+        (".x\n  @while $not\n    a: b\n", "WHILE_RULE@"),
+    ] {
+        let tree = render(parse_sass_layout, source);
+        let body = tree
+            .split_once(rule)
+            .map(|(_, rest)| rest.contains("BLOCK@") && rest.contains("DECLARATION@"));
+        assert_eq!(body, Some(true), "{source:?}:\n{tree}");
+        assert!(!tree.contains("\nerror "), "{source:?}:\n{tree}");
+    }
+    check(
+        ".x\n  @for $i from 1 through $to\n    a: $i\n",
+        expect![[r#"
+            SOURCE_FILE@0..42
+              RULE_SET@0..41
+                SELECTOR_LIST@0..2
+                  SELECTOR@0..2
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "x"
+                BLOCK@2..41
+                  LBRACE@2..2 ""
+                  FOR_RULE@2..41
+                    WHITESPACE@2..5 "\n  "
+                    AT@5..6 "@"
+                    IDENT@6..9 "for"
+                    WHITESPACE@9..10 " "
+                    DOLLAR@10..11 "$"
+                    IDENT@11..12 "i"
+                    WHITESPACE@12..13 " "
+                    IDENT@13..17 "from"
+                    NUMBER_LITERAL@17..19
+                      WHITESPACE@17..18 " "
+                      NUMBER@18..19 "1"
+                    WHITESPACE@19..20 " "
+                    IDENT@20..27 "through"
+                    VARIABLE_REF@27..31
+                      WHITESPACE@27..28 " "
+                      DOLLAR@28..29 "$"
+                      IDENT@29..31 "to"
+                    BLOCK@31..41
+                      LBRACE@31..31 ""
+                      DECLARATION@31..41
+                        PROPERTY@31..37
+                          WHITESPACE@31..36 "\n    "
+                          IDENT@36..37 "a"
+                        COLON@37..38 ":"
+                        VALUE@38..41
+                          VARIABLE_REF@38..41
+                            WHITESPACE@38..39 " "
+                            DOLLAR@39..40 "$"
+                            IDENT@40..41 "i"
+                        SEMICOLON@41..41 ""
+                      RBRACE@41..41 ""
+                  RBRACE@41..41 ""
+              WHITESPACE@41..42 "\n"
+        "#]],
+    );
+}
+
 #[test]
 fn a_header_goes_on_on_a_deeper_line_that_starts_like_its_rest() {
     check(

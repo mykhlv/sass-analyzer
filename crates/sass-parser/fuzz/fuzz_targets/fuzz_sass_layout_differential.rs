@@ -63,6 +63,23 @@ fn known_difference(source: &str, legacy: &str, layout: &str) -> bool {
         || operator_ends_a_line_legacy_ended(source, legacy)
         || stray_colon_ends_a_variable_line(source)
         || word_operator_ends_a_line_layout_ended(source)
+        || variable_named_like_a_header_word(source)
+}
+
+/// Legacy reads the name of a variable such as `$to` or `$in` at the end of a line as the
+/// header word it is spelled like, and continues the header onto the next line; the
+/// layout frontend counts only a word of its own. With the variables renamed, the
+/// difference is gone.
+fn variable_named_like_a_header_word(source: &str) -> bool {
+    const WORDS: &[&str] = &[
+        "from", "through", "to", "in", "and", "or", "not", "if", "using", "as", "with",
+        "show", "hide",
+    ];
+    let mut renamed = source.to_owned();
+    for word in WORDS {
+        renamed = renamed.replace(&format!("${word}"), "$x");
+    }
+    renamed != source && differs(&renamed).is_none()
 }
 
 /// Legacy continues every line that ends in `and`, `or` or `not`; the layout frontend

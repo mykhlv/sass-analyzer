@@ -605,14 +605,17 @@ impl<'src> Parser<'src> {
     // ── Headers ──────────────────────────────────────────────────────
 
     /// Whether the header goes on over the line breaks before `line` because of how the
-    /// line above ends.
+    /// line above ends. A variable's name is no end word: `through $to` ends with a value.
     fn header_goes_on_at_end_of_line(&self, line: &Line) -> bool {
         let Some((header, name)) = self.indented.header else {
             return false;
         };
         let last = line.index - 1;
+        let variable = self.input.kind(last.wrapping_sub(1)) == SyntaxKind::DOLLAR
+            && self.input.trivia_before(last).is_empty();
         (last == name && header.name_continues)
             || (self.input.kind(last) == SyntaxKind::IDENT
+                && !variable
                 && header.end_words.contains(&self.token_text(last)))
     }
 
