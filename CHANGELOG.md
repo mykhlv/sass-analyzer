@@ -42,7 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   but only the declarations were copied into the mixin, so a nested rule, `@include`,
   `@media`, `@extend`, nested property or comment in between was silently lost. Every
   selected statement now moves into the mixin with its nesting intact; a selection that
-  cuts through a statement or crosses a block's `}` offers no action
+  cuts through a statement or crosses a block's `}` offers no action. The new mixin is
+  also no longer declared where Dart Sass rejects it — inside another mixin, a control
+  directive or an `@include` content block — and the action is not offered in a
+  `@function`, where `@include` is not allowed
 - LSP: releasing the resolver and module-graph locks before recursing removes a potential
   deadlock between indexing and a concurrent configuration change
 - LSP: `${workspaceFolder}` in `loadPaths`, `importAliases` and `prependImports` is now

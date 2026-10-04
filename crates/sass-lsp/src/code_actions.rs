@@ -769,19 +769,7 @@ fn extract_mixin_action(
         return;
     };
 
-    // Find the enclosing rule/at-rule to insert the mixin before
-    let Some(rule_set) = block.ancestors().find(|a| {
-        matches!(
-            a.kind(),
-            SyntaxKind::RULE_SET
-                | SyntaxKind::MIXIN_RULE
-                | SyntaxKind::FUNCTION_RULE
-                | SyntaxKind::EACH_RULE
-                | SyntaxKind::FOR_RULE
-                | SyntaxKind::WHILE_RULE
-                | SyntaxKind::IF_RULE
-        )
-    }) else {
+    let Some(rule_set) = mixin_insertion_anchor(&block) else {
         return;
     };
 
@@ -789,7 +777,7 @@ fn extract_mixin_action(
     let body = mixin_body(text, &block, moved, rule_indent);
 
     let (mixin_text, include_text) = if crate::worker::is_sass_file(uri) {
-        indented_mixin_texts(root, &body, rule_indent)
+        indented_mixin_texts(root, &block, &body, rule_indent)
     } else {
         (
             format!("{rule_indent}@mixin new-mixin {{\n{body}\n{rule_indent}}}\n\n"),
@@ -826,6 +814,37 @@ fn extract_mixin_action(
         }),
         ..CodeAction::default()
     });
+}
+
+/// The statement the new mixin is inserted before, or `None` where no mixin can
+/// be included at all (a function body).
+///
+/// Dart Sass rejects a mixin declared inside another mixin, a control directive
+/// or an `@include` content block, so the mixin goes before the outermost of
+/// those. Elsewhere it goes before the nearest style rule, which keeps it local
+/// to the parent rule.
+fn mixin_insertion_anchor(block: &SyntaxNode) -> Option<SyntaxNode> {
+    if block
+        .ancestors()
+        .any(|a| a.kind() == SyntaxKind::FUNCTION_RULE)
+    {
+        return None;
+    }
+    block
+        .ancestors()
+        .filter(|a| {
+            matches!(
+                a.kind(),
+                SyntaxKind::MIXIN_RULE
+                    | SyntaxKind::INCLUDE_RULE
+                    | SyntaxKind::EACH_RULE
+                    | SyntaxKind::FOR_RULE
+                    | SyntaxKind::WHILE_RULE
+                    | SyntaxKind::IF_RULE
+            )
+        })
+        .last()
+        .or_else(|| block.ancestors().find(|a| a.kind() == SyntaxKind::RULE_SET))
 }
 
 /// The `moved` text of `block`, re-indented one unit under `rule_indent`.
@@ -872,14 +891,23 @@ fn mixin_body(text: &str, block: &SyntaxNode, moved: TextRange, rule_indent: &st
 /// The `=`/`+` shorthands are used only when the file already uses them. The
 /// long forms are always valid and are what a reader expects by default; the
 /// shorthands are a style a file opts into, so the edit follows that choice
-/// rather than introducing it.
-fn indented_mixin_texts(root: &SyntaxNode, body: &str, rule_indent: &str) -> (String, String) {
+/// rather than introducing it. The `+` form is never written into a nested
+/// property's block, where Dart Sass accepts only declarations and at-rules.
+fn indented_mixin_texts(
+    root: &SyntaxNode,
+    block: &SyntaxNode,
+    body: &str,
+    rule_indent: &str,
+) -> (String, String) {
     let header = if uses_shorthand(root, SyntaxKind::MIXIN_RULE, "=") {
         "=new-mixin"
     } else {
         "@mixin new-mixin"
     };
-    let include = if uses_shorthand(root, SyntaxKind::INCLUDE_RULE, "+") {
+    let in_nested_property = block
+        .parent()
+        .is_some_and(|p| p.kind() == SyntaxKind::NESTED_PROPERTY);
+    let include = if !in_nested_property && uses_shorthand(root, SyntaxKind::INCLUDE_RULE, "+") {
         "+new-mixin"
     } else {
         "@include new-mixin"
@@ -1385,25 +1413,64 @@ mod tests {
 
     #[test]
     fn extract_mixin_inside_mixin_body() {
-        let src = "@mixin outer {\n  .inner {\n    color: red;\n  }\n}\n";
-        // Select "color: red;" inside .inner which is inside @mixin outer
-        let edits = run_extract_mixin(src, (2, 4), (2, 15));
-        assert_eq!(edits.len(), 2);
-        assert!(edits[0].new_text.contains("@mixin new-mixin"));
-        let result = apply_edits(src, &edits);
-        let (_, errors) = sass_parser::parse_scss(&result);
-        assert!(errors.is_empty(), "Parse errors in:\n{result}\n{errors:?}");
+        // A mixin may not declare another one, so the new mixin goes before
+        // `@mixin outer`, not before `.inner`.
+        check_scss_mixin(
+            "@mixin outer {\n  .inner {\n    color: red;\n  }\n}\n",
+            "color: red;",
+            &expect_test::expect![[r#"
+                @mixin new-mixin {
+                  color: red;
+                }
+
+                @mixin outer {
+                  .inner {
+                    @include new-mixin;
+                  }
+                }
+            "#]],
+        );
     }
 
     #[test]
-    fn extract_mixin_inside_function_body() {
-        // Functions can't have rule sets, so this should produce no action
+    fn extract_mixin_inside_control_directive_and_content_block() {
+        check_scss_mixin(
+            ".a {\n  @each $k in x, y {\n    .#{$k} { color: red; }\n  }\n}\n",
+            "color: red;",
+            &expect_test::expect![[r#"
+                .a {
+                  @mixin new-mixin {
+                    color: red;
+                  }
+
+                  @each $k in x, y {
+                    .#{$k} { @include new-mixin; }
+                  }
+                }
+            "#]],
+        );
+        check_scss_mixin(
+            "@include wrap {\n  .b {\n    color: red;\n  }\n}\n",
+            "color: red;",
+            &expect_test::expect![[r#"
+                @mixin new-mixin {
+                  color: red;
+                }
+
+                @include wrap {
+                  .b {
+                    @include new-mixin;
+                  }
+                }
+            "#]],
+        );
+    }
+
+    #[test]
+    fn extract_mixin_inside_function_body_no_action() {
+        // `@include` is not allowed in a function.
         let src = "@function foo() {\n  $x: 1;\n  @return $x;\n}\n";
-        let edits = run_extract_mixin(src, (1, 2), (1, 8));
-        // VARIABLE_DECL is inside @function block but no RULE_SET ancestor —
-        // the enclosing rule is FUNCTION_RULE, so mixin is inserted before it
-        assert_eq!(edits.len(), 2);
-        assert!(edits[0].new_text.contains("@mixin new-mixin"));
+        assert!(run_extract_mixin(src, (1, 2), (1, 8)).is_empty());
     }
 
     #[test]
@@ -2076,6 +2143,27 @@ mod tests {
                 .a
                   +new-mixin
                   width: 1px
+            "#]],
+        );
+    }
+
+    #[test]
+    fn sass_extract_mixin_nested_property_uses_long_include() {
+        // Dart Sass reads `+new-mixin` in a nested property's block as a
+        // malformed declaration.
+        check_sass(
+            extract_mixin_action,
+            ".a\n  +b\n  font:\n    family: x\n    size: 1px\n",
+            "family: x",
+            &expect_test::expect![[r#"
+                @mixin new-mixin
+                  family: x
+
+                .a
+                  +b
+                  font:
+                    @include new-mixin
+                    size: 1px
             "#]],
         );
     }
