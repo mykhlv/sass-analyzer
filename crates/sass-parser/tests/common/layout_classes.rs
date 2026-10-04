@@ -67,6 +67,12 @@ pub enum Class {
     /// errors in: such lines are everywhere in valid Sass, where a difference is a
     /// regression.
     OperatorOrColonEndsALine,
+    /// An at-rule that starts in mid-line, after a statement an error cut short, is a
+    /// statement of its own: the header of the broken statement ends there, and a deeper
+    /// line below opens the at-rule's block, or ends it, rather than going on with that
+    /// header, as legacy went on with a variable's. With such at-rules on lines of their
+    /// own, the frontends agree. Only on input legacy reports errors in.
+    AtRuleAfterABrokenStatement,
     Other,
 }
 
@@ -100,14 +106,17 @@ pub fn classify(source: &str) -> Vec<Class> {
             (Class::VariableNamedLikeAHeaderWord, next)
         } else {
             let class = by_what_the_parse_does(&source, &legacy);
-            match with_line_end_operators_respelled(&source) {
-                Some(next) if class == Class::Other && legacy.contains("\nerror ") => {
-                    (Class::OperatorOrColonEndsALine, next)
-                }
-                _ => {
-                    found.push(class);
-                    return found;
-                }
+            if class != Class::Other || !legacy.contains("\nerror ") {
+                found.push(class);
+                return found;
+            }
+            if let Some(next) = with_line_end_operators_respelled(&source) {
+                (Class::OperatorOrColonEndsALine, next)
+            } else if let Some(next) = with_at_rules_on_lines_of_their_own(&source) {
+                (Class::AtRuleAfterABrokenStatement, next)
+            } else {
+                found.push(class);
+                return found;
             }
         };
         found.push(class);
@@ -188,7 +197,11 @@ fn with_line_end_operators_respelled(source: &str) -> Option<String> {
         .map(|line| {
             let code = line.find("//").map_or(line, |comment| &line[..comment]);
             let body = code.trim_end_matches(['\n', '\r', '\x0c', ' ', '\t']);
-            if body.ends_with(OPERATORS) && !body.ends_with("*/") {
+            // Not the `*` of a `/*` or the `/` of a `*/`, as in `/**/*`.
+            let comment = (body.ends_with("/*") && !body.ends_with("*/*"))
+                || (body.ends_with("*/") && !body.ends_with("/*/"))
+                || body.ends_with("/*/");
+            if body.ends_with(OPERATORS) && !comment {
                 changed = true;
                 format!("{}x{}", &body[..body.len() - 1], &line[body.len()..])
             } else {
@@ -197,6 +210,34 @@ fn with_line_end_operators_respelled(source: &str) -> Option<String> {
         })
         .collect();
     changed.then_some(respelled)
+}
+
+/// The input with every `@` that does not start its line moved to a line of its own, at
+/// the same indentation, if it has any.
+fn with_at_rules_on_lines_of_their_own(source: &str) -> Option<String> {
+    let mut changed = false;
+    let mut out = String::with_capacity(source.len());
+    for line in source.split_inclusive(['\n', '\r', '\x0c']) {
+        let indent = &line[..line.len() - line.trim_start_matches([' ', '\t']).len()];
+        let mut rest = line;
+        let mut first = true;
+        while let Some(at) = rest.find('@') {
+            if first && rest[..at].trim_start_matches([' ', '\t']).is_empty() {
+                out.push_str(&rest[..=at]);
+                rest = &rest[at + 1..];
+            } else {
+                changed = true;
+                out.push_str(&rest[..at]);
+                out.push('\n');
+                out.push_str(indent);
+                out.push('@');
+                rest = &rest[at + 1..];
+            }
+            first = false;
+        }
+        out.push_str(rest);
+    }
+    changed.then_some(out)
 }
 
 /// The input with the variables named like a header word renamed, if it has any.

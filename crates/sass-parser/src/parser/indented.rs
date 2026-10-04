@@ -170,6 +170,30 @@ impl<'src> Parser<'src> {
         self.fence = self.locate_fence();
     }
 
+    /// The grammar is at the first token of an at-rule. A header still declared then is
+    /// that of a statement an error ended before its line did, and the at-rule is a new
+    /// statement on the same line: the rest of the line is no longer that header, and a
+    /// deeper line below cannot go on with it. Whether that line goes on was decided ahead
+    /// of the cursor, with the old header; decide it again. Tokens that start no statement
+    /// are left to the broken one, as legacy leaves them.
+    #[inline]
+    pub fn begin_at_rule(&mut self) {
+        if self.layout == super::Layout::Indented && self.indented.header.is_some() {
+            self.drop_stale_header();
+        }
+    }
+
+    #[cold]
+    fn drop_stale_header(&mut self) {
+        self.indented.header = None;
+        let (start, end) = self.input.line_break_range(self.pos);
+        // Nothing at the line starts after a cursor in mid-line has been emitted yet.
+        if start == end && self.indented.line.index > self.pos {
+            self.find_line_start(self.pos);
+            self.fence = self.locate_fence();
+        }
+    }
+
     /// Whether the cursor is at the first token of a statement: the first of a line the
     /// layout ended the previous statement at, or of the input. Always false when braced.
     #[inline]

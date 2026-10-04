@@ -32,6 +32,7 @@ fn is_css_function_rule(p: &Parser<'_>) -> bool {
 
 /// Dispatch `@keyword` — called when parser is at `AT`.
 pub fn at_rule(p: &mut Parser<'_>) {
+    p.begin_at_rule();
     if p.at_shorthand() {
         if p.at(EQ) {
             mixin::mixin_rule(p);

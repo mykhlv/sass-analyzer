@@ -102,9 +102,10 @@ fn allow_listed_defects_report_what_they_should() {
 #[test]
 fn differences_are_told_apart_by_kind() {
     use layout_classes::Class::{
-        BracketRecovery, CommentAcrossBlankLine, IndentationDiagnostics, OperatorContinuesALine,
-        OperatorOrColonEndsALine, StrayColonEndsALine, TrailingIndentation, UnbalancedBrackets,
-        UnterminatedComment, VariableNamedLikeAHeaderWord, WordOperatorBeforeAStatement,
+        AtRuleAfterABrokenStatement, BracketRecovery, CommentAcrossBlankLine,
+        IndentationDiagnostics, OperatorContinuesALine, OperatorOrColonEndsALine,
+        StrayColonEndsALine, TrailingIndentation, UnbalancedBrackets, UnterminatedComment,
+        VariableNamedLikeAHeaderWord, WordOperatorBeforeAStatement,
     };
     for (source, kinds) in [
         (".a\n  b: c\n    ", vec![TrailingIndentation]),
@@ -134,6 +135,7 @@ fn differences_are_told_apart_by_kind() {
         (":*\n", vec![OperatorOrColonEndsALine]),
         ("=\n\n\t//\n", vec![OperatorOrColonEndsALine]),
         ("$+*//\n", vec![OperatorOrColonEndsALine]),
+        ("$@\n ''", vec![AtRuleAfterABrokenStatement]),
     ] {
         assert_eq!(layout_classes::classify(source), kinds, "{source:?}");
     }
@@ -572,6 +574,45 @@ fn a_variable_named_like_a_header_word_ends_the_header() {
                       RBRACE@41..41 ""
                   RBRACE@41..41 ""
               WHITESPACE@41..42 "\n"
+        "#]],
+    );
+}
+
+/// An error ends a statement before its line does; an at-rule after it on the line is a
+/// statement of its own, and the header of the broken one no longer decides whether the
+/// deeper line below goes on: here it opens the at-rule's block, as in legacy.
+#[test]
+fn an_at_rule_after_a_broken_statement_ends_its_header() {
+    check_same("+J@\n\t(\n");
+    check_same("=@\n ,\n");
+    check(
+        "+m@\n  (a)\n",
+        expect![[r#"
+            SOURCE_FILE@0..10
+              INCLUDE_RULE@0..2
+                AT@0..0 ""
+                IDENT@0..1 "+"
+                IDENT@1..2 "m"
+              GENERIC_AT_RULE@2..9
+                AT@2..3 "@"
+                BLOCK@3..9
+                  LBRACE@3..3 ""
+                  ERROR@3..7
+                    WHITESPACE@3..6 "\n  "
+                    LPAREN@6..7 "("
+                  RULE_SET@7..8
+                    SELECTOR_LIST@7..8
+                      SELECTOR@7..8
+                        SIMPLE_SELECTOR@7..8
+                          IDENT@7..8 "a"
+                  ERROR@8..9
+                    RPAREN@8..9 ")"
+                  SEMICOLON@9..9 ""
+                  RBRACE@9..9 ""
+              WHITESPACE@9..10 "\n"
+            error 2..3: expected SEMICOLON
+            error 6..7: expected declaration or nested rule
+            error 8..9: expected declaration or nested rule
         "#]],
     );
 }
