@@ -1738,6 +1738,8 @@ fn error_missing_colon() {
                   SEMICOLON@13..14 ";"
                   WHITESPACE@14..15 " "
                   RBRACE@15..16 "}"
+            errors:
+              13..13: expected `{`
         "#]],
     );
 }
@@ -1810,6 +1812,8 @@ fn error_selector_no_block() {
                   SELECTOR@0..3
                     SIMPLE_SELECTOR@0..3
                       IDENT@0..3 "div"
+            errors:
+              3..3: expected `{`
         "#]],
     );
 }
@@ -1940,15 +1944,18 @@ fn error_unterminated_attr() {
         expect![[r#"
             SOURCE_FILE@0..9
               RULE_SET@0..9
-                SELECTOR_LIST@0..9
-                  SELECTOR@0..9
-                    ATTR_SELECTOR@0..9
+                SELECTOR_LIST@0..5
+                  SELECTOR@0..5
+                    ATTR_SELECTOR@0..5
                       LBRACKET@0..1 "["
                       IDENT@1..5 "attr"
-                      WHITESPACE@5..6 " "
-                      LBRACE@6..7 "{"
-                      WHITESPACE@7..8 " "
-                      RBRACE@8..9 "}"
+                BLOCK@5..9
+                  WHITESPACE@5..6 " "
+                  LBRACE@6..7 "{"
+                  WHITESPACE@7..8 " "
+                  RBRACE@8..9 "}"
+            errors:
+              6..7: expected RBRACKET
         "#]],
     );
 }
@@ -1999,6 +2006,8 @@ fn error_multiple_errors_same_file() {
                   LBRACE@28..29 "{"
                   WHITESPACE@29..30 " "
                   RBRACE@30..31 "}"
+            errors:
+              21..21: expected `{`
         "#]],
     );
 }
@@ -2043,6 +2052,8 @@ fn error_eof_mid_selector() {
                       WHITESPACE@3..4 " "
                       GT@4..5 ">"
               WHITESPACE@5..6 " "
+            errors:
+              5..5: expected `{`
         "#]],
     );
 }
@@ -2154,6 +2165,8 @@ fn error_declaration_missing_property() {
                   SEMICOLON@9..10 ";"
                   WHITESPACE@10..11 " "
                   RBRACE@11..12 "}"
+            errors:
+              9..9: expected `{`
         "#]],
     );
 }
@@ -2248,6 +2261,8 @@ fn error_double_colon_in_property() {
                   SEMICOLON@15..16 ";"
                   WHITESPACE@16..17 " "
                   RBRACE@17..18 "}"
+            errors:
+              15..15: expected `{`
         "#]],
     );
 }
@@ -2293,6 +2308,8 @@ fn error_recovery_continuity_after_bad_decl() {
                     SEMICOLON@32..33 ";"
                   WHITESPACE@33..34 " "
                   RBRACE@34..35 "}"
+            errors:
+              7..7: expected `{`
         "#]],
     );
 }
@@ -2318,6 +2335,7 @@ fn error_eof_after_property() {
                           WHITESPACE@3..4 " "
                           IDENT@4..9 "color"
             errors:
+              9..9: expected `{`
               9..9: expected RBRACE
         "#]],
     );
@@ -2379,6 +2397,8 @@ fn error_nested_error_recovery() {
                       RBRACE@40..41 "}"
                   WHITESPACE@41..42 " "
                   RBRACE@42..43 "}"
+            errors:
+              15..15: expected `{`
         "#]],
     );
 }
@@ -2747,6 +2767,8 @@ fn error_inner_block_no_corruption_of_sibling() {
                       RBRACE@52..53 "}"
                   WHITESPACE@53..54 " "
                   RBRACE@54..55 "}"
+            errors:
+              20..20: expected `{`
         "#]],
     );
 }
@@ -2817,6 +2839,8 @@ fn error_three_levels_deep_outer_intact() {
                     SEMICOLON@49..50 ";"
                   WHITESPACE@50..51 " "
                   RBRACE@51..52 "}"
+            errors:
+              17..17: expected `{`
         "#]],
     );
 }
@@ -2885,6 +2909,9 @@ fn error_two_broken_rules_third_correct() {
                     SEMICOLON@39..40 ";"
                   WHITESPACE@40..41 " "
                   RBRACE@41..42 "}"
+            errors:
+              9..9: expected `{`
+              21..21: expected `{`
         "#]],
     );
 }

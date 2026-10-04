@@ -8,6 +8,7 @@ use std::fmt::Write;
 
 use sass_parser::event::Event;
 use sass_parser::input::Input;
+use sass_parser::parser::{Layout, Parser};
 use sass_parser::syntax::{SyntaxNode, debug_tree};
 
 /// Parses `source` with the legacy pipeline, then rebuilds the tree from the same events
@@ -21,7 +22,11 @@ use sass_parser::syntax::{SyntaxNode, debug_tree};
 /// Returns both renderings on disagreement, or `None`.
 pub fn virtual_token_mismatch(source: &str) -> Option<String> {
     let legacy_tokens = sass_parser::sass_lexer::sass_tokenize(source);
-    let mut parser = sass_parser::parser::Parser::new(Input::from_tokens(&legacy_tokens), source);
+    let mut parser = Parser::with_layout(
+        Input::from_tokens(&legacy_tokens),
+        source,
+        Layout::LegacyIndented,
+    );
     sass_parser::grammar::source_file(&mut parser);
     let (events, errors, legacy, _) = parser.finish();
     let expected = render(sass_parser::build_tree(

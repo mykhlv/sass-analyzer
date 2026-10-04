@@ -64,6 +64,9 @@ fn selector(p: &mut Parser<'_>) {
                 compound_selector(p);
             }
         } else if p.at_ts(SELECTOR_START) {
+            if p.braced() && super::declaration_interrupts_selector(p) {
+                break;
+            }
             // Descendant combinator (whitespace) — no explicit token
             compound_selector(p);
         } else {
@@ -219,42 +222,49 @@ pub fn interpolation(p: &mut Parser<'_>) -> CompletedMarker {
 
 /// Consume `(...)` balanced parentheses, treating content as opaque.
 fn eat_balanced_parens(p: &mut Parser<'_>) {
-    assert!(p.at(LPAREN));
-    let p = &mut *p.transparent_guard();
-    p.bump(); // (
-    let mut depth: u32 = 1;
-    while !p.at_end() && depth > 0 {
-        match p.current() {
-            LPAREN => {
-                depth += 1;
-                p.bump();
-            }
-            RPAREN => {
-                depth -= 1;
-                p.bump();
-            }
-            _ => p.bump(),
-        }
-    }
+    eat_balanced(p, LPAREN, RPAREN);
 }
 
 /// Consume `[...]` balanced brackets, treating content as opaque.
 fn eat_balanced_brackets(p: &mut Parser<'_>) {
-    assert!(p.at(LBRACKET));
+    eat_balanced(p, LBRACKET, RBRACKET);
+}
+
+/// Consume `open ... close`, treating content as opaque. Braced, a `{` or `}` outside
+/// interpolation ends a bracket left unclosed: no selector argument holds one, and the
+/// rules after it stay intact. The indented layout recovers at a line start instead.
+fn eat_balanced(p: &mut Parser<'_>, open: SyntaxKind, close: SyntaxKind) {
+    assert!(p.at(open));
     let p = &mut *p.transparent_guard();
-    p.bump(); // [
+    let braced = p.braced();
+    p.bump();
     let mut depth: u32 = 1;
+    let mut interpolation: u32 = 0;
     while !p.at_end() && depth > 0 {
-        match p.current() {
-            LBRACKET => {
-                depth += 1;
-                p.bump();
+        let kind = p.current();
+        if braced {
+            match kind {
+                HASH_LBRACE => interpolation += 1,
+                LBRACE | RBRACE if interpolation == 0 => break,
+                LBRACE => interpolation += 1,
+                RBRACE => interpolation -= 1,
+                _ => {}
             }
-            RBRACKET => {
-                depth -= 1;
-                p.bump();
-            }
-            _ => p.bump(),
+        }
+        if kind == open {
+            depth += 1;
+        } else if kind == close {
+            depth -= 1;
+        }
+        p.bump();
+    }
+    if braced && depth > 0 {
+        // At a `{` the rule's block starts: that is where the bracket is found unclosed.
+        let msg = format!("expected {close:?}");
+        if p.at(LBRACE) {
+            p.error(msg);
+        } else {
+            p.error_after_prev(msg);
         }
     }
 }

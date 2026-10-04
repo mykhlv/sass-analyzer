@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   arguments are no longer misparsed as nested properties — `p:nth-child(2) { }` inside a
   rule was silently turned into a property, and `button:hover, [type="b"] { }` produced a
   false "expected RBRACKET" error
+- Parser: a selector with no `{` after it is reported as "expected `{`" — `.a` at the end
+  of a file, or a nested `.b` followed by `color: red;`, was silently accepted as a rule
+  with no block. The same applies to a keyframe stop such as `50%` with no block. A
+  pseudo-class or attribute selector left unclosed, as in `.a:not(.b`, is now reported
+  too and ends at the next `{` or `}`, where it previously swallowed every rule after it
+  up to the end of the file
 - Parser: indented Sass at-rule headers continue correctly after arguments again —
   `@for $i` followed by an indented `from 1 through 10`, `@each $a` followed by `in b, c`,
   and `@function a` followed by `()` regressed in 0.3.4 (indented Sass compliance

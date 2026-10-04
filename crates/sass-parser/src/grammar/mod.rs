@@ -346,11 +346,79 @@ fn rule_set(p: &mut Parser<'_>) {
         return;
     };
     let m = g.start();
+    let errors = g.error_count();
     selectors::selector_list(&mut g);
     if g.at(LBRACE) {
         block(&mut g);
+    } else if g.braced() {
+        let selector_reported = g.error_count() > errors;
+        missing_rule_block(&mut g, selector_reported);
     }
     let _ = m.complete(&mut g, RULE_SET);
+}
+
+/// Report a braced rule's missing `{`. Where the statement ends, or the next one starts,
+/// the error goes right after the selector, unless the selector has reported one of its
+/// own already, such as an unclosed `(`. Tokens the selector stopped at are skipped as
+/// one error up to the next `{`, `;` or `}`, and a block there is still the rule's.
+fn missing_rule_block(p: &mut Parser<'_>, selector_reported: bool) {
+    // The selector consumes every selector-start token, unless one begins a declaration
+    // (see `declaration_interrupts_selector`): a statement of its own.
+    if p.at_end()
+        || p.at(SEMICOLON)
+        || p.at(RBRACE)
+        || p.at(AT)
+        || p.at(DOLLAR)
+        || p.at_ts(selectors::SELECTOR_START)
+    {
+        if !selector_reported {
+            p.error_after_prev("expected `{`");
+        }
+        return;
+    }
+    let m = p.start();
+    p.error("expected `{`");
+    let mut interpolation: u32 = 0;
+    while !p.at_end() {
+        match p.current() {
+            LBRACE | RBRACE | SEMICOLON if interpolation == 0 => break,
+            HASH_LBRACE | LBRACE => interpolation += 1,
+            RBRACE => interpolation -= 1,
+            _ => {}
+        }
+        p.bump();
+    }
+    let _ = m.complete(p, SyntaxKind::ERROR);
+    if p.at(LBRACE) {
+        block(p);
+    }
+}
+
+/// In a braced selector, whether the compound at the cursor starts a declaration instead:
+/// `name:` where the colon cannot begin a pseudo-class, or whose statement ends at `;` or
+/// `}` before any `{`. Only a rule missing its `{` gets here with one, as in
+/// `.a { .b  color: red; }`; ending the selector before it keeps the declaration.
+pub(crate) fn declaration_interrupts_selector(p: &Parser<'_>) -> bool {
+    const MAX_SCAN: usize = 100;
+    if !p.at(IDENT) || p.nth(1) != COLON || p.nth_has_whitespace_before(1) {
+        return false;
+    }
+    if !could_start_pseudo_class(p, p.joined(lines::LINE_JOINS), 2) {
+        return true;
+    }
+    // Budget and EOF read as a selector: a valid one must not be cut short.
+    let mut depth: u32 = 0;
+    for offset in 2..MAX_SCAN {
+        match p.nth(offset) {
+            EOF => return false,
+            LBRACE if depth == 0 => return false,
+            SEMICOLON | RBRACE if depth == 0 => return true,
+            LPAREN | LBRACKET | HASH_LBRACE | LBRACE => depth += 1,
+            RPAREN | RBRACKET | RBRACE => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    false
 }
 
 /// Skip tokens until `}` or EOF, consuming a balanced `{ ... }` block if present.

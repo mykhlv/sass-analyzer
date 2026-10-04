@@ -20,6 +20,10 @@ pub enum Layout {
     /// does not absorb ends the statement before it, and its indentation opens or
     /// closes blocks: the parser reads those as zero-width `;`, `{` and `}`.
     Indented,
+    /// Indented Sass that the legacy lexer has already laid out: its line breaks and
+    /// indentation are zero-width `;`, `{` and `}` in the input. Delimited by tokens as
+    /// when braced, but a rule may still end without a block.
+    LegacyIndented,
 }
 
 /// The first position at or after the cursor where the token stream stops being the
@@ -136,6 +140,14 @@ impl<'src> Parser<'src> {
         self.pos >= self.fence.index && self.fence.kind == SyntaxKind::EOF
     }
 
+    /// Whether blocks and statements are delimited by real tokens only. In the indented
+    /// layouts a selector line with nothing indented beneath it is a rule with no block,
+    /// and a bracket left open recovers at a line start, not at a brace.
+    #[inline]
+    pub fn braced(&self) -> bool {
+        self.layout == Layout::Braced
+    }
+
     /// The kind of the input token before the cursor, zero-width tokens aside; `EOF` at
     /// the start of the input.
     pub fn prev_kind(&self) -> SyntaxKind {
@@ -229,7 +241,7 @@ impl<'src> Parser<'src> {
     /// The fence ahead of the cursor, from the layout's state.
     fn locate_fence(&mut self) -> Fence {
         match self.layout {
-            Layout::Braced => eof_fence(&self.input),
+            Layout::Braced | Layout::LegacyIndented => eof_fence(&self.input),
             Layout::Indented => self.locate_indented(),
         }
     }
@@ -278,6 +290,25 @@ impl<'src> Parser<'src> {
         } else {
             TextRange::empty(TextSize::of(self.source))
         };
+        self.error_at(range, msg);
+        if self.layout == Layout::Indented {
+            self.error_reported();
+        }
+    }
+
+    /// How many errors have been reported so far.
+    pub fn error_count(&self) -> usize {
+        self.error_messages.len()
+    }
+
+    /// Report `msg` at the end of the input token before the cursor rather than at the
+    /// cursor: where a missing token belongs, not past the trivia or on the line after.
+    pub fn error_after_prev(&mut self, msg: impl Into<String>) {
+        let Some(prev) = self.pos.checked_sub(1) else {
+            self.error(msg);
+            return;
+        };
+        let range = TextRange::empty(self.input.range(prev).end());
         self.error_at(range, msg);
         if self.layout == Layout::Indented {
             self.error_reported();
