@@ -28,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cache evicts them, which silently produced a file with no declarations
 - LSP: find-references and rename no longer re-parse every file in the workspace, which
   also thrashed the tree cache on large projects
+- LSP: folding in indented `.sass` files now hides a block's last body line — it was kept
+  visible as if it held a closing `}`, so a block with a single body line could not be
+  folded at all. The same applies to a `/*` comment that ends at a dedent
 - LSP: releasing the resolver and module-graph locks before recursing removes a potential
   deadlock between indexing and a concurrent configuration change
 - LSP: `${workspaceFolder}` in `loadPaths`, `importAliases` and `prependImports` is now

@@ -45,6 +45,26 @@ const COMMENT_ONLY_LINES: &str = "\
   margin: 0
 ";
 
+// No trailing newline, so `.eof` and `.deep` close together at EOF.
+const FOLD_EDGES: &str = "\
+.trailing-comment
+  color: red
+  // last body line is a comment
+
+.blank-lines-after
+  margin: 0
+
+
+@if $a
+  b: 1
+@else
+  c: 2
+/* loud comment
+   closed by the dedent
+.eof
+  .deep
+    x: 1";
+
 /// Byte offset of an LSP position. The inputs are ASCII, so a UTF-16 column is a
 /// byte column.
 fn offset(source: &str, pos: &Value) -> usize {
@@ -123,10 +143,6 @@ async fn check_selection(
     expect.assert_eq(&out);
 }
 
-// Known defect, pinned as-is: `fold_block` drops the node's last line on the
-// assumption that it holds a closing `}`. Indented blocks have none, so every fold
-// below hides one line too few, and a two-line block (`&:hover`, `.footer`, the
-// comment-only `@mixin`) produces no fold at all.
 #[tokio::test]
 async fn sass_folding_nested_rule() {
     check_folds(
@@ -134,8 +150,10 @@ async fn sass_folding_nested_rule() {
         NESTED_RULE,
         700,
         &expect![[r#"
-            0..=4 block: ".nav" .. "    &:hover"
-            2..=4 block: "  .item" .. "    &:hover"
+            0..=5 block: ".nav" .. "      color: blue"
+            2..=5 block: "  .item" .. "      color: blue"
+            4..=5 block: "    &:hover" .. "      color: blue"
+            6..=7 block: ".footer" .. "  padding: 0"
         "#]],
     )
     .await;
@@ -148,7 +166,8 @@ async fn sass_folding_continued_header() {
         CONTINUED_HEADER,
         701,
         &expect![[r#"
-            0..=2 block: "@media screen and (min-width: 100px)," .. "  .a"
+            0..=3 block: "@media screen and (min-width: 100px)," .. "    color: red"
+            2..=3 block: "  .a" .. "    color: red"
         "#]],
     )
     .await;
@@ -161,9 +180,29 @@ async fn sass_folding_comment_only_lines() {
         COMMENT_ONLY_LINES,
         702,
         &expect![[r#"
-            2..=3 block: ".a" .. "  // only a comment"
-            7..=8 block: ".b" .. "  /* loud */"
+            2..=4 block: ".a" .. "  color: red"
+            5..=6 block: "@mixin empty" .. "  // comment-only body"
+            7..=9 block: ".b" .. "  margin: 0"
             0..=1 comment: "// leading comment" .. "// second line"
+        "#]],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn sass_folding_edges() {
+    check_folds(
+        "file:///fold_edges.sass",
+        FOLD_EDGES,
+        703,
+        &expect![[r#"
+            0..=2 block: ".trailing-comment" .. "  // last body line is a comment"
+            4..=5 block: ".blank-lines-after" .. "  margin: 0"
+            8..=11 block: "@if $a" .. "  c: 2"
+            10..=11 block: "@else" .. "  c: 2"
+            14..=16 block: ".eof" .. "    x: 1"
+            12..=13 comment: "/* loud comment" .. "   closed by the dedent"
+            15..=16 block: "  .deep" .. "    x: 1"
         "#]],
     )
     .await;
