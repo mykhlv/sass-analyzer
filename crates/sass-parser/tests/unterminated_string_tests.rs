@@ -41,12 +41,33 @@ fn top_level_rules(parse: ParseFn, source: &str) -> Vec<String> {
         .collect()
 }
 
+/// The text of every declaration in `source`, variables and custom properties included.
+fn declarations(parse: ParseFn, source: &str) -> Vec<String> {
+    let root = SyntaxNode::new_root(parse(source).0);
+    assert_eq!(
+        root.text().to_string(),
+        source,
+        "lossless round-trip failed"
+    );
+    root.descendants()
+        .filter(|node| {
+            matches!(
+                node.kind(),
+                SyntaxKind::DECLARATION
+                    | SyntaxKind::CUSTOM_PROPERTY_DECL
+                    | SyntaxKind::VARIABLE_DECL
+            )
+        })
+        .map(|node| node.text().to_string().trim().to_owned())
+        .collect()
+}
+
 // ── Extent ───────────────────────────────────────────────────────────
 
 #[test]
 fn ends_at_the_end_of_its_line_scss() {
-    // A declaration still runs to its `;`, as CSS recovers from a bad string, so the next
-    // line joins the value; the rule's `}` and everything after it are untouched.
+    // The declaration ends with the string's line, though the string took no `;`: the next
+    // line is a declaration of its own, and the rule's `}` and what follows are untouched.
     common::check(
         ".a {\n  b: \"x\n  c: d;\n}\n",
         expect![[r#"
@@ -60,19 +81,21 @@ fn ends_at_the_end_of_its_line_scss() {
                 BLOCK@2..22
                   WHITESPACE@2..3 " "
                   LBRACE@3..4 "{"
-                  DECLARATION@4..20
+                  DECLARATION@4..12
                     PROPERTY@4..8
                       WHITESPACE@4..7 "\n  "
                       IDENT@7..8 "b"
                     COLON@8..9 ":"
-                    VALUE@9..19
+                    VALUE@9..12
                       STRING_LITERAL@9..12
                         WHITESPACE@9..10 " "
                         QUOTED_STRING@10..12 "\"x"
-                      VALUE@12..16
-                        WHITESPACE@12..15 "\n  "
-                        IDENT@15..16 "c"
-                      COLON@16..17 ":"
+                  DECLARATION@12..20
+                    PROPERTY@12..16
+                      WHITESPACE@12..15 "\n  "
+                      IDENT@15..16 "c"
+                    COLON@16..17 ":"
+                    VALUE@17..19
                       VALUE@17..19
                         WHITESPACE@17..18 " "
                         IDENT@18..19 "d"
@@ -142,19 +165,21 @@ fn single_quotes() {
             BLOCK@2..23
               WHITESPACE@2..3 " "
               LBRACE@3..4 "{"
-              DECLARATION@4..21
+              DECLARATION@4..13
                 PROPERTY@4..8
                   WHITESPACE@4..7 "\n  "
                   IDENT@7..8 "b"
                 COLON@8..9 ":"
-                VALUE@9..20
+                VALUE@9..13
                   STRING_LITERAL@9..13
                     WHITESPACE@9..10 " "
                     QUOTED_STRING@10..13 "'x;"
-                  VALUE@13..17
-                    WHITESPACE@13..16 "\n  "
-                    IDENT@16..17 "c"
-                  COLON@17..18 ":"
+              DECLARATION@13..21
+                PROPERTY@13..17
+                  WHITESPACE@13..16 "\n  "
+                  IDENT@16..17 "c"
+                COLON@17..18 ":"
+                VALUE@18..20
                   VALUE@18..20
                     WHITESPACE@18..19 " "
                     IDENT@19..20 "d"
@@ -459,12 +484,12 @@ fn after_an_interpolation() {
                 BLOCK@2..30
                   WHITESPACE@2..3 " "
                   LBRACE@3..4 "{"
-                  DECLARATION@4..28
+                  DECLARATION@4..20
                     PROPERTY@4..8
                       WHITESPACE@4..7 "\n  "
                       IDENT@7..8 "b"
                     COLON@8..9 ":"
-                    VALUE@9..27
+                    VALUE@9..20
                       INTERPOLATED_STRING@9..20
                         WHITESPACE@9..10 " "
                         STRING_START@10..13 "\"x "
@@ -475,10 +500,12 @@ fn after_an_interpolation() {
                             IDENT@16..17 "y"
                           RBRACE@17..18 "}"
                         STRING_END@18..20 " z"
-                      VALUE@20..24
-                        WHITESPACE@20..23 "\n  "
-                        IDENT@23..24 "c"
-                      COLON@24..25 ":"
+                  DECLARATION@20..28
+                    PROPERTY@20..24
+                      WHITESPACE@20..23 "\n  "
+                      IDENT@23..24 "c"
+                    COLON@24..25 ":"
+                    VALUE@25..27
                       VALUE@25..27
                         WHITESPACE@25..26 " "
                         IDENT@26..27 "d"
@@ -603,12 +630,12 @@ fn inside_an_interpolation_ends_the_string_around_it() {
                 BLOCK@2..27
                   WHITESPACE@2..3 " "
                   LBRACE@3..4 "{"
-                  DECLARATION@4..25
+                  DECLARATION@4..17
                     PROPERTY@4..8
                       WHITESPACE@4..7 "\n  "
                       IDENT@7..8 "b"
                     COLON@8..9 ":"
-                    VALUE@9..24
+                    VALUE@9..17
                       INTERPOLATED_STRING@9..17
                         WHITESPACE@9..10 " "
                         STRING_START@10..13 "\"x "
@@ -616,10 +643,12 @@ fn inside_an_interpolation_ends_the_string_around_it() {
                           HASH_LBRACE@13..15 "#{"
                           STRING_LITERAL@15..17
                             QUOTED_STRING@15..17 "\"y"
-                      VALUE@17..21
-                        WHITESPACE@17..20 "\n  "
-                        IDENT@20..21 "c"
-                      COLON@21..22 ":"
+                  DECLARATION@17..25
+                    PROPERTY@17..21
+                      WHITESPACE@17..20 "\n  "
+                      IDENT@20..21 "c"
+                    COLON@21..22 ":"
+                    VALUE@22..24
                       VALUE@22..24
                         WHITESPACE@22..23 " "
                         IDENT@23..24 "d"
@@ -1920,8 +1949,8 @@ fn in_brackets_opened_on_an_earlier_line() {
 
 #[test]
 fn in_brackets_opened_on_its_line() {
-    // `f("x` ends at the line break; what the string should have closed on the next line
-    // joins the declaration's value, which any stray `)` may.
+    // `f("x` ends at the line break, and the declaration with it, as when the next line is
+    // a declaration of its own; what the string should have closed there is left over.
     common::check(
         ".a {\n  b: f(\"x\n  2);\n  c: d;\n}\n",
         expect![[r#"
@@ -1935,12 +1964,12 @@ fn in_brackets_opened_on_its_line() {
             BLOCK@2..30
               WHITESPACE@2..3 " "
               LBRACE@3..4 "{"
-              DECLARATION@4..20
+              DECLARATION@4..14
                 PROPERTY@4..8
                   WHITESPACE@4..7 "\n  "
                   IDENT@7..8 "b"
                 COLON@8..9 ":"
-                VALUE@9..19
+                VALUE@9..14
                   FUNCTION_CALL@9..14
                     WHITESPACE@9..10 " "
                     IDENT@10..11 "f"
@@ -1949,11 +1978,12 @@ fn in_brackets_opened_on_its_line() {
                       ARG@12..14
                         STRING_LITERAL@12..14
                           QUOTED_STRING@12..14 "\"x"
-                  NUMBER_LITERAL@14..18
-                    WHITESPACE@14..17 "\n  "
-                    NUMBER@17..18 "2"
-                  RPAREN@18..19 ")"
-                SEMICOLON@19..20 ";"
+              ERROR@14..18
+                WHITESPACE@14..17 "\n  "
+                NUMBER@17..18 "2"
+              ERROR@18..19
+                RPAREN@18..19 ")"
+              SEMICOLON@19..20 ";"
               DECLARATION@20..28
                 PROPERTY@20..24
                   WHITESPACE@20..23 "\n  "
@@ -1969,6 +1999,8 @@ fn in_brackets_opened_on_its_line() {
           WHITESPACE@30..31 "\n"
         errors:
           12..14: unterminated string
+          17..18: expected declaration or nested rule
+          18..19: expected declaration or nested rule
     "#]],
     );
     // A whole line taken in the indented syntax ends the call with the statement.
@@ -2051,21 +2083,23 @@ fn in_a_url() {
                 BLOCK@2..26
                   WHITESPACE@2..3 " "
                   LBRACE@3..4 "{"
-                  DECLARATION@4..24
+                  DECLARATION@4..16
                     PROPERTY@4..8
                       WHITESPACE@4..7 "\n  "
                       IDENT@7..8 "b"
                     COLON@8..9 ":"
-                    VALUE@9..23
+                    VALUE@9..16
                       SPECIAL_FUNCTION_CALL@9..16
                         WHITESPACE@9..10 " "
                         IDENT@10..13 "url"
                         LPAREN@13..14 "("
                         QUOTED_STRING@14..16 "'x"
-                      VALUE@16..20
-                        WHITESPACE@16..19 "\n  "
-                        IDENT@19..20 "c"
-                      COLON@20..21 ":"
+                  DECLARATION@16..24
+                    PROPERTY@16..20
+                      WHITESPACE@16..19 "\n  "
+                      IDENT@19..20 "c"
+                    COLON@20..21 ":"
+                    VALUE@21..23
                       VALUE@21..23
                         WHITESPACE@21..22 " "
                         IDENT@22..23 "d"
@@ -2099,6 +2133,242 @@ fn in_a_url() {
               14..16: unterminated string
         "#]],
     );
+}
+
+// ── The statement around it ──────────────────────────────────────────
+
+#[test]
+fn that_took_the_semicolon_of_a_declaration() {
+    // The declaration ends at the line break, the `;` the string took not reported again,
+    // and the next line is a declaration of its own.
+    common::check(
+        ".a {\n  b: \"x;\n  c: d;\n}\n.e { f: g; }\n",
+        expect![[r#"
+            SOURCE_FILE@0..37
+              RULE_SET@0..23
+                SELECTOR_LIST@0..2
+                  SELECTOR@0..2
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "a"
+                BLOCK@2..23
+                  WHITESPACE@2..3 " "
+                  LBRACE@3..4 "{"
+                  DECLARATION@4..13
+                    PROPERTY@4..8
+                      WHITESPACE@4..7 "\n  "
+                      IDENT@7..8 "b"
+                    COLON@8..9 ":"
+                    VALUE@9..13
+                      STRING_LITERAL@9..13
+                        WHITESPACE@9..10 " "
+                        QUOTED_STRING@10..13 "\"x;"
+                  DECLARATION@13..21
+                    PROPERTY@13..17
+                      WHITESPACE@13..16 "\n  "
+                      IDENT@16..17 "c"
+                    COLON@17..18 ":"
+                    VALUE@18..20
+                      VALUE@18..20
+                        WHITESPACE@18..19 " "
+                        IDENT@19..20 "d"
+                    SEMICOLON@20..21 ";"
+                  WHITESPACE@21..22 "\n"
+                  RBRACE@22..23 "}"
+              RULE_SET@23..36
+                SELECTOR_LIST@23..26
+                  SELECTOR@23..26
+                    SIMPLE_SELECTOR@23..26
+                      WHITESPACE@23..24 "\n"
+                      DOT@24..25 "."
+                      IDENT@25..26 "e"
+                BLOCK@26..36
+                  WHITESPACE@26..27 " "
+                  LBRACE@27..28 "{"
+                  DECLARATION@28..34
+                    PROPERTY@28..30
+                      WHITESPACE@28..29 " "
+                      IDENT@29..30 "f"
+                    COLON@30..31 ":"
+                    VALUE@31..33
+                      VALUE@31..33
+                        WHITESPACE@31..32 " "
+                        IDENT@32..33 "g"
+                    SEMICOLON@33..34 ";"
+                  WHITESPACE@34..35 " "
+                  RBRACE@35..36 "}"
+              WHITESPACE@36..37 "\n"
+            errors:
+              10..13: unterminated string
+        "#]],
+    );
+    // Whatever else the string took with it, and wherever in the value it starts.
+    for source in [
+        ".a {\n  b: f(\"x);\n  c: d;\n}\n",
+        ".a {\n  b: \"x !important;\n  c: d;\n}\n",
+        ".a {\n  b: e \"x;\n  c: d;\n}\n",
+        ".a {\n  font: {\n    b: \"x;\n    c: d;\n  }\n}\n",
+        ".a {\n  font: 1px {\n    b: \"x;\n    c: d;\n  }\n}\n",
+    ] {
+        assert_eq!(
+            errors(parse_scss, source),
+            ["unterminated string"],
+            "{source:?}"
+        );
+        let declared = declarations(parse_scss, source);
+        assert_eq!(
+            declared.last().map(String::as_str),
+            Some("c: d;"),
+            "{source:?}"
+        );
+    }
+    // The indented syntax ends it at the line break anyway.
+    assert_eq!(
+        declarations(parse_sass, ".a\n  b: \"x;\n  c: d\n"),
+        ["b: \"x;", "c: d"]
+    );
+}
+
+#[test]
+fn that_left_the_semicolon_to_the_next_line() {
+    // A `;` starting the next line still ends the declaration it belongs to.
+    common::check(
+        ".a {\n  b: \"x\n  ;\n  c: d;\n}\n",
+        expect![[r#"
+        SOURCE_FILE@0..27
+          RULE_SET@0..26
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            BLOCK@2..26
+              WHITESPACE@2..3 " "
+              LBRACE@3..4 "{"
+              DECLARATION@4..16
+                PROPERTY@4..8
+                  WHITESPACE@4..7 "\n  "
+                  IDENT@7..8 "b"
+                COLON@8..9 ":"
+                VALUE@9..12
+                  STRING_LITERAL@9..12
+                    WHITESPACE@9..10 " "
+                    QUOTED_STRING@10..12 "\"x"
+                WHITESPACE@12..15 "\n  "
+                SEMICOLON@15..16 ";"
+              DECLARATION@16..24
+                PROPERTY@16..20
+                  WHITESPACE@16..19 "\n  "
+                  IDENT@19..20 "c"
+                COLON@20..21 ":"
+                VALUE@21..23
+                  VALUE@21..23
+                    WHITESPACE@21..22 " "
+                    IDENT@22..23 "d"
+                SEMICOLON@23..24 ";"
+              WHITESPACE@24..25 "\n"
+              RBRACE@25..26 "}"
+          WHITESPACE@26..27 "\n"
+        errors:
+          10..12: unterminated string
+    "#]],
+    );
+}
+
+#[test]
+fn that_took_a_comma_of_a_declaration() {
+    // A comma the string took goes on with the list on the next line, as in brackets: the
+    // `c: d` there joins the value, with no further diagnostics.
+    let source = ".a {\n  b: \"x,\n  c: d;\n}\n.e { f: g; }\n";
+    assert_eq!(errors(parse_scss, source), ["unterminated string"]);
+    assert_eq!(
+        declarations(parse_scss, source),
+        ["b: \"x,\n  c: d;", "f: g;"]
+    );
+}
+
+#[test]
+fn that_took_the_semicolon_of_a_custom_property() {
+    // An opaque value ends at the line break all the same.
+    common::check(
+        ".a {\n  --b: \"x;\n  c: d;\n}\n",
+        expect![[r#"
+        SOURCE_FILE@0..26
+          RULE_SET@0..25
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            BLOCK@2..25
+              WHITESPACE@2..3 " "
+              LBRACE@3..4 "{"
+              CUSTOM_PROPERTY_DECL@4..15
+                PROPERTY@4..10
+                  WHITESPACE@4..7 "\n  "
+                  IDENT@7..10 "--b"
+                COLON@10..11 ":"
+                VALUE@11..15
+                  WHITESPACE@11..12 " "
+                  QUOTED_STRING@12..15 "\"x;"
+              DECLARATION@15..23
+                PROPERTY@15..19
+                  WHITESPACE@15..18 "\n  "
+                  IDENT@18..19 "c"
+                COLON@19..20 ":"
+                VALUE@20..22
+                  VALUE@20..22
+                    WHITESPACE@20..21 " "
+                    IDENT@21..22 "d"
+                SEMICOLON@22..23 ";"
+              WHITESPACE@23..24 "\n"
+              RBRACE@24..25 "}"
+          WHITESPACE@25..26 "\n"
+        errors:
+          12..15: unterminated string
+    "#]],
+    );
+    // Brackets opened on the string's line too, whose ends it took with the `;`...
+    let source = ".a {\n  --b: f(\"x);\n  c: d;\n}\n";
+    assert_eq!(errors(parse_scss, source), ["unterminated string"]);
+    assert_eq!(declarations(parse_scss, source), ["--b: f(\"x);", "c: d;"]);
+    // ...unless the next line closes them.
+    let source = ".a {\n  --b: f(\"x\n  );\n  c: d;\n}\n";
+    assert_eq!(errors(parse_scss, source), ["unterminated string"]);
+    assert_eq!(
+        declarations(parse_scss, source),
+        ["--b: f(\"x\n  );", "c: d;"]
+    );
+    // A comma the string took goes on with the value.
+    let source = ".a {\n  --b: \"x,\n  c: d;\n}\n";
+    assert_eq!(errors(parse_scss, source), ["unterminated string"]);
+    assert_eq!(declarations(parse_scss, source), ["--b: \"x,\n  c: d;"]);
+}
+
+#[test]
+fn that_took_the_semicolon_of_a_statement() {
+    for (source, declared) in [
+        ("$a: \"x;\n$b: c;\n", &["$a: \"x;", "$b: c;"][..]),
+        (
+            "$a: \"x !default;\n$b: c;\n",
+            &["$a: \"x !default;", "$b: c;"],
+        ),
+        ("@include m(\"x);\n$b: c;\n", &["$b: c;"]),
+        (
+            "@function f() {\n  @return \"x;\n  $b: c;\n}\n",
+            &["$b: c;"],
+        ),
+        ("@debug \"x;\n$b: c;\n", &["$b: c;"]),
+        ("@warn \"x;\n$b: c;\n", &["$b: c;"]),
+        ("@error \"x;\n$b: c;\n", &["$b: c;"]),
+    ] {
+        assert_eq!(
+            errors(parse_scss, source),
+            ["unterminated string"],
+            "{source:?}"
+        );
+        assert_eq!(declarations(parse_scss, source), declared, "{source:?}");
+    }
 }
 
 // ── Selectors and at-rules ───────────────────────────────────────────
