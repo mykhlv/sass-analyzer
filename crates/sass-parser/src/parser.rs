@@ -582,6 +582,39 @@ mod tests {
         );
     }
 
+    /// Re-lexing a comment on a continued line lexes and compares only the tokens around
+    /// the lines it changes, wherever in the input they are: that work grows with the
+    /// number of such comments, not with that number times the length of the input.
+    #[test]
+    fn relexing_continued_lines_is_linear_in_the_input() {
+        for statement in [
+            // The comment reaches over `2` until it is re-lexed: the tokens change.
+            "$a: 1 +\n  // c\n    2\n",
+            // Nothing deeper follows the comment: re-lexing changes nothing.
+            ".a,\n// c\n.b\n  c: d\n",
+        ] {
+            let work = |count: usize| {
+                let source = statement.repeat(count);
+                crate::input::RELEX_WORK.set(0);
+                let input = Input::from_source_indented(&source);
+                let mut p = Parser::with_layout(input, &source, super::Layout::Indented);
+                crate::grammar::source_file(&mut p);
+                let _ = p.finish();
+                crate::input::RELEX_WORK.get()
+            };
+            let (small, large) = (work(200), work(2_000));
+            assert!(
+                small > 0 && large <= small * 11,
+                "{statement:?}: {small} tokens lexed or visited for 200 statements, \
+                 {large} for 2000",
+            );
+            assert!(
+                large <= 2_000 * 32,
+                "{statement:?}: {large} for 2000 statements"
+            );
+        }
+    }
+
     /// Bump every token the indented layout presents, real or zero-width, and list
     /// them: `{}` and `;` for the zero-width ones, the source text for the others.
     fn indented_stream(source: &str) -> (String, Vec<String>) {

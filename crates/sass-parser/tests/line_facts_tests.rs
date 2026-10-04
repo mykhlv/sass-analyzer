@@ -2,6 +2,7 @@ use std::fmt::Write;
 
 use expect_test::{Expect, expect};
 use sass_parser::input::{IndentKind, Input, LineBreak};
+use sass_parser::syntax_kind::SyntaxKind;
 
 #[path = "common/layout_allow_list.rs"]
 mod layout_allow_list;
@@ -332,6 +333,83 @@ fn relexing_a_continued_line_ends_its_comment_with_the_line() {
         !input.relex_continued(source, first_break, true),
         "a second pass changes nothing",
     );
+}
+
+/// Re-lexing in any order, the indices that tokens and line breaks hold into the trivia
+/// stay right: splicing a segment in shifts those of everything after it.
+#[test]
+fn relexed_lines_keep_every_index_right_in_any_order() {
+    let source = "$a: 1 +\n  // c\n    2\n$b: 3 +\n  // d\n    4\n$e: 5 +\n  // f\n    6\n";
+    let mut input = Input::from_source_indented(source);
+    let comment_breaks: Vec<u32> = (0..input.line_break_count())
+        .filter(|&i| {
+            let after = input.line_break(i).trivia() as usize + 1;
+            input
+                .all_trivia()
+                .get(after)
+                .is_some_and(|(_, range)| source[*range].starts_with("//"))
+        })
+        .collect();
+    assert_eq!(comment_breaks.len(), 3);
+    // Last first, so that each one shifts the indices of those already re-lexed.
+    for &index in comment_breaks.iter().rev() {
+        let line_break = input.line_break(index);
+        assert!(input.relex_continued(source, index, true));
+        assert_eq!(
+            input.line_break(index),
+            line_break,
+            "the break itself stays put"
+        );
+        assert_indices_hold(&input, source);
+    }
+    expect![[r#"
+        DOLLAR "$"
+        IDENT "a"
+        COLON ":"
+        NUMBER "1"
+        PLUS "+"
+        NUMBER "2" <- 2 spaces, 4 spaces
+        DOLLAR "$" <- 0
+        IDENT "b"
+        COLON ":"
+        NUMBER "3"
+        PLUS "+"
+        NUMBER "4" <- 2 spaces, 4 spaces
+        DOLLAR "$" <- 0
+        IDENT "e"
+        COLON ":"
+        NUMBER "5"
+        PLUS "+"
+        NUMBER "6" <- 2 spaces, 4 spaces
+        EOF <- 0
+    "#]]
+    .assert_eq(&render_input(&input, source));
+}
+
+fn assert_indices_hold(input: &Input, source: &str) {
+    let mut line_breaks = 0;
+    for pos in 0..=input.len() {
+        let trivia = if pos < input.len() {
+            input.trivia_before(pos)
+        } else {
+            input.trailing_trivia()
+        };
+        let (start, end) = input.line_break_range(pos);
+        assert_eq!(start, line_breaks, "line breaks before token {pos}");
+        line_breaks = end;
+        for index in start..end {
+            let line_break = input.line_break(index);
+            let (kind, range) = input.all_trivia()[line_break.trivia() as usize];
+            assert_eq!(kind, SyntaxKind::WHITESPACE);
+            assert!(source[range].contains('\n'), "line break {index}");
+            assert!(
+                trivia.contains(&(kind, range)),
+                "line break {index} before token {pos}"
+            );
+            assert_eq!(input.line_break_owner(index), pos);
+        }
+    }
+    assert_eq!(line_breaks, input.line_break_count());
 }
 
 #[test]

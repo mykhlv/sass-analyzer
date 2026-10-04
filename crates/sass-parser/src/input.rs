@@ -256,7 +256,13 @@ impl Input {
     /// lines continue a statement, so [`Input::from_source_indented`] reads every comment
     /// that starts a line as starting a statement.
     ///
-    /// Returns whether any token changed. The tokens before the line break never do.
+    /// Lexing stops where it meets the existing tokens again, and only the tokens in
+    /// between are lexed, compared and replaced: that work is bounded by the segment, not
+    /// by the input. What follows the segment moves over in the arrays, with the indices
+    /// it holds shifted by the difference, but is not looked at otherwise. The tokens
+    /// before the line break never change, nor do their indices.
+    ///
+    /// Returns whether any token changed.
     pub fn relex_continued(&mut self, source: &str, from: u32, across_blank: bool) -> bool {
         let line_break = self.line_breaks[from as usize];
         if line_break.depth != 0 {
@@ -267,20 +273,137 @@ impl Input {
         let Some((segment, resume)) = self.relexed_segment(source, start, across_blank) else {
             return false;
         };
-        let old: Vec<(SyntaxKind, TextRange)> = self.tokens_in_order().collect();
+        #[cfg(debug_assertions)]
+        let expected =
+            (self.len() < 2048).then(|| self.relexed_in_full(source, start, resume, &segment));
+        self.splice(source, from, resume, &segment);
+        #[cfg(debug_assertions)]
+        if let Some(expected) = expected {
+            self.debug_assert_same(&expected);
+        }
+        true
+    }
+
+    /// Replace the tokens from line break `from` up to `resume` with `segment`, which
+    /// covers the same text, and shift the indices that the tokens after it hold.
+    #[allow(clippy::cast_possible_truncation)]
+    fn splice(
+        &mut self,
+        source: &str,
+        from: u32,
+        resume: TextSize,
+        segment: &[(SyntaxKind, TextRange)],
+    ) {
+        let t0 = self.line_breaks[from as usize].trivia as usize;
+        let start = self.all_trivia[t0].1.start();
+        let k0 = self.ranges.partition_point(|r| r.start() < start);
+        let k1 = k0 + self.ranges[k0..].partition_point(|r| r.start() < resume);
+        let t1 = t0 + self.all_trivia[t0..].partition_point(|(_, r)| r.start() < resume);
+        let b0 = from as usize;
+        let b1 = b0 + self.line_breaks[b0..].partition_point(|b| (b.trivia as usize) < t1);
+
+        // The loop of `lex`, from its state at `start`; the line break there is at depth 0.
+        let mut kinds = Vec::new();
+        let mut ranges = Vec::new();
+        let mut trivia = Vec::new();
+        let mut trivia_starts = Vec::new();
+        let mut line_breaks = Vec::new();
+        let mut line_break_starts = Vec::new();
+        let mut pending_trivia_start = self.trivia_starts[k0];
+        let mut pending_line_break_start = self.line_break_starts[k0];
+        let mut depth = 0u32;
+        for &(kind, range) in segment {
+            if kind.is_trivia() {
+                if kind == SyntaxKind::WHITESPACE
+                    && let Some(mut line_break) = LineBreak::measure(&source[range])
+                {
+                    line_break.trivia = (t0 + trivia.len()) as u32;
+                    line_break.depth = u16::try_from(depth).unwrap_or(u16::MAX);
+                    line_breaks.push(line_break);
+                }
+                trivia.push((kind, range));
+            } else {
+                trivia_starts.push(pending_trivia_start);
+                pending_trivia_start = (t0 + trivia.len()) as u32;
+                line_break_starts.push(pending_line_break_start);
+                pending_line_break_start = (b0 + line_breaks.len()) as u32;
+                depth = bracket_depth_after(depth, kind);
+                kinds.push(kind);
+                ranges.push(range);
+            }
+        }
+        // The first token after the segment: where its trivia and line breaks start.
+        trivia_starts.push(pending_trivia_start);
+        line_break_starts.push(pending_line_break_start);
+
+        let added_trivia = trivia.len().wrapping_sub(t1 - t0) as u32;
+        let added_line_breaks = line_breaks.len().wrapping_sub(b1 - b0) as u32;
+        let new_line_breaks = line_breaks.len();
+
+        self.kinds.splice(k0..k1, kinds);
+        self.ranges.splice(k0..k1, ranges);
+        let tail = k0 + trivia_starts.len();
+        self.trivia_starts.splice(k0..=k1, trivia_starts);
+        for start in &mut self.trivia_starts[tail..] {
+            *start = start.wrapping_add(added_trivia);
+        }
+        self.line_break_starts.splice(k0..=k1, line_break_starts);
+        for start in &mut self.line_break_starts[tail..] {
+            *start = start.wrapping_add(added_line_breaks);
+        }
+        self.all_trivia.splice(t0..t1, trivia);
+        self.line_breaks.splice(b0..b1, line_breaks);
+        for line_break in &mut self.line_breaks[b0 + new_line_breaks..] {
+            line_break.trivia = line_break.trivia.wrapping_add(added_trivia);
+        }
+    }
+
+    /// What [`Input::splice`] must produce: the whole input lexed again with `segment` in
+    /// place of the tokens from `start` up to `resume`.
+    #[cfg(debug_assertions)]
+    fn relexed_in_full(
+        &self,
+        source: &str,
+        start: TextSize,
+        resume: TextSize,
+        segment: &[(SyntaxKind, TextRange)],
+    ) -> Self {
+        #[cfg(test)]
+        let work = RELEX_WORK.get();
+        let old: Vec<(SyntaxKind, TextRange)> = self.tokens_from(TextSize::from(0)).collect();
+        #[cfg(test)]
+        RELEX_WORK.set(work);
         let replay = old
             .iter()
             .copied()
             .take_while(|(_, range)| range.start() < start)
-            .chain(segment)
+            .chain(segment.iter().copied())
             .chain(
                 old.iter()
                     .copied()
                     .skip_while(|(_, range)| range.start() < resume),
             )
             .map(|(kind, range)| (kind, &source[range]));
-        *self = Self::lex::<true>(source, Replay(replay));
-        true
+        Self::lex::<true>(source, Replay(replay))
+    }
+
+    #[cfg(debug_assertions)]
+    fn debug_assert_same(&self, expected: &Self) {
+        debug_assert!(self.kinds == expected.kinds, "spliced kinds");
+        debug_assert!(self.ranges == expected.ranges, "spliced ranges");
+        debug_assert!(self.all_trivia == expected.all_trivia, "spliced trivia");
+        debug_assert!(
+            self.trivia_starts == expected.trivia_starts,
+            "spliced trivia starts"
+        );
+        debug_assert!(
+            self.line_breaks == expected.line_breaks,
+            "spliced line breaks"
+        );
+        debug_assert!(
+            self.line_break_starts == expected.line_break_starts,
+            "spliced line break starts",
+        );
     }
 
     /// The tokens from `start` up to the first point where lexing as continued lines
@@ -298,6 +421,7 @@ impl Input {
         let mut offset = start;
         loop {
             let (kind, text) = lexer.next_token_where(!continued);
+            count_relex_work();
             if kind == SyntaxKind::EOF {
                 break;
             }
@@ -374,22 +498,36 @@ impl Input {
     /// Whether `segment` differs from the existing tokens between `start` and `end`.
     fn differs(&self, segment: &[(SyntaxKind, TextRange)], start: TextSize, end: TextSize) -> bool {
         !self
-            .tokens_in_order()
-            .skip_while(|(_, r)| r.start() < start)
+            .tokens_from(start)
             .take_while(|(_, r)| r.start() < end)
             .eq(segment.iter().copied())
     }
 
-    /// Every token, trivia included, in source order.
-    fn tokens_in_order(&self) -> impl Iterator<Item = (SyntaxKind, TextRange)> + '_ {
-        (0..=self.len()).flat_map(move |pos| {
-            let trivia = if pos < self.len() {
-                self.trivia_before(pos)
-            } else {
-                self.trailing_trivia()
+    /// Every token, trivia included, in source order from the first that starts at or
+    /// after `offset`.
+    fn tokens_from(&self, offset: TextSize) -> impl Iterator<Item = (SyntaxKind, TextRange)> {
+        let mut token = self.ranges.partition_point(|r| r.start() < offset);
+        let mut trivia = self.all_trivia.partition_point(|(_, r)| r.start() < offset);
+        std::iter::from_fn(move || {
+            count_relex_work();
+            let next_trivia = self.all_trivia.get(trivia).copied();
+            let next_token = self.ranges.get(token).map(|&r| (self.kinds[token], r));
+            let next = match (next_trivia, next_token) {
+                (Some(t), Some(k)) if t.1.start() < k.1.start() => {
+                    trivia += 1;
+                    t
+                }
+                (_, Some(k)) => {
+                    token += 1;
+                    k
+                }
+                (Some(t), None) => {
+                    trivia += 1;
+                    t
+                }
+                (None, None) => return None,
             };
-            let token = (pos < self.len()).then(|| (self.kinds[pos], self.ranges[pos]));
-            trivia.iter().copied().chain(token)
+            Some(next)
         })
     }
 
@@ -596,12 +734,26 @@ impl Input {
 }
 
 /// Tokens lexed before, fed back through [`Input::lex`].
+#[cfg(debug_assertions)]
 struct Replay<I>(I);
 
+#[cfg(debug_assertions)]
 impl<'src, I: Iterator<Item = (SyntaxKind, &'src str)>> lexer::TokenSource<'src> for Replay<I> {
     fn next_token(&mut self) -> (SyntaxKind, &'src str) {
         self.0.next().unwrap_or((SyntaxKind::EOF, ""))
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tokens lexed or visited by [`Input::relex_continued`] on this thread.
+    pub(crate) static RELEX_WORK: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[inline]
+fn count_relex_work() {
+    #[cfg(test)]
+    RELEX_WORK.set(RELEX_WORK.get() + 1);
 }
 
 /// Bracket depth after a significant token, counted as the indented lexer counts it for
