@@ -210,6 +210,22 @@ fn parse_layout_vuetify_sass(bencher: Bencher<'_, '_>) {
         .bench_values(sass_parser::parse_sass_layout);
 }
 
+// A comment on every continued line: each one read first as reaching over the deeper
+// line beneath it, then re-lexed as the ordinary comment it is once the parser absorbs
+// the line break before it. Each re-lex lexes and compares only its own lines; the rest
+// of its cost is moving the arrays after them.
+static CONTINUED_COMMENTS_SASS: LazyLock<String> =
+    LazyLock::new(|| "$a: 1 +\n  // c\n    2\n.a,\n// c\n.b\n  c: d\n".repeat(5_000));
+
+#[divan::bench]
+fn parse_layout_continued_comments(bencher: Bencher<'_, '_>) {
+    let source = &*CONTINUED_COMMENTS_SASS;
+    bencher
+        .counter(divan::counter::BytesCount::of_str(source))
+        .with_inputs(|| source.as_str())
+        .bench_values(sass_parser::parse_sass_layout);
+}
+
 // ── Incremental reparse benchmarks ──────────────────────────────────────
 
 /// Prepare an incremental edit scenario: parse old source, apply a single-char

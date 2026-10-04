@@ -147,10 +147,10 @@ pub fn allow_list() -> Vec<Allowed> {
         Allowed {
             input: ".a\n  content: not\n  b: c\n",
             change: "legacy continues the line after a value ending in `not` and silently \
-                     takes `b: c` into it; the layout frontend ends the declaration there, \
-                     so `b: c` is a declaration of its own (Dart reports `expected \
-                     newline.`; reporting it here needs `not` to be an operator in CSS \
-                     values, which would change SCSS)",
+                     takes `b: c` into it; the layout frontend goes on after `not` only \
+                     into a line that could be its operand, so `b: c` is a declaration of \
+                     its own (Dart reports `expected newline.`; reporting it here needs \
+                     `not` to be an operator in CSS values, which would change SCSS)",
             expected: expect![[r#"
                 SOURCE_FILE@0..25
                   RULE_SET@0..24
@@ -180,6 +180,418 @@ pub fn allow_list() -> Vec<Allowed> {
                           VALUE@22..24
                             WHITESPACE@22..23 " "
                             IDENT@23..24 "c"
+                        SEMICOLON@24..24 ""
+                      RBRACE@24..24 ""
+                  WHITESPACE@24..25 "\n"
+            "#]],
+        },
+        Allowed {
+            input: ".a\n  b: c and\n    d: e\n",
+            change: "legacy continues the line after a value ending in `and` and silently \
+                     takes `d: e` into it; the layout frontend goes on after `and` or `or` \
+                     only into a line that could be its operand, so the deeper `d: e` is a \
+                     nested declaration, as without the `and` (Dart reports `expected \
+                     newline.`, as for `not`)",
+            expected: expect![[r#"
+                SOURCE_FILE@0..23
+                  RULE_SET@0..22
+                    SELECTOR_LIST@0..2
+                      SELECTOR@0..2
+                        SIMPLE_SELECTOR@0..2
+                          DOT@0..1 "."
+                          IDENT@1..2 "a"
+                    BLOCK@2..22
+                      LBRACE@2..2 ""
+                      NESTED_PROPERTY@2..22
+                        PROPERTY@2..6
+                          WHITESPACE@2..5 "\n  "
+                          IDENT@5..6 "b"
+                        COLON@6..7 ":"
+                        VALUE@7..13
+                          VALUE@7..9
+                            WHITESPACE@7..8 " "
+                            IDENT@8..9 "c"
+                          VALUE@9..13
+                            WHITESPACE@9..10 " "
+                            IDENT@10..13 "and"
+                        BLOCK@13..22
+                          LBRACE@13..13 ""
+                          DECLARATION@13..22
+                            PROPERTY@13..19
+                              WHITESPACE@13..18 "\n    "
+                              IDENT@18..19 "d"
+                            COLON@19..20 ":"
+                            VALUE@20..22
+                              VALUE@20..22
+                                WHITESPACE@20..21 " "
+                                IDENT@21..22 "e"
+                            SEMICOLON@22..22 ""
+                          RBRACE@22..22 ""
+                      RBRACE@22..22 ""
+                  WHITESPACE@22..23 "\n"
+            "#]],
+        },
+        Allowed {
+            input: ".a\n  b: c or\n  d: e\n",
+            change: "legacy continues the line after a value ending in `or` and silently \
+                     takes `d: e` into it; the layout frontend ends the declaration there, \
+                     so `d: e` is a declaration of its own (Dart reports `expected \
+                     newline.`, as for `not`)",
+            expected: expect![[r#"
+                SOURCE_FILE@0..20
+                  RULE_SET@0..19
+                    SELECTOR_LIST@0..2
+                      SELECTOR@0..2
+                        SIMPLE_SELECTOR@0..2
+                          DOT@0..1 "."
+                          IDENT@1..2 "a"
+                    BLOCK@2..19
+                      LBRACE@2..2 ""
+                      DECLARATION@2..12
+                        PROPERTY@2..6
+                          WHITESPACE@2..5 "\n  "
+                          IDENT@5..6 "b"
+                        COLON@6..7 ":"
+                        VALUE@7..12
+                          VALUE@7..9
+                            WHITESPACE@7..8 " "
+                            IDENT@8..9 "c"
+                          VALUE@9..12
+                            WHITESPACE@9..10 " "
+                            IDENT@10..12 "or"
+                        SEMICOLON@12..12 ""
+                      DECLARATION@12..19
+                        PROPERTY@12..16
+                          WHITESPACE@12..15 "\n  "
+                          IDENT@15..16 "d"
+                        COLON@16..17 ":"
+                        VALUE@17..19
+                          VALUE@17..19
+                            WHITESPACE@17..18 " "
+                            IDENT@18..19 "e"
+                        SEMICOLON@19..19 ""
+                      RBRACE@19..19 ""
+                  WHITESPACE@19..20 "\n"
+            "#]],
+        },
+        Allowed {
+            input: ".a\n  content: and\n  b: c\n",
+            change: "legacy continues the line after any value ending in `and` and silently \
+                     takes `b: c` into it; with no operand before it `and` is a plain word, \
+                     so the layout frontend ends the declaration there (Dart: same)",
+            expected: expect![[r#"
+                SOURCE_FILE@0..25
+                  RULE_SET@0..24
+                    SELECTOR_LIST@0..2
+                      SELECTOR@0..2
+                        SIMPLE_SELECTOR@0..2
+                          DOT@0..1 "."
+                          IDENT@1..2 "a"
+                    BLOCK@2..24
+                      LBRACE@2..2 ""
+                      DECLARATION@2..17
+                        PROPERTY@2..12
+                          WHITESPACE@2..5 "\n  "
+                          IDENT@5..12 "content"
+                        COLON@12..13 ":"
+                        VALUE@13..17
+                          VALUE@13..17
+                            WHITESPACE@13..14 " "
+                            IDENT@14..17 "and"
+                        SEMICOLON@17..17 ""
+                      DECLARATION@17..24
+                        PROPERTY@17..21
+                          WHITESPACE@17..20 "\n  "
+                          IDENT@20..21 "b"
+                        COLON@21..22 ":"
+                        VALUE@22..24
+                          VALUE@22..24
+                            WHITESPACE@22..23 " "
+                            IDENT@23..24 "c"
+                        SEMICOLON@24..24 ""
+                      RBRACE@24..24 ""
+                  WHITESPACE@24..25 "\n"
+            "#]],
+        },
+        Allowed {
+            input: "$to: 3\n.x\n  @for $i from 1 through $to\n    a: $i\n",
+            change: "legacy reads the name in `$to` as the word `to`, which leaves an `@for` \
+                     header unfinished, and silently takes the line below into the header, \
+                     so the loop has no body; the layout frontend counts only a word of its \
+                     own, and `a: $i` is the loop's body (Dart: same)",
+            expected: expect![[r#"
+                SOURCE_FILE@0..49
+                  VARIABLE_DECL@0..6
+                    DOLLAR@0..1 "$"
+                    IDENT@1..3 "to"
+                    COLON@3..4 ":"
+                    NUMBER_LITERAL@4..6
+                      WHITESPACE@4..5 " "
+                      NUMBER@5..6 "3"
+                    SEMICOLON@6..6 ""
+                  RULE_SET@6..48
+                    SELECTOR_LIST@6..9
+                      SELECTOR@6..9
+                        SIMPLE_SELECTOR@6..9
+                          WHITESPACE@6..7 "\n"
+                          DOT@7..8 "."
+                          IDENT@8..9 "x"
+                    BLOCK@9..48
+                      LBRACE@9..9 ""
+                      FOR_RULE@9..48
+                        WHITESPACE@9..12 "\n  "
+                        AT@12..13 "@"
+                        IDENT@13..16 "for"
+                        WHITESPACE@16..17 " "
+                        DOLLAR@17..18 "$"
+                        IDENT@18..19 "i"
+                        WHITESPACE@19..20 " "
+                        IDENT@20..24 "from"
+                        NUMBER_LITERAL@24..26
+                          WHITESPACE@24..25 " "
+                          NUMBER@25..26 "1"
+                        WHITESPACE@26..27 " "
+                        IDENT@27..34 "through"
+                        VARIABLE_REF@34..38
+                          WHITESPACE@34..35 " "
+                          DOLLAR@35..36 "$"
+                          IDENT@36..38 "to"
+                        BLOCK@38..48
+                          LBRACE@38..38 ""
+                          DECLARATION@38..48
+                            PROPERTY@38..44
+                              WHITESPACE@38..43 "\n    "
+                              IDENT@43..44 "a"
+                            COLON@44..45 ":"
+                            VALUE@45..48
+                              VARIABLE_REF@45..48
+                                WHITESPACE@45..46 " "
+                                DOLLAR@46..47 "$"
+                                IDENT@47..48 "i"
+                            SEMICOLON@48..48 ""
+                          RBRACE@48..48 ""
+                      RBRACE@48..48 ""
+                  WHITESPACE@48..49 "\n"
+            "#]],
+        },
+        Allowed {
+            input: "$in: 1 2\n.x\n  @each $v in $in\n    a: $v\n",
+            change: "legacy reads the name in `$in` as the word `in` and takes the line \
+                     below into the `@each` header, with four errors; the layout frontend \
+                     gives the loop its body (Dart: same)",
+            expected: expect![[r#"
+                SOURCE_FILE@0..40
+                  VARIABLE_DECL@0..8
+                    DOLLAR@0..1 "$"
+                    IDENT@1..3 "in"
+                    COLON@3..4 ":"
+                    NUMBER_LITERAL@4..6
+                      WHITESPACE@4..5 " "
+                      NUMBER@5..6 "1"
+                    NUMBER_LITERAL@6..8
+                      WHITESPACE@6..7 " "
+                      NUMBER@7..8 "2"
+                    SEMICOLON@8..8 ""
+                  RULE_SET@8..39
+                    SELECTOR_LIST@8..11
+                      SELECTOR@8..11
+                        SIMPLE_SELECTOR@8..11
+                          WHITESPACE@8..9 "\n"
+                          DOT@9..10 "."
+                          IDENT@10..11 "x"
+                    BLOCK@11..39
+                      LBRACE@11..11 ""
+                      EACH_RULE@11..39
+                        WHITESPACE@11..14 "\n  "
+                        AT@14..15 "@"
+                        IDENT@15..19 "each"
+                        WHITESPACE@19..20 " "
+                        DOLLAR@20..21 "$"
+                        IDENT@21..22 "v"
+                        WHITESPACE@22..23 " "
+                        IDENT@23..25 "in"
+                        VARIABLE_REF@25..29
+                          WHITESPACE@25..26 " "
+                          DOLLAR@26..27 "$"
+                          IDENT@27..29 "in"
+                        BLOCK@29..39
+                          LBRACE@29..29 ""
+                          DECLARATION@29..39
+                            PROPERTY@29..35
+                              WHITESPACE@29..34 "\n    "
+                              IDENT@34..35 "a"
+                            COLON@35..36 ":"
+                            VALUE@36..39
+                              VARIABLE_REF@36..39
+                                WHITESPACE@36..37 " "
+                                DOLLAR@37..38 "$"
+                                IDENT@38..39 "v"
+                            SEMICOLON@39..39 ""
+                          RBRACE@39..39 ""
+                      RBRACE@39..39 ""
+                  WHITESPACE@39..40 "\n"
+            "#]],
+        },
+        Allowed {
+            input: "$and: true\n.x\n  @if $and\n    a: b\n",
+            change: "legacy reads the name in `$and` as the word `and` and silently takes \
+                     the line below into the `@if` condition; the layout frontend gives the \
+                     rule its body (Dart: same)",
+            expected: expect![[r#"
+                SOURCE_FILE@0..34
+                  VARIABLE_DECL@0..10
+                    DOLLAR@0..1 "$"
+                    IDENT@1..4 "and"
+                    COLON@4..5 ":"
+                    BOOL_LITERAL@5..10
+                      WHITESPACE@5..6 " "
+                      IDENT@6..10 "true"
+                    SEMICOLON@10..10 ""
+                  RULE_SET@10..33
+                    SELECTOR_LIST@10..13
+                      SELECTOR@10..13
+                        SIMPLE_SELECTOR@10..13
+                          WHITESPACE@10..11 "\n"
+                          DOT@11..12 "."
+                          IDENT@12..13 "x"
+                    BLOCK@13..33
+                      LBRACE@13..13 ""
+                      IF_RULE@13..33
+                        WHITESPACE@13..16 "\n  "
+                        AT@16..17 "@"
+                        IDENT@17..19 "if"
+                        VARIABLE_REF@19..24
+                          WHITESPACE@19..20 " "
+                          DOLLAR@20..21 "$"
+                          IDENT@21..24 "and"
+                        BLOCK@24..33
+                          LBRACE@24..24 ""
+                          DECLARATION@24..33
+                            PROPERTY@24..30
+                              WHITESPACE@24..29 "\n    "
+                              IDENT@29..30 "a"
+                            COLON@30..31 ":"
+                            VALUE@31..33
+                              VALUE@31..33
+                                WHITESPACE@31..32 " "
+                                IDENT@32..33 "b"
+                            SEMICOLON@33..33 ""
+                          RBRACE@33..33 ""
+                      RBRACE@33..33 ""
+                  WHITESPACE@33..34 "\n"
+            "#]],
+        },
+        Allowed {
+            input: "@function f($if)\n  @return $if\n.a\n  b: f(1)\n",
+            change: "legacy reads the name in `$if` as the word `if` and takes the next \
+                     rule into the `@return` value, with an error; the layout frontend ends \
+                     the function there (Dart: same)",
+            expected: expect![[r#"
+                SOURCE_FILE@0..44
+                  FUNCTION_RULE@0..30
+                    AT@0..1 "@"
+                    IDENT@1..9 "function"
+                    WHITESPACE@9..10 " "
+                    IDENT@10..11 "f"
+                    PARAM_LIST@11..16
+                      LPAREN@11..12 "("
+                      PARAM@12..15
+                        DOLLAR@12..13 "$"
+                        IDENT@13..15 "if"
+                      RPAREN@15..16 ")"
+                    BLOCK@16..30
+                      LBRACE@16..16 ""
+                      RETURN_RULE@16..30
+                        WHITESPACE@16..19 "\n  "
+                        AT@19..20 "@"
+                        IDENT@20..26 "return"
+                        VARIABLE_REF@26..30
+                          WHITESPACE@26..27 " "
+                          DOLLAR@27..28 "$"
+                          IDENT@28..30 "if"
+                        SEMICOLON@30..30 ""
+                      RBRACE@30..30 ""
+                  RULE_SET@30..43
+                    SELECTOR_LIST@30..33
+                      SELECTOR@30..33
+                        SIMPLE_SELECTOR@30..33
+                          WHITESPACE@30..31 "\n"
+                          DOT@31..32 "."
+                          IDENT@32..33 "a"
+                    BLOCK@33..43
+                      LBRACE@33..33 ""
+                      DECLARATION@33..43
+                        PROPERTY@33..37
+                          WHITESPACE@33..36 "\n  "
+                          IDENT@36..37 "b"
+                        COLON@37..38 ":"
+                        VALUE@38..43
+                          FUNCTION_CALL@38..43
+                            WHITESPACE@38..39 " "
+                            IDENT@39..40 "f"
+                            ARG_LIST@40..43
+                              LPAREN@40..41 "("
+                              ARG@41..42
+                                NUMBER_LITERAL@41..42
+                                  NUMBER@41..42 "1"
+                              RPAREN@42..43 ")"
+                        SEMICOLON@43..43 ""
+                      RBRACE@43..43 ""
+                  WHITESPACE@43..44 "\n"
+            "#]],
+        },
+        Allowed {
+            input: ".a\n  b: c\n@x:*\n.d\n  e: f\n",
+            change: "legacy goes on after a `*` that ends a line in any statement with a \
+                     colon before it, as if it were multiplication, and silently takes the \
+                     rule `.d` into the at-rule's prelude; the layout frontend ends the \
+                     at-rule at the line break (Dart: same, `@x :*;` and the rule)",
+            expected: expect![[r#"
+                SOURCE_FILE@0..25
+                  RULE_SET@0..9
+                    SELECTOR_LIST@0..2
+                      SELECTOR@0..2
+                        SIMPLE_SELECTOR@0..2
+                          DOT@0..1 "."
+                          IDENT@1..2 "a"
+                    BLOCK@2..9
+                      LBRACE@2..2 ""
+                      DECLARATION@2..9
+                        PROPERTY@2..6
+                          WHITESPACE@2..5 "\n  "
+                          IDENT@5..6 "b"
+                        COLON@6..7 ":"
+                        VALUE@7..9
+                          VALUE@7..9
+                            WHITESPACE@7..8 " "
+                            IDENT@8..9 "c"
+                        SEMICOLON@9..9 ""
+                      RBRACE@9..9 ""
+                  GENERIC_AT_RULE@9..14
+                    WHITESPACE@9..10 "\n"
+                    AT@10..11 "@"
+                    IDENT@11..12 "x"
+                    COLON@12..13 ":"
+                    STAR@13..14 "*"
+                    SEMICOLON@14..14 ""
+                  RULE_SET@14..24
+                    SELECTOR_LIST@14..17
+                      SELECTOR@14..17
+                        SIMPLE_SELECTOR@14..17
+                          WHITESPACE@14..15 "\n"
+                          DOT@15..16 "."
+                          IDENT@16..17 "d"
+                    BLOCK@17..24
+                      LBRACE@17..17 ""
+                      DECLARATION@17..24
+                        PROPERTY@17..21
+                          WHITESPACE@17..20 "\n  "
+                          IDENT@20..21 "e"
+                        COLON@21..22 ":"
+                        VALUE@22..24
+                          VALUE@22..24
+                            WHITESPACE@22..23 " "
+                            IDENT@23..24 "f"
                         SEMICOLON@24..24 ""
                       RBRACE@24..24 ""
                   WHITESPACE@24..25 "\n"
@@ -639,11 +1051,9 @@ pub fn allow_list() -> Vec<Allowed> {
                         SIMPLE_SELECTOR@0..2
                           DOT@0..1 "."
                           IDENT@1..2 "a"
-                  ERROR@2..22
-                    WHITESPACE@2..3 " "
-                    ERROR@3..22 "/* x\n  y\n.b\n  c: d\n"
+                  WHITESPACE@2..3 " "
+                  ERROR@3..22 "/* x\n  y\n.b\n  c: d\n"
                   SEMICOLON@22..22 ""
-                error 3..22: expected rule
                 error 3..22: unterminated comment
             "#]],
         },
@@ -666,15 +1076,42 @@ pub fn allow_list() -> Vec<Allowed> {
                           WHITESPACE@2..5 "\n  "
                           IDENT@5..6 "b"
                         COLON@6..7 ":"
-                        VALUE@7..33
+                        VALUE@7..9
                           VALUE@7..9
                             WHITESPACE@7..8 " "
                             IDENT@8..9 "c"
-                          WHITESPACE@9..10 " "
-                          ERROR@10..33 "/* never closed\n  d: e\n"
+                        WHITESPACE@9..10 " "
+                        ERROR@10..33 "/* never closed\n  d: e\n"
                         SEMICOLON@33..33 ""
                       RBRACE@33..33 ""
                 error 10..33: unterminated comment
+            "#]],
+        },
+        Allowed {
+            input: "$a: 1 +\n  /* c\n    d\n    2\n.b\n  c: $a\n",
+            change: "a loud comment on a continued line is an ordinary one, so one that \
+                     never closes runs to the end of the file; legacy took it as a comment, \
+                     silently but for the missing operand; the layout frontend reports the \
+                     missing operand and the unterminated comment, and nothing else, as the \
+                     statement ends where the comment starts (Dart: `expected more \
+                     input.`)",
+            expected: expect![[r#"
+                SOURCE_FILE@0..38
+                  VARIABLE_DECL@0..38
+                    DOLLAR@0..1 "$"
+                    IDENT@1..2 "a"
+                    COLON@2..3 ":"
+                    BINARY_EXPR@3..7
+                      NUMBER_LITERAL@3..5
+                        WHITESPACE@3..4 " "
+                        NUMBER@4..5 "1"
+                      WHITESPACE@5..6 " "
+                      PLUS@6..7 "+"
+                    WHITESPACE@7..10 "\n  "
+                    ERROR@10..38 "/* c\n    d\n    2\n.b\n  c: $a\n"
+                    SEMICOLON@38..38 ""
+                error 38..38: expected expression
+                error 10..38: unterminated comment
             "#]],
         },
         Allowed {
@@ -696,12 +1133,12 @@ pub fn allow_list() -> Vec<Allowed> {
                           WHITESPACE@1..4 "\n  "
                           IDENT@4..5 "b"
                         COLON@5..6 ":"
-                        VALUE@6..14
+                        VALUE@6..8
                           VALUE@6..8
                             WHITESPACE@6..7 " "
                             IDENT@7..8 "c"
-                          WHITESPACE@8..9 " "
-                          ERROR@9..14 "/* d\n"
+                        WHITESPACE@8..9 " "
+                        ERROR@9..14 "/* d\n"
                         SEMICOLON@14..14 ""
                       RBRACE@14..14 ""
                 error 9..14: unterminated comment

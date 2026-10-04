@@ -170,6 +170,30 @@ impl<'src> Parser<'src> {
         self.fence = self.locate_fence();
     }
 
+    /// The grammar is at the first token of an at-rule. A header still declared then is
+    /// that of a statement an error ended before its line did, and the at-rule is a new
+    /// statement on the same line: the rest of the line is no longer that header, and a
+    /// deeper line below cannot go on with it. Whether that line goes on was decided ahead
+    /// of the cursor, with the old header; decide it again. Tokens that start no statement
+    /// are left to the broken one, as legacy leaves them.
+    #[inline]
+    pub fn begin_at_rule(&mut self) {
+        if self.layout == super::Layout::Indented && self.indented.header.is_some() {
+            self.drop_stale_header();
+        }
+    }
+
+    #[cold]
+    fn drop_stale_header(&mut self) {
+        self.indented.header = None;
+        // The line breaks before the cursor went on with the statement; those after the
+        // at-rule's `@` are decided ahead, but nothing at them has been emitted yet.
+        if self.indented.line.index > self.pos {
+            self.find_line_start(self.pos + 1);
+            self.fence = self.locate_fence();
+        }
+    }
+
     /// Whether the cursor is at the first token of a statement: the first of a line the
     /// layout ended the previous statement at, or of the input. Always false when braced.
     #[inline]
@@ -605,14 +629,17 @@ impl<'src> Parser<'src> {
     // ── Headers ──────────────────────────────────────────────────────
 
     /// Whether the header goes on over the line breaks before `line` because of how the
-    /// line above ends.
+    /// line above ends. A variable's name is no end word: `through $to` ends with a value.
     fn header_goes_on_at_end_of_line(&self, line: &Line) -> bool {
         let Some((header, name)) = self.indented.header else {
             return false;
         };
         let last = line.index - 1;
+        let variable = self.input.kind(last.wrapping_sub(1)) == SyntaxKind::DOLLAR
+            && self.input.trivia_before(last).is_empty();
         (last == name && header.name_continues)
             || (self.input.kind(last) == SyntaxKind::IDENT
+                && !variable
                 && header.end_words.contains(&self.token_text(last)))
     }
 
@@ -642,14 +669,13 @@ impl<'src> Parser<'src> {
     }
 
     /// A `/*` that does not start its line and is never closed runs to the end of the
-    /// input as an `ERROR` token, the last one; the braced layout's missing `}` reports
-    /// that, but here nothing else would.
+    /// input as an `ERROR` token, which the input keeps as its last trivia; the braced
+    /// layout's missing `}` reports that, but here nothing else would.
     pub(super) fn report_unterminated_comment(&mut self) {
-        let Some(last) = self.input.len().checked_sub(1) else {
-            return;
-        };
-        if self.input.kind(last) == SyntaxKind::ERROR && self.token_text(last).starts_with("/*") {
-            self.error_at(self.input.range(last), "unterminated comment");
+        if let Some(&(SyntaxKind::ERROR, range)) = self.input.trailing_trivia().last()
+            && self.source[range].starts_with("/*")
+        {
+            self.error_at(range, "unterminated comment");
         }
     }
 

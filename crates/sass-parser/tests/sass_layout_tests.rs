@@ -7,6 +7,8 @@ use expect_test::{Expect, expect};
 
 #[path = "common/layout_allow_list.rs"]
 mod layout_allow_list;
+#[path = "common/layout_classes.rs"]
+mod layout_classes;
 #[path = "common/layout_differential.rs"]
 mod layout_differential;
 
@@ -76,6 +78,12 @@ fn allow_listed_defects_report_what_they_should() {
     let tree = render(parse_sass_layout, source);
     assert_eq!(tree.matches("RULE_SET@").count(), 3, "{tree}");
     assert_eq!(tree.matches("DECLARATION@").count(), 3, "{tree}");
+    // An unterminated loud comment: the error before it, and the comment itself.
+    assert_eq!(
+        error_count("$a: 1 +\n  /* c\n    d\n    2\n.b\n  c: $a\n"),
+        2
+    );
+    assert_eq!(error_count(".a /* x\n  y\n.b\n  c: d\n"), 1);
     // The loud comments of sass-spec's `loud.hrx`.
     let loud = layout_allow_list::allow_list()
         .into_iter()
@@ -84,6 +92,63 @@ fn allow_listed_defects_report_what_they_should() {
     let tree = render(parse_sass_layout, loud.input);
     assert_eq!(tree.matches("MULTI_LINE_COMMENT@").count(), 8, "{tree}");
     assert_eq!(error_count(loud.input), 0);
+}
+
+// ── Kinds of difference ──────────────────────────────────────────────
+
+/// The kinds the differences on the fuzz corpora must be of, each told on a small input
+/// that makes it; all of these but the comment across a blank line are inputs Dart Sass
+/// rejects. An input can make several, found one after another.
+#[test]
+fn differences_are_told_apart_by_kind() {
+    use layout_classes::Class::{
+        AtRuleAfterABrokenStatement, BracketRecovery, CommentAcrossBlankLine,
+        CommentLineDedentedToNoOpenBlock, DedentToNoOpenBlock, IndentationDiagnostics,
+        OperatorContinuesALine, OperatorOrColonEndsALine, StarEndsALine, StrayColonEndsALine,
+        TrailingIndentation, UnbalancedBrackets, UnterminatedComment, VariableNamedLikeAHeaderWord,
+        WordOperatorBeforeAStatement,
+    };
+    for (source, kinds) in [
+        (".a\n  b: c\n    ", vec![TrailingIndentation]),
+        (".a\n  b: c /* d\n", vec![UnterminatedComment]),
+        (
+            ".a\n  b: c /* d\n  ",
+            vec![TrailingIndentation, UnterminatedComment],
+        ),
+        (
+            ".a\n    .b\n      c: d\n  .e\n    f: g\n",
+            vec![IndentationDiagnostics],
+        ),
+        (
+            ".a\n  b: c and\n    d: e\n",
+            vec![WordOperatorBeforeAStatement],
+        ),
+        (
+            ".x\n  @if $and\n    a: b\n",
+            vec![VariableNamedLikeAHeaderWord],
+        ),
+        (".a\n  b: fn(1\n.c\n  d: e\n", vec![BracketRecovery]),
+        ("\x0e[:\n}+\n0", vec![UnbalancedBrackets]),
+        ("$||{z:\x0c,,", vec![UnbalancedBrackets]),
+        ("//\n\n //\n 4", vec![CommentAcrossBlankLine]),
+        ("$0*\n", vec![OperatorContinuesALine]),
+        ("$||:\x0c", vec![StrayColonEndsALine]),
+        (":*\n", vec![OperatorOrColonEndsALine]),
+        ("=\n\n\t//\n", vec![OperatorOrColonEndsALine]),
+        ("$+*//\n", vec![OperatorOrColonEndsALine]),
+        ("$@\n ''", vec![AtRuleAfterABrokenStatement]),
+        ("$\n\t //\n #\n", vec![DedentToNoOpenBlock]),
+        (
+            "=\x08\n\t //\n //\x08\n",
+            vec![CommentLineDedentedToNoOpenBlock],
+        ),
+        ("@:*\n", vec![OperatorOrColonEndsALine]),
+        ("@:*\n:", vec![StarEndsALine]),
+        ("$/or//or\n", vec![WordOperatorBeforeAStatement]),
+    ] {
+        assert_eq!(layout_classes::classify(source), kinds, "{source:?}");
+    }
+    assert!(layout_classes::classify(".a\n  b: c\n").is_empty());
 }
 
 // ── Forms Dart Sass accepts ──────────────────────────────────────────
@@ -107,8 +172,10 @@ fn dart_valid_continuations_parse_without_errors() {
     }
 }
 
-/// Accepted although Dart Sass rejects them; kept until the indented frontend is aligned
-/// with Dart, so that only that step changes what is accepted.
+/// Accepted although Dart Sass rejects them, or reads them otherwise (a trailing comma
+/// before a line at the same column); kept until the indented frontend is aligned with
+/// Dart, so that only that step changes what is accepted. Each is marked `lenient:` in
+/// the grammar.
 #[test]
 fn lenient_forms_still_parse_without_errors() {
     for source in [
@@ -121,6 +188,12 @@ fn lenient_forms_still_parse_without_errors() {
         ".a\n  @at-root\n    (without: media)\n    .b\n      c: d\n",
         "$b: true\n@if false\n  a: b\n@else\n  if $b\n  c: d\n",
         "$x: true\n$y: true\n@if $x\n  and $y\n  a: b\n",
+        ".a\n  b: c,\n    d\n",
+        ".a\n  b: c,\n  d\n",
+        "$a: 1,\n  2\n",
+        "@function f()\n  @return 1,\n    2\n",
+        "$a: 1\n  2\n",
+        "$a: 1\n  , 2\n",
     ] {
         let tree = check_same(source);
         assert!(!tree.contains("\nerror "), "{source:?}:\n{tree}");
@@ -152,6 +225,77 @@ fn an_operator_at_the_end_of_a_line_continues_the_expression() {
               WHITESPACE@9..10 "\n"
         "#]],
     );
+}
+
+/// A declaration's value reads `and`, `or` and `not` as words, but Dart Sass reads them
+/// as operators: after `and` or `or` with an operand before it, or after `not`, the value
+/// goes on on the next line, as it did in legacy.
+#[test]
+fn a_word_operator_at_the_end_of_a_value_continues_it() {
+    for source in [
+        ".a\n  b: c and\n    d\n",
+        ".a\n  b: c and\n  d\n",
+        ".a\n  b: c or\n    d\n",
+        ".a\n  b: 1 and\n    2\n",
+        ".a\n  b: c not\n    d\n",
+        ".a\n  content: not\n    d\n",
+        ".a\n  b: c and\n    d e\n",
+        ".a\n  b: c, d and\n  e\n",
+        ".a\n  b: c and\n    d\n  e: f\n",
+    ] {
+        let tree = check_same(source);
+        assert!(!tree.contains("\nerror "), "{source:?}:\n{tree}");
+    }
+    check(
+        ".a\n  b: c and\n    d\n",
+        expect![[r#"
+            SOURCE_FILE@0..20
+              RULE_SET@0..19
+                SELECTOR_LIST@0..2
+                  SELECTOR@0..2
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "a"
+                BLOCK@2..19
+                  LBRACE@2..2 ""
+                  DECLARATION@2..19
+                    PROPERTY@2..6
+                      WHITESPACE@2..5 "\n  "
+                      IDENT@5..6 "b"
+                    COLON@6..7 ":"
+                    VALUE@7..19
+                      VALUE@7..9
+                        WHITESPACE@7..8 " "
+                        IDENT@8..9 "c"
+                      VALUE@9..13
+                        WHITESPACE@9..10 " "
+                        IDENT@10..13 "and"
+                      VALUE@13..19
+                        WHITESPACE@13..18 "\n    "
+                        IDENT@18..19 "d"
+                    SEMICOLON@19..19 ""
+                  RBRACE@19..19 ""
+              WHITESPACE@19..20 "\n"
+        "#]],
+    );
+}
+
+/// The failing cases: a line that starts like a declaration is no operand, and `and` or
+/// `or` with nothing before it is a plain word. Both end the value, and the next line
+/// has a property of its own, with no diagnostic yet (Dart reports `expected newline.`
+/// for the first).
+#[test]
+fn a_word_operator_does_not_take_a_declaration_into_the_value() {
+    for source in [
+        ".a\n  b: c and\n    d: e\n",
+        ".a\n  b: c or\n  d: e\n",
+        ".a\n  content: not\n  b: c\n",
+        ".a\n  content: and\n  b: c\n",
+    ] {
+        let tree = render(parse_sass_layout, source);
+        assert_eq!(tree.matches(" PROPERTY@").count(), 2, "{source:?}:\n{tree}");
+        assert!(!tree.contains("\nerror "), "{source:?}:\n{tree}");
+    }
 }
 
 #[test]
@@ -200,6 +344,72 @@ fn a_blank_line_ends_a_continued_expression() {
 #[test]
 fn a_comma_continues_across_a_blank_line() {
     check_same(".a,\n\n.b\n  c: d\n");
+}
+
+/// Every list the grammar reads outside brackets goes on after a comma at the end of a
+/// line, with or without a blank line after it, as in legacy.
+#[test]
+fn every_comma_separated_list_goes_on_after_a_comma() {
+    for source in [
+        ".a,\n  .b\n  c: d\n",
+        ".a\n  @extend .b,\n    .c\n",
+        "@each $a,\n  $b in c\n  d: e\n",
+        "@each $a in b,\n  c\n  d: e\n",
+        ".a\n  b: c,\n    d\n",
+        "$a: 1,\n  2\n",
+        "@use \"a\" show b,\n  c\n",
+        "@import \"a\",\n  \"b\"\n",
+        "@layer a,\n  b\n",
+        "@keyframes k\n  10%,\n    20%\n    a: b\n",
+        "@foo\n  10%,\n  20%\n    a: b\n",
+        "@media screen,\n  print\n  .a\n    b: c\n",
+        "@foo a,\n  b\n  c: d\n",
+        ".a\n  --x: a,\n    b\n",
+    ] {
+        check_same(source);
+        check_same(&source.replacen(",\n", ",\n\n", 1));
+    }
+}
+
+/// The keyframe selectors of an unknown at-rule's block: the comma joins `20%` to `10%`,
+/// and the block below belongs to both.
+#[test]
+fn a_comma_continues_a_keyframe_list_in_an_unknown_at_rule() {
+    check_same("@foo\n  10%,\n  20%\n    a: b\n");
+    check(
+        "@foo\n  10%,\n  20%\n    a: b\n",
+        expect![[r#"
+            SOURCE_FILE@0..27
+              GENERIC_AT_RULE@0..26
+                AT@0..1 "@"
+                IDENT@1..4 "foo"
+                BLOCK@4..26
+                  LBRACE@4..4 ""
+                  KEYFRAME_SELECTOR@4..26
+                    WHITESPACE@4..7 "\n  "
+                    NUMBER@7..9 "10"
+                    PERCENT@9..10 "%"
+                    COMMA@10..11 ","
+                    WHITESPACE@11..14 "\n  "
+                    NUMBER@14..16 "20"
+                    PERCENT@16..17 "%"
+                    BLOCK@17..26
+                      LBRACE@17..17 ""
+                      DECLARATION@17..26
+                        PROPERTY@17..23
+                          WHITESPACE@17..22 "\n    "
+                          IDENT@22..23 "a"
+                        COLON@23..24 ":"
+                        VALUE@24..26
+                          VALUE@24..26
+                            WHITESPACE@24..25 " "
+                            IDENT@25..26 "b"
+                        SEMICOLON@26..26 ""
+                      RBRACE@26..26 ""
+                  RBRACE@26..26 ""
+              WHITESPACE@26..27 "\n"
+        "#]],
+    );
 }
 
 #[test]
@@ -298,6 +508,122 @@ fn a_comment_on_a_continued_line_is_an_ordinary_comment() {
                     SEMICOLON@31..31 ""
                   RBRACE@31..31 ""
               WHITESPACE@31..32 "\n"
+        "#]],
+    );
+}
+
+/// A header goes on after one of its words at the end of a line; a variable named like
+/// one is no such word, and the line below is the rule's body, as in Dart Sass.
+#[test]
+fn a_variable_named_like_a_header_word_ends_the_header() {
+    check_same(".x\n  @for $i from 1 through\n    3\n    a: $i\n");
+    check_same(".x\n  @each $v in\n    1 2\n    a: $v\n");
+    for (source, rule) in [
+        (".x\n  @for $i from 1 through $to\n    a: $i\n", "FOR_RULE@"),
+        (".x\n  @for $i from 1 to $through\n    a: $i\n", "FOR_RULE@"),
+        (
+            ".x\n  @for $i from $from through $to\n    a: $i\n",
+            "FOR_RULE@",
+        ),
+        (".x\n  @each $v in $in\n    a: $v\n", "EACH_RULE@"),
+        (".x\n  @if $and\n    a: b\n", "IF_RULE@"),
+        (".x\n  @if true and $or\n    a: b\n", "IF_RULE@"),
+        (".x\n  @while $not\n    a: b\n", "WHILE_RULE@"),
+    ] {
+        let tree = render(parse_sass_layout, source);
+        let body = tree
+            .split_once(rule)
+            .map(|(_, rest)| rest.contains("BLOCK@") && rest.contains("DECLARATION@"));
+        assert_eq!(body, Some(true), "{source:?}:\n{tree}");
+        assert!(!tree.contains("\nerror "), "{source:?}:\n{tree}");
+    }
+    check(
+        ".x\n  @for $i from 1 through $to\n    a: $i\n",
+        expect![[r#"
+            SOURCE_FILE@0..42
+              RULE_SET@0..41
+                SELECTOR_LIST@0..2
+                  SELECTOR@0..2
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "x"
+                BLOCK@2..41
+                  LBRACE@2..2 ""
+                  FOR_RULE@2..41
+                    WHITESPACE@2..5 "\n  "
+                    AT@5..6 "@"
+                    IDENT@6..9 "for"
+                    WHITESPACE@9..10 " "
+                    DOLLAR@10..11 "$"
+                    IDENT@11..12 "i"
+                    WHITESPACE@12..13 " "
+                    IDENT@13..17 "from"
+                    NUMBER_LITERAL@17..19
+                      WHITESPACE@17..18 " "
+                      NUMBER@18..19 "1"
+                    WHITESPACE@19..20 " "
+                    IDENT@20..27 "through"
+                    VARIABLE_REF@27..31
+                      WHITESPACE@27..28 " "
+                      DOLLAR@28..29 "$"
+                      IDENT@29..31 "to"
+                    BLOCK@31..41
+                      LBRACE@31..31 ""
+                      DECLARATION@31..41
+                        PROPERTY@31..37
+                          WHITESPACE@31..36 "\n    "
+                          IDENT@36..37 "a"
+                        COLON@37..38 ":"
+                        VALUE@38..41
+                          VARIABLE_REF@38..41
+                            WHITESPACE@38..39 " "
+                            DOLLAR@39..40 "$"
+                            IDENT@40..41 "i"
+                        SEMICOLON@41..41 ""
+                      RBRACE@41..41 ""
+                  RBRACE@41..41 ""
+              WHITESPACE@41..42 "\n"
+        "#]],
+    );
+}
+
+/// An error ends a statement before its line does; an at-rule after it on the line is a
+/// statement of its own, and the header of the broken one no longer decides whether the
+/// deeper line below goes on: here it opens the at-rule's block, as in legacy.
+#[test]
+fn an_at_rule_after_a_broken_statement_ends_its_header() {
+    check_same("+J@\n\t(\n");
+    check_same("=@\n ,\n");
+    // A comma went on over the line break before the at-rule.
+    check_same("=,\x0c@\x0c ,");
+    check(
+        "+m@\n  (a)\n",
+        expect![[r#"
+            SOURCE_FILE@0..10
+              INCLUDE_RULE@0..2
+                AT@0..0 ""
+                IDENT@0..1 "+"
+                IDENT@1..2 "m"
+              GENERIC_AT_RULE@2..9
+                AT@2..3 "@"
+                BLOCK@3..9
+                  LBRACE@3..3 ""
+                  ERROR@3..7
+                    WHITESPACE@3..6 "\n  "
+                    LPAREN@6..7 "("
+                  RULE_SET@7..8
+                    SELECTOR_LIST@7..8
+                      SELECTOR@7..8
+                        SIMPLE_SELECTOR@7..8
+                          IDENT@7..8 "a"
+                  ERROR@8..9
+                    RPAREN@8..9 ")"
+                  SEMICOLON@9..9 ""
+                  RBRACE@9..9 ""
+              WHITESPACE@9..10 "\n"
+            error 2..3: expected SEMICOLON
+            error 6..7: expected declaration or nested rule
+            error 8..9: expected declaration or nested rule
         "#]],
     );
 }

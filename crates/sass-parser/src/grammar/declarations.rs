@@ -116,6 +116,8 @@ fn value(p: &mut Parser<'_>) {
     let ctx = ParseContext::CssValue;
 
     let mut has_content = false;
+    // The last item was an operand, which `and` or `or` after it would combine.
+    let mut operand_before = false;
     loop {
         if p.at(SEMICOLON) || p.at(RBRACE) || p.at(LBRACE) || p.at_end() {
             break;
@@ -133,6 +135,7 @@ fn value(p: &mut Parser<'_>) {
             p.bump();
             p.continue_line();
             has_content = true;
+            operand_before = false;
             continue;
         }
         // In CssValue context, `/` is a separator — just consume it
@@ -140,22 +143,33 @@ fn value(p: &mut Parser<'_>) {
             p.bump();
             p.continue_line();
             has_content = true;
+            operand_before = false;
             continue;
         }
         if p.at(COMMA) {
             p.bump();
+            // lenient: Dart ends the value at a comma that ends its line, a trailing comma,
+            // and reads the next line as a statement of its own: `b: c,` / `    d` is
+            // rejected — "expected ':'." — and `b: c,` / `  d` makes `d` an empty rule.
             p.continue_line_across_blank();
             has_content = true;
+            operand_before = false;
             continue;
         }
         if !p.at_ts(expressions::EXPR_START) {
             // Unknown token in value position — bump for progress
             super::lines::bump_in_run(p);
             has_content = true;
+            operand_before = false;
             continue;
         }
+        let goes_on = super::lines::word_operator_goes_on(p, operand_before);
         if expressions::expr(p, ctx).is_some() {
             has_content = true;
+            operand_before = true;
+            if goes_on {
+                p.continue_line();
+            }
         } else {
             break;
         }

@@ -6,9 +6,10 @@
 //! beneath it, which the at-rule function declares with [`Parser::continue_header`]
 //! when it has read the rule's name.
 //!
-//! Forms marked `lenient:` are accepted here although Dart Sass rejects them; they are
-//! kept, for now, so that the indented frontend does not change what it accepts while it
-//! is being rebuilt.
+//! Forms marked `lenient:`, here and at the grammar positions that continue a line, are
+//! accepted although Dart Sass rejects them, or reads them otherwise; they are kept, for
+//! now, so that the indented frontend does not change what it accepts while it is being
+//! rebuilt.
 
 use crate::parser::{HeaderLines, Parser};
 #[allow(clippy::wildcard_imports)]
@@ -199,6 +200,8 @@ const VALUE_WORDS: &[&str] = &[
 
 /// A variable declaration's value goes on below it on a line that starts like a value.
 pub(crate) const VARIABLE: HeaderLines = HeaderLines {
+    // lenient: Dart rejects anything indented beneath a variable declaration: `$a: 1` /
+    // `  2` — "Nothing may be indented beneath a variable declaration."
     starts: VALUE_STARTS,
     words: VALUE_WORDS,
     bare_starts: VALUE_STARTS,
@@ -244,6 +247,27 @@ pub(crate) fn bump_operator(p: &mut Parser<'_>) {
     if !unit {
         p.continue_line();
     }
+}
+
+/// Whether the line goes on after the token at the cursor, a word that a CSS value reads
+/// as a plain identifier but Dart Sass as an operator, when it ends its line: `and` or
+/// `or` after an operand, or `not`. Dart takes the next line as its operand, as legacy
+/// did. A next line that starts like a declaration (`name:`) cannot be one — Dart
+/// rejects it — and is left a statement of its own rather than taken into the value.
+pub(crate) fn word_operator_goes_on(p: &Parser<'_>, operand_before: bool) -> bool {
+    if !p.at(IDENT) {
+        return false;
+    }
+    let operator = match p.current_text() {
+        "and" | "or" => operand_before,
+        "not" => true,
+        _ => false,
+    };
+    if !operator || !matches!(p.nth(1), SEMICOLON | LBRACE | RBRACE | EOF) {
+        return false;
+    }
+    let joined = p.joined(TokenSet::new(&[IDENT]));
+    !(p.nth_joined(joined, 1) == IDENT && p.nth_joined(joined, 2) == COLON)
 }
 
 /// [`Parser::err_and_bump`], with the token bumped as in [`bump_in_run`].
