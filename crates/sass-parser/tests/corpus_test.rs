@@ -570,13 +570,13 @@ fn sass_corpora_layout_matches_legacy() {
         }
     }
     eprintln!(
-        "\nparse_sass_layout vs parse_sass_legacy: {files} files, {allowed} allow-listed \
+        "\nparse_sass vs parse_sass_legacy: {files} files, {allowed} allow-listed \
          differences, {} other",
         mismatches.len(),
     );
     assert!(
         mismatches.is_empty(),
-        "parse_sass_layout disagrees with parse_sass_legacy:\n{}",
+        "parse_sass disagrees with parse_sass_legacy:\n{}",
         mismatches[..mismatches.len().min(3)].join("\n"),
     );
 }

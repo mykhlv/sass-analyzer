@@ -1,4 +1,4 @@
-//! `parse_sass_layout` against `parse_sass_legacy`: the two indented frontends must give
+//! `parse_sass` against `parse_sass_legacy`: the two indented frontends must give
 //! the same tree and errors, except for the kinds of difference the layout frontend makes
 //! on purpose, which the corpus tests know too (`tests/common/layout_classes.rs`). A
 //! difference of no known kind does not stop the run: the input is recorded under

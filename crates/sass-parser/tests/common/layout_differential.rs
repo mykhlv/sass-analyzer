@@ -1,4 +1,4 @@
-//! Differential check of `parse_sass_layout` against `parse_sass_legacy`.
+//! Differential check of `parse_sass` against `parse_sass_legacy`.
 //!
 //! Included with `#[path]` by the test binaries that run it, rather than through
 //! `common/mod.rs`, so that binaries which do not are not left with dead code.
@@ -30,7 +30,7 @@ pub fn render(parse: ParseFn, source: &str) -> String {
 /// Both renderings when the layout pipeline and the legacy one disagree on `source`.
 pub fn layout_mismatch(source: &str) -> Option<(String, String)> {
     let legacy = render(sass_parser::parse_sass_legacy, source);
-    let layout = render(sass_parser::parse_sass_layout, source);
+    let layout = render(sass_parser::parse_sass, source);
     (legacy != layout).then_some((legacy, layout))
 }
 

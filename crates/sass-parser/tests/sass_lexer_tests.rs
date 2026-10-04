@@ -27,12 +27,12 @@ fn check_parse(source: &str) -> String {
     parse_tree(source)
 }
 
-/// `parse_sass_layout` gives legacy's tree, or the input is on the allow-list.
+/// `parse_sass` gives legacy's tree, or the input is on the allow-list.
 fn check_layout(source: &str) {
     if let Some((legacy, layout)) = layout_differential::layout_mismatch(source) {
         assert!(
             layout_allow_list::allowed(source).is_some(),
-            "parse_sass_layout disagrees with parse_sass_legacy on {source:?}, which is not \
+            "parse_sass disagrees with parse_sass_legacy on {source:?}, which is not \
              on the allow-list:\n{}",
             layout_differential::first_difference(&legacy, &layout),
         );
@@ -5126,24 +5126,26 @@ fn loud_comment_closer_on_a_dedented_line_is_an_error() {
     );
 }
 
-/// Dart Sass reports `expected more input.` at the end of the file. A comment after
-/// content follows the SCSS rule, and the lexer has no way to report one never closed.
+/// A comment after content follows the SCSS rule: it runs to the end of the file and is
+/// reported as never closed (Dart Sass: `expected more input.`).
 #[test]
-fn unclosed_loud_comment_after_content_runs_to_the_end_of_the_file() {
+fn unclosed_loud_comment_after_content_is_reported() {
     check_tree(
         ".a /* x\n  y\n.b\n  c: d\n",
         expect![[r#"
-        SOURCE_FILE@0..22
-          RULE_SET@0..2
-            SELECTOR_LIST@0..2
-              SELECTOR@0..2
-                SIMPLE_SELECTOR@0..2
-                  DOT@0..1 "."
-                  IDENT@1..2 "a"
-          WHITESPACE@2..3 " "
-          MULTI_LINE_COMMENT@3..22 "/* x\n  y\n.b\n  c: d\n"
-          SEMICOLON@22..22 ""
-    "#]],
+            SOURCE_FILE@0..22
+              RULE_SET@0..2
+                SELECTOR_LIST@0..2
+                  SELECTOR@0..2
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "a"
+              WHITESPACE@2..3 " "
+              ERROR@3..22 "/* x\n  y\n.b\n  c: d\n"
+              SEMICOLON@22..22 ""
+            errors:
+              3..22: unterminated comment
+        "#]],
     );
 }
 
@@ -5525,44 +5527,39 @@ fn silent_comment_continuation_line_with_an_unclosed_url() {
     );
 }
 
-/// Dart Sass continues the comment over the blank line, so `more` is part of it and the
-/// file compiles to `.a { b: c }`.
+/// As in Dart Sass, the comment continues over the blank line, so `more` is part of it
+/// and the file compiles to `.a { b: c }`.
 #[test]
-fn blank_line_ending_a_silent_comment_is_a_known_limitation() {
+fn silent_comment_continues_across_a_blank_line() {
     check_tree_across_a_blank_line(
         "// c\n\n  more\n.a\n  b: c\n",
         expect![[r#"
-        SOURCE_FILE@0..23
-          RULE_SET@0..12
-            SELECTOR_LIST@0..12
-              SELECTOR@0..12
-                SIMPLE_SELECTOR@0..12
-                  SINGLE_LINE_COMMENT@0..4 "// c"
-                  WHITESPACE@4..8 "\n\n  "
-                  IDENT@8..12 "more"
-          SEMICOLON@12..12 ""
-          RULE_SET@12..22
-            SELECTOR_LIST@12..15
-              SELECTOR@12..15
-                SIMPLE_SELECTOR@12..15
-                  WHITESPACE@12..13 "\n"
-                  DOT@13..14 "."
-                  IDENT@14..15 "a"
-            BLOCK@15..22
-              LBRACE@15..15 ""
-              DECLARATION@15..22
-                PROPERTY@15..19
-                  WHITESPACE@15..18 "\n  "
-                  IDENT@18..19 "b"
-                COLON@19..20 ":"
-                VALUE@20..22
-                  VALUE@20..22
-                    WHITESPACE@20..21 " "
-                    IDENT@21..22 "c"
-                SEMICOLON@22..22 ""
-              RBRACE@22..22 ""
-          WHITESPACE@22..23 "\n"
-    "#]],
+            SOURCE_FILE@0..23
+              RULE_SET@0..22
+                SELECTOR_LIST@0..15
+                  SELECTOR@0..15
+                    SIMPLE_SELECTOR@0..15
+                      SINGLE_LINE_COMMENT@0..4 "// c"
+                      WHITESPACE@4..8 "\n\n  "
+                      SINGLE_LINE_COMMENT@8..12 "more"
+                      WHITESPACE@12..13 "\n"
+                      DOT@13..14 "."
+                      IDENT@14..15 "a"
+                BLOCK@15..22
+                  LBRACE@15..15 ""
+                  DECLARATION@15..22
+                    PROPERTY@15..19
+                      WHITESPACE@15..18 "\n  "
+                      IDENT@18..19 "b"
+                    COLON@19..20 ":"
+                    VALUE@20..22
+                      VALUE@20..22
+                        WHITESPACE@20..21 " "
+                        IDENT@21..22 "c"
+                    SEMICOLON@22..22 ""
+                  RBRACE@22..22 ""
+              WHITESPACE@22..23 "\n"
+        "#]],
     );
 }
 

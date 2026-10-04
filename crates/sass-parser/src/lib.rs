@@ -83,20 +83,11 @@ pub fn parse_scss(source: &str) -> (rowan::GreenNode, Vec<(String, TextRange)>) 
 
 /// Parse indented Sass (`.sass`) source into a rowan green tree + diagnostics.
 ///
-/// Uses the same parser and bridge as [`parse_scss()`], but pre-processes tokens
-/// with [`sass_lexer::sass_tokenize()`] to insert virtual `{`/`}`/`;` tokens
-/// based on indentation and newlines.
+/// Uses the same grammar and bridge as [`parse_scss()`]. The parser decides from the
+/// line breaks and indentation of the source where statements end and blocks open,
+/// and builds the same tree shape as for the equivalent SCSS, with zero-width
+/// `{`/`}`/`;` tokens at those points.
 pub fn parse_sass(source: &str) -> (rowan::GreenNode, Vec<(String, TextRange)>) {
-    parse_sass_legacy(source)
-}
-
-/// Indented Sass parsed by layout: the parser itself decides where statements end and
-/// blocks open, from the line breaks and indentation of the source, with no virtual
-/// tokens from the lexer. Meant to replace [`parse_sass_legacy()`] behind
-/// [`parse_sass()`]; until then a differential test holds the two to the same trees.
-/// Not part of the supported API.
-#[doc(hidden)]
-pub fn parse_sass_layout(source: &str) -> (rowan::GreenNode, Vec<(String, TextRange)>) {
     let input = input::Input::from_source_indented(source);
     let mut parser = parser::Parser::with_layout(input, source, parser::Layout::Indented);
     grammar::source_file(&mut parser);
@@ -104,10 +95,9 @@ pub fn parse_sass_layout(source: &str) -> (rowan::GreenNode, Vec<(String, TextRa
     build_tree(events, &errors, &input, src)
 }
 
-/// The indented-Sass pipeline built on [`sass_lexer::sass_tokenize()`], callable
-/// under its own name so that it stays available as the reference when
-/// [`parse_sass()`] moves to a different frontend: a differential test compares
-/// the two trees and error lists. Not part of the supported API.
+/// The previous indented-Sass pipeline, built on [`sass_lexer::sass_tokenize()`]'s
+/// virtual tokens. Kept as the reference that a differential test compares
+/// [`parse_sass()`] against until it is deleted. Not part of the supported API.
 #[doc(hidden)]
 pub fn parse_sass_legacy(source: &str) -> (rowan::GreenNode, Vec<(String, TextRange)>) {
     let tokens = sass_lexer::sass_tokenize(source);
