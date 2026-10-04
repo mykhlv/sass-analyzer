@@ -46,6 +46,10 @@ pub enum Class {
     /// block deeper than it, as the blocks follow the columns; legacy kept such a line in
     /// a block a comment line had opened. Dart Sass rejects such input.
     DedentToNoOpenBlock,
+    /// The same for a line that holds only a silent comment, which is not reported: it
+    /// closes the block a comment line above it opened, where legacy kept it in. Without
+    /// the comment-only lines, the frontends agree. Only on input legacy reports errors in.
+    CommentLineDedentedToNoOpenBlock,
     /// A closing bracket that does not match the open one (`}` inside `[`), or a `{` or
     /// `}` outside brackets, which the indented syntax has no use for, puts the input's
     /// count of open brackets out of step with the grammar's, so that a line break the
@@ -62,6 +66,11 @@ pub enum Class {
     /// A line that starts with `$` and ends with a colon goes on only after a variable's
     /// name, `$name:`; legacy continued any such line.
     StrayColonEndsALine,
+    /// A `*` that ends a line ends the statement where the grammar does not read it as
+    /// multiplication — in a selector, in an at-rule's prelude; legacy went on after it
+    /// in any statement with a colon before it. With such a `*` respelled, the frontends
+    /// agree. Only on input one of them reports errors in.
+    StarEndsALine,
     /// Whether a line that ends in an operator or a colon goes on is the grammar's
     /// decision — after an operator it reads as one, after a colon only where a name ends
     /// the line — where legacy decided by the shape of the line, and went on where the
@@ -116,8 +125,11 @@ pub fn classify(source: &str) -> Vec<Class> {
                 found.push(class);
                 return found;
             }
+            let reported = rejected || layout.contains("\nerror ");
             if let Some(next) = ending_at_its_last_operator(&source) {
                 (Class::OperatorOrColonEndsALine, next)
+            } else if let Some(next) = with_line_end_stars_respelled(&source).filter(|_| reported) {
+                (Class::StarEndsALine, next)
             } else if let Some(next) =
                 with_line_end_operators_respelled(&source).filter(|_| rejected)
             {
@@ -126,6 +138,8 @@ pub fn classify(source: &str) -> Vec<Class> {
                 with_at_rules_on_lines_of_their_own(&source).filter(|_| rejected)
             {
                 (Class::AtRuleAfterABrokenStatement, next)
+            } else if let Some(next) = without_comment_lines(&source).filter(|_| rejected) {
+                (Class::CommentLineDedentedToNoOpenBlock, next)
             } else {
                 found.push(class);
                 return found;
@@ -180,16 +194,18 @@ fn without_indentation_diagnostics(layout: &str) -> String {
     out
 }
 
-/// The input with `and`, `or` and `not` at the end of a line respelled, if it has any.
+/// The input with `and`, `or` and `not` at the end of a line respelled, if it has any; a
+/// silent comment after the word on the line does not count.
 fn with_word_operators_respelled(source: &str) -> Option<String> {
     let mut changed = false;
     let respelled: String = source
         .split_inclusive('\n')
         .map(|line| {
-            let body = line.trim_end_matches(['\n', '\r', '\x0c', ' ', '\t']);
+            let code = line.find("//").map_or(line, |comment| &line[..comment]);
+            let body = code.trim_end_matches(['\n', '\r', '\x0c', ' ', '\t']);
             for word in ["and", "or", "not"] {
                 if let Some(head) = body.strip_suffix(word)
-                    && (head.is_empty() || head.ends_with([' ', '\t', ':', ',', '/']))
+                    && !head.ends_with(|c: char| c.is_alphanumeric() || "-_$".contains(c))
                 {
                     changed = true;
                     return format!("{head}x{}", &line[head.len() + 1..]);
@@ -216,6 +232,38 @@ fn with_line_end_operators_respelled(source: &str) -> Option<String> {
                 || (body.ends_with("*/") && !body.ends_with("/*/"))
                 || body.ends_with("/*/");
             if body.ends_with(OPERATORS) && !comment {
+                changed = true;
+                format!("{}x{}", &body[..body.len() - 1], &line[body.len()..])
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect();
+    changed.then_some(respelled)
+}
+
+/// The input without the lines that hold only a silent comment, if it has any.
+fn without_comment_lines(source: &str) -> Option<String> {
+    let mut changed = false;
+    let kept: String = source
+        .split_inclusive(['\n', '\r', '\x0c'])
+        .filter(|line| {
+            let comment = line.trim_start_matches([' ', '\t']).starts_with("//");
+            changed |= comment;
+            !comment
+        })
+        .collect();
+    changed.then_some(kept)
+}
+
+/// The input with a `*` that ends a line respelled, if it has any; not the `*` of a `/*`.
+fn with_line_end_stars_respelled(source: &str) -> Option<String> {
+    let mut changed = false;
+    let respelled: String = source
+        .split_inclusive(['\n', '\r', '\x0c'])
+        .map(|line| {
+            let body = line.trim_end_matches(['\n', '\r', '\x0c', ' ', '\t']);
+            if body.ends_with('*') && !body.ends_with("/*") {
                 changed = true;
                 format!("{}x{}", &body[..body.len() - 1], &line[body.len()..])
             } else {

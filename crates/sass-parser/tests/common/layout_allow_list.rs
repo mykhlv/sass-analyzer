@@ -541,6 +541,63 @@ pub fn allow_list() -> Vec<Allowed> {
             "#]],
         },
         Allowed {
+            input: ".a\n  b: c\n@x:*\n.d\n  e: f\n",
+            change: "legacy goes on after a `*` that ends a line in any statement with a \
+                     colon before it, as if it were multiplication, and silently takes the \
+                     rule `.d` into the at-rule's prelude; the layout frontend ends the \
+                     at-rule at the line break (Dart: same, `@x :*;` and the rule)",
+            expected: expect![[r#"
+                SOURCE_FILE@0..25
+                  RULE_SET@0..9
+                    SELECTOR_LIST@0..2
+                      SELECTOR@0..2
+                        SIMPLE_SELECTOR@0..2
+                          DOT@0..1 "."
+                          IDENT@1..2 "a"
+                    BLOCK@2..9
+                      LBRACE@2..2 ""
+                      DECLARATION@2..9
+                        PROPERTY@2..6
+                          WHITESPACE@2..5 "\n  "
+                          IDENT@5..6 "b"
+                        COLON@6..7 ":"
+                        VALUE@7..9
+                          VALUE@7..9
+                            WHITESPACE@7..8 " "
+                            IDENT@8..9 "c"
+                        SEMICOLON@9..9 ""
+                      RBRACE@9..9 ""
+                  GENERIC_AT_RULE@9..14
+                    WHITESPACE@9..10 "\n"
+                    AT@10..11 "@"
+                    IDENT@11..12 "x"
+                    COLON@12..13 ":"
+                    STAR@13..14 "*"
+                    SEMICOLON@14..14 ""
+                  RULE_SET@14..24
+                    SELECTOR_LIST@14..17
+                      SELECTOR@14..17
+                        SIMPLE_SELECTOR@14..17
+                          WHITESPACE@14..15 "\n"
+                          DOT@15..16 "."
+                          IDENT@16..17 "d"
+                    BLOCK@17..24
+                      LBRACE@17..17 ""
+                      DECLARATION@17..24
+                        PROPERTY@17..21
+                          WHITESPACE@17..20 "\n  "
+                          IDENT@20..21 "e"
+                        COLON@21..22 ":"
+                        VALUE@22..24
+                          VALUE@22..24
+                            WHITESPACE@22..23 " "
+                            IDENT@23..24 "f"
+                        SEMICOLON@24..24 ""
+                      RBRACE@24..24 ""
+                  WHITESPACE@24..25 "\n"
+            "#]],
+        },
+        Allowed {
             input: "/* loud\n  still comment\n.a\n  b: c\n.d\n  e: f\n",
             change: "a loud comment that starts a statement ends at the first line no \
                      deeper than its own, not at the end of the file; both frontends now \

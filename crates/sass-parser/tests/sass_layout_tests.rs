@@ -102,10 +102,11 @@ fn allow_listed_defects_report_what_they_should() {
 #[test]
 fn differences_are_told_apart_by_kind() {
     use layout_classes::Class::{
-        AtRuleAfterABrokenStatement, BracketRecovery, CommentAcrossBlankLine, DedentToNoOpenBlock,
-        IndentationDiagnostics, OperatorContinuesALine, OperatorOrColonEndsALine,
-        StrayColonEndsALine, TrailingIndentation, UnbalancedBrackets, UnterminatedComment,
-        VariableNamedLikeAHeaderWord, WordOperatorBeforeAStatement,
+        AtRuleAfterABrokenStatement, BracketRecovery, CommentAcrossBlankLine,
+        CommentLineDedentedToNoOpenBlock, DedentToNoOpenBlock, IndentationDiagnostics,
+        OperatorContinuesALine, OperatorOrColonEndsALine, StarEndsALine, StrayColonEndsALine,
+        TrailingIndentation, UnbalancedBrackets, UnterminatedComment, VariableNamedLikeAHeaderWord,
+        WordOperatorBeforeAStatement,
     };
     for (source, kinds) in [
         (".a\n  b: c\n    ", vec![TrailingIndentation]),
@@ -137,7 +138,13 @@ fn differences_are_told_apart_by_kind() {
         ("$+*//\n", vec![OperatorOrColonEndsALine]),
         ("$@\n ''", vec![AtRuleAfterABrokenStatement]),
         ("$\n\t //\n #\n", vec![DedentToNoOpenBlock]),
+        (
+            "=\x08\n\t //\n //\x08\n",
+            vec![CommentLineDedentedToNoOpenBlock],
+        ),
         ("@:*\n", vec![OperatorOrColonEndsALine]),
+        ("@:*\n:", vec![StarEndsALine]),
+        ("$/or//or\n", vec![WordOperatorBeforeAStatement]),
     ] {
         assert_eq!(layout_classes::classify(source), kinds, "{source:?}");
     }
