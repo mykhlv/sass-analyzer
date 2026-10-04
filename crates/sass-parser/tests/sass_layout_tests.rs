@@ -1,4 +1,4 @@
-//! `parse_sass_layout`: indented Sass with statement boundaries decided by the parser.
+//! `parse_sass`: indented Sass with statement boundaries decided by the parser.
 //!
 //! Every input in `sass_lexer_tests.rs` is also parsed by both frontends there and must
 //! give the same tree, unless it is on the allow-list.
@@ -13,12 +13,12 @@ mod layout_classes;
 mod layout_differential;
 
 use layout_differential::render;
-use sass_parser::parse_sass_layout;
+use sass_parser::parse_sass;
 
 #[allow(clippy::needless_pass_by_value)]
 #[track_caller]
 fn check(source: &str, expect: Expect) {
-    expect.assert_eq(&render(parse_sass_layout, source));
+    expect.assert_eq(&render(parse_sass, source));
 }
 
 /// The layout frontend gives the same tree as legacy here.
@@ -26,15 +26,15 @@ fn check(source: &str, expect: Expect) {
 fn check_same(source: &str) -> String {
     if let Some((legacy, layout)) = layout_differential::layout_mismatch(source) {
         panic!(
-            "parse_sass_layout and parse_sass_legacy disagree on {source:?}:\n{}",
+            "parse_sass and parse_sass_legacy disagree on {source:?}:\n{}",
             layout_differential::first_difference(&legacy, &layout),
         );
     }
-    render(parse_sass_layout, source)
+    render(parse_sass, source)
 }
 
 fn error_count(source: &str) -> usize {
-    parse_sass_layout(source).1.len()
+    parse_sass(source).1.len()
 }
 
 // ── The allow-list ───────────────────────────────────────────────────
@@ -42,9 +42,7 @@ fn error_count(source: &str) -> usize {
 #[test]
 fn allow_listed_inputs_reach_their_target() {
     for entry in layout_allow_list::allow_list() {
-        entry
-            .expected
-            .assert_eq(&render(parse_sass_layout, entry.input));
+        entry.expected.assert_eq(&render(parse_sass, entry.input));
     }
 }
 
@@ -75,7 +73,7 @@ fn allow_listed_defects_report_what_they_should() {
     // An unclosed bracket: one error, and the rules after it parse.
     let source = ".a\n  b: fn(1\n.c\n  d: e\n.f\n  g: h\n";
     assert_eq!(error_count(source), 1);
-    let tree = render(parse_sass_layout, source);
+    let tree = render(parse_sass, source);
     assert_eq!(tree.matches("RULE_SET@").count(), 3, "{tree}");
     assert_eq!(tree.matches("DECLARATION@").count(), 3, "{tree}");
     // An unterminated loud comment: the error before it, and the comment itself.
@@ -89,7 +87,7 @@ fn allow_listed_defects_report_what_they_should() {
         .into_iter()
         .find(|entry| entry.input.starts_with("/* Single-line"))
         .unwrap();
-    let tree = render(parse_sass_layout, loud.input);
+    let tree = render(parse_sass, loud.input);
     assert_eq!(tree.matches("MULTI_LINE_COMMENT@").count(), 8, "{tree}");
     assert_eq!(error_count(loud.input), 0);
 }
@@ -292,7 +290,7 @@ fn a_word_operator_does_not_take_a_declaration_into_the_value() {
         ".a\n  content: not\n  b: c\n",
         ".a\n  content: and\n  b: c\n",
     ] {
-        let tree = render(parse_sass_layout, source);
+        let tree = render(parse_sass, source);
         assert_eq!(tree.matches(" PROPERTY@").count(), 2, "{source:?}:\n{tree}");
         assert!(!tree.contains("\nerror "), "{source:?}:\n{tree}");
     }
@@ -530,7 +528,7 @@ fn a_variable_named_like_a_header_word_ends_the_header() {
         (".x\n  @if true and $or\n    a: b\n", "IF_RULE@"),
         (".x\n  @while $not\n    a: b\n", "WHILE_RULE@"),
     ] {
-        let tree = render(parse_sass_layout, source);
+        let tree = render(parse_sass, source);
         let body = tree
             .split_once(rule)
             .map(|(_, rest)| rest.contains("BLOCK@") && rest.contains("DECLARATION@"));

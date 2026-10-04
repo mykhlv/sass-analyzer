@@ -1,4 +1,4 @@
-//! The kinds of difference between `parse_sass_layout` and `parse_sass_legacy` that the
+//! The kinds of difference between `parse_sass` and `parse_sass_legacy` that the
 //! layout frontend makes on purpose, on inputs that are not on the allow-list: the
 //! inputs of a fuzzer, almost none of them Sass. Each kind is a defect of legacy that the
 //! layout frontend fixes, or a reading of input that Dart Sass rejects, described by what
@@ -324,7 +324,7 @@ fn ending_at_its_last_operator(source: &str) -> Option<String> {
 }
 
 fn layout_reports(source: &str, message: &str) -> bool {
-    sass_parser::parse_sass_layout(source)
+    sass_parser::parse_sass(source)
         .1
         .iter()
         .any(|(found, _)| found.contains(message))

@@ -1,4 +1,4 @@
-//! The inputs on which `parse_sass_layout` may differ from `parse_sass_legacy`, each a
+//! The inputs on which `parse_sass` may differ from `parse_sass_legacy`, each a
 //! known defect of the legacy indented frontend, with the tree the layout frontend gives
 //! instead. Any other difference is a regression of the layout frontend.
 //!
@@ -17,7 +17,7 @@ pub struct Allowed {
     pub input: &'static str,
     /// What legacy does wrong here, and what the layout frontend does instead.
     pub change: &'static str,
-    /// `parse_sass_layout`'s tree and errors.
+    /// `parse_sass`'s tree and errors.
     pub expected: Expect,
 }
 

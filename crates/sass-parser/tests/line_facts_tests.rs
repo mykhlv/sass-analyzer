@@ -67,13 +67,13 @@ fn check(source: &str, expect: Expect) {
     assert_layout_matches_legacy(source);
 }
 
-/// `parse_sass_layout` gives legacy's tree, or the input is on the allow-list.
+/// `parse_sass` gives legacy's tree, or the input is on the allow-list.
 #[track_caller]
 fn assert_layout_matches_legacy(source: &str) {
     if let Some((legacy, layout)) = layout_differential::layout_mismatch(source) {
         assert!(
             layout_allow_list::allowed(source).is_some(),
-            "parse_sass_layout disagrees with parse_sass_legacy on {source:?}:\n{}",
+            "parse_sass disagrees with parse_sass_legacy on {source:?}:\n{}",
             layout_differential::first_difference(&legacy, &layout),
         );
     }

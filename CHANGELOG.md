@@ -137,12 +137,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lines below. The continuation line was lexed as code and only then marked as comment, so
   `it's` opened a string that ran to the next `'` anywhere below; as in Dart Sass, such a
   line now ends where the line ends
+- Indented Sass: an unclosed bracket no longer turns off line handling for the rest of the
+  file. After `b: fn(1` every later line break was read as plain whitespace, so all the
+  rules below joined that one declaration and lost their own declarations, symbols and
+  folding. The missing `)` is now reported once, and parsing resumes at the next line
+  indented no deeper than the one the bracket opened on
+- Indented Sass: inconsistent indentation is now reported, as Dart Sass reports it.
+  A line indented with spaces in a file indented with tabs (or the reverse), and a line
+  that mixes tabs and spaces in its indentation, were accepted silently; a dedent to a
+  column that no enclosing block uses closed the deeper blocks without a word. Each
+  now gets one diagnostic: "expected tabs, was spaces", "tabs and spaces may not be
+  mixed", "inconsistent indentation, expected 4 spaces"
+- Indented Sass: whitespace indented deeper than the last line at the very end of a file
+  no longer changes the last statement. A trailing `    ` after `b: c` opened an empty
+  block, **silently** turning the declaration into a nested property
+- Indented Sass: a `//` comment continues across a blank line onto the more deeply
+  indented lines after it, as in Dart Sass. It stopped at the blank line, so the next
+  indented line was **silently** parsed as a rule of its own
+- Indented Sass: an unclosed `/*` after other content on its line (`.a /* x`) is now
+  reported as an unterminated comment. It was **silently** taken as a comment running to
+  the end of the file, swallowing every rule below it
+- Indented Sass: a variable named like a header keyword — `$to`, `$in`, `$and`, `$if` —
+  at the end of an `@for`, `@each`, `@if` or `@return` line no longer pulls the line below
+  into the header. `@for $i from 1 through $to` **silently** took its indented body into
+  the header, leaving the loop with no body. The keyword fix above missed these headers,
+  which take the bare word themselves
+- Indented Sass: an at-rule line ending in `*`, such as `@x:*`, ends at its line break.
+  The `*` read as multiplication, so the rule on the next line was **silently** taken into
+  the at-rule's prelude
+- Indented Sass: a declaration value ending in a bare `and`, `or` or `not`
+  (`content: not`) no longer swallows the declaration on the line below. The two were
+  **silently** merged into one; they are now separate declarations, and an indented line
+  under `b: c and` is a nested declaration, as it would be without the `and`
 
 ### Documentation
 - Corrected the 0.3.3 indented-Sass compliance figure: it reported 100% (346/346), the
   measured value against the pinned sass-spec corpus was 345/346
 
 ### Changed
+- Indented Sass: where a statement ends and a block opens is now decided by the parser from
+  the line layout, rather than guessed by the lexer. Real-world files parse to the same
+  trees as before; the fixes above are the deliberate differences
 - Dependencies refreshed: 47 transitive Rust crates within semver, `rowan` 0.16 → 0.17,
   TypeScript 6 → 7, `@types/node` 25 → 26, esbuild 0.27 → 0.28
 - `@types/vscode` is now pinned with a tilde (`~1.110.0`) so it tracks the supported
@@ -150,14 +185,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Known issues
 - In indented Sass, a declaration value ending in a bare `and`/`or`/`not` (`content: not`)
-  swallows the line below it. Dart Sass continues the expression too and then reports an
-  error; sass-analyzer produces one merged declaration with no diagnostic. This form occurs
-  zero times across the Bulma, Vuetify and Quasar corpora
-- In indented Sass, a `//` comment stops at a blank line, while Dart Sass continues it
-  over the blank line onto the more deeply indented lines below; such a line is parsed as a
-  statement with no diagnostic. Text indented under a closed `/* … */`, and an unclosed
-  `/*` after other content on its line, are accepted without the error Dart Sass reports.
-  None of these occurs in the Bulma, Vuetify and Quasar corpora
+  is accepted without the "expected newline." error Dart Sass reports. The line below is
+  no longer swallowed, but no diagnostic is shown. This form occurs zero times across the
+  Bulma, Vuetify and Quasar corpora
+- In indented Sass, text indented under a closed `/* … */` is accepted without the error
+  Dart Sass reports. It does not occur in the Bulma, Vuetify and Quasar corpora
 
 ## 0.3.4 — 2026-03-31
 

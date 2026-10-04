@@ -196,10 +196,10 @@ fn parse_vuetify_sass(bencher: Bencher<'_, '_>) {
         .bench_values(sass_parser::parse_sass);
 }
 
-/// The same corpus through the frontend in which the parser, not the lexer, decides
-/// where statements end; it must keep up with `parse_vuetify_sass`.
+/// The same corpus through the previous frontend, in which the lexer decided where
+/// statements end, for comparison until it is deleted.
 #[divan::bench]
-fn parse_layout_vuetify_sass(bencher: Bencher<'_, '_>) {
+fn parse_legacy_vuetify_sass(bencher: Bencher<'_, '_>) {
     let source = &*VUETIFY_SASS;
     if source.is_empty() {
         return;
@@ -207,7 +207,7 @@ fn parse_layout_vuetify_sass(bencher: Bencher<'_, '_>) {
     bencher
         .counter(divan::counter::BytesCount::of_str(source))
         .with_inputs(|| source.as_str())
-        .bench_values(sass_parser::parse_sass_layout);
+        .bench_values(sass_parser::parse_sass_legacy);
 }
 
 // A comment on every continued line: each one read first as reaching over the deeper
@@ -223,7 +223,7 @@ fn parse_layout_continued_comments(bencher: Bencher<'_, '_>) {
     bencher
         .counter(divan::counter::BytesCount::of_str(source))
         .with_inputs(|| source.as_str())
-        .bench_values(sass_parser::parse_sass_layout);
+        .bench_values(sass_parser::parse_sass);
 }
 
 // ── Incremental reparse benchmarks ──────────────────────────────────────
