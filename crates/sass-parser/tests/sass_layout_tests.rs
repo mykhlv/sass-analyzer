@@ -113,8 +113,10 @@ fn dart_valid_continuations_parse_without_errors() {
     }
 }
 
-/// Accepted although Dart Sass rejects them; kept until the indented frontend is aligned
-/// with Dart, so that only that step changes what is accepted.
+/// Accepted although Dart Sass rejects them, or reads them otherwise (a trailing comma
+/// before a line at the same column); kept until the indented frontend is aligned with
+/// Dart, so that only that step changes what is accepted. Each is marked `lenient:` in
+/// the grammar.
 #[test]
 fn lenient_forms_still_parse_without_errors() {
     for source in [
@@ -127,6 +129,12 @@ fn lenient_forms_still_parse_without_errors() {
         ".a\n  @at-root\n    (without: media)\n    .b\n      c: d\n",
         "$b: true\n@if false\n  a: b\n@else\n  if $b\n  c: d\n",
         "$x: true\n$y: true\n@if $x\n  and $y\n  a: b\n",
+        ".a\n  b: c,\n    d\n",
+        ".a\n  b: c,\n  d\n",
+        "$a: 1,\n  2\n",
+        "@function f()\n  @return 1,\n    2\n",
+        "$a: 1\n  2\n",
+        "$a: 1\n  , 2\n",
     ] {
         let tree = check_same(source);
         assert!(!tree.contains("\nerror "), "{source:?}:\n{tree}");

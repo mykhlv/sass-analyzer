@@ -6,9 +6,10 @@
 //! beneath it, which the at-rule function declares with [`Parser::continue_header`]
 //! when it has read the rule's name.
 //!
-//! Forms marked `lenient:` are accepted here although Dart Sass rejects them; they are
-//! kept, for now, so that the indented frontend does not change what it accepts while it
-//! is being rebuilt.
+//! Forms marked `lenient:`, here and at the grammar positions that continue a line, are
+//! accepted although Dart Sass rejects them, or reads them otherwise; they are kept, for
+//! now, so that the indented frontend does not change what it accepts while it is being
+//! rebuilt.
 
 use crate::parser::{HeaderLines, Parser};
 #[allow(clippy::wildcard_imports)]
@@ -199,6 +200,8 @@ const VALUE_WORDS: &[&str] = &[
 
 /// A variable declaration's value goes on below it on a line that starts like a value.
 pub(crate) const VARIABLE: HeaderLines = HeaderLines {
+    // lenient: Dart rejects anything indented beneath a variable declaration: `$a: 1` /
+    // `  2` — "Nothing may be indented beneath a variable declaration."
     starts: VALUE_STARTS,
     words: VALUE_WORDS,
     bare_starts: VALUE_STARTS,

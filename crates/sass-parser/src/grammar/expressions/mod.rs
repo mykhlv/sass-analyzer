@@ -96,6 +96,10 @@ pub(crate) fn sass_value_list(p: &mut Parser<'_>, ctx: ParseContext) -> Option<C
     }
     let m = first.precede(p);
     while p.eat(COMMA) {
+        // lenient: Dart ends a variable's value, or an `@return`, `@debug`, `@warn` or
+        // `@error` value, at a comma that ends its line, and rejects what is indented
+        // beneath: `$a: 1,` / `  2` — "Nothing may be indented beneath a variable
+        // declaration." Inside brackets the comma's line break is plain whitespace anyway.
         p.continue_line_across_blank();
         if !at_value_end(p) {
             sass_value(p, ctx);

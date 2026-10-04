@@ -148,6 +148,9 @@ fn value(p: &mut Parser<'_>) {
         }
         if p.at(COMMA) {
             p.bump();
+            // lenient: Dart ends the value at a comma that ends its line, a trailing comma,
+            // and reads the next line as a statement of its own: `b: c,` / `    d` is
+            // rejected — "expected ':'." — and `b: c,` / `  d` makes `d` an empty rule.
             p.continue_line_across_blank();
             has_content = true;
             operand_before = false;
