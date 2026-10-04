@@ -201,7 +201,7 @@ sass-analyzer/
 │   │   │   └── token_set.rs      # [u64; 4] bit set
 │   │   ├── tests/            # expect-test snapshots
 │   │   ├── benches/          # divan benchmarks
-│   │   └── fuzz/             # 4 libfuzzer targets
+│   │   └── fuzz/             # 7 libfuzzer targets
 │   ├── sass-lsp/             # LSP server (tower-lsp-server)
 │   ├── sass-cli/             # Command-line tool
 │   └── xtask/                # Codegen from sass.ungram
