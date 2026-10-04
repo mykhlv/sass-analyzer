@@ -42,6 +42,10 @@ pub enum Class {
     /// An error inside a bracket ends the bracket at the next line no deeper than the
     /// line it opened on, and the lines after a bracket left unclosed count again.
     BracketRecovery,
+    /// A line dedented to a column that no open block has is reported, and closes every
+    /// block deeper than it, as the blocks follow the columns; legacy kept such a line in
+    /// a block a comment line had opened. Dart Sass rejects such input.
+    DedentToNoOpenBlock,
     /// A closing bracket that does not match the open one (`}` inside `[`), or a `{` or
     /// `}` outside brackets, which the indented syntax has no use for, puts the input's
     /// count of open brackets out of step with the grammar's, so that a line break the
@@ -62,9 +66,10 @@ pub enum Class {
     /// decision — after an operator it reads as one, after a colon only where a name ends
     /// the line — where legacy decided by the shape of the line, and went on where the
     /// layout frontend stops: across a blank line or a comment line, or to the end of the
-    /// input, which moves the end of the statement and the errors with it. With the last
-    /// character of such lines respelled, the frontends agree. Only on input legacy reports
-    /// errors in: such lines are everywhere in valid Sass, where a difference is a
+    /// input, which moves the end of the statement and the errors with it. Without the
+    /// line breaks after the input's last operator, or with the last character of such
+    /// lines respelled, the frontends agree; the second only on input legacy reports
+    /// errors in, as such lines are everywhere in valid Sass, where a difference is a
     /// regression.
     OperatorOrColonEndsALine,
     /// An at-rule that starts in mid-line, after a statement an error cut short, is a
@@ -106,13 +111,20 @@ pub fn classify(source: &str) -> Vec<Class> {
             (Class::VariableNamedLikeAHeaderWord, next)
         } else {
             let class = by_what_the_parse_does(&source, &legacy);
-            if class != Class::Other || !legacy.contains("\nerror ") {
+            let rejected = legacy.contains("\nerror ");
+            if class != Class::Other {
                 found.push(class);
                 return found;
             }
-            if let Some(next) = with_line_end_operators_respelled(&source) {
+            if let Some(next) = ending_at_its_last_operator(&source) {
                 (Class::OperatorOrColonEndsALine, next)
-            } else if let Some(next) = with_at_rules_on_lines_of_their_own(&source) {
+            } else if let Some(next) =
+                with_line_end_operators_respelled(&source).filter(|_| rejected)
+            {
+                (Class::OperatorOrColonEndsALine, next)
+            } else if let Some(next) =
+                with_at_rules_on_lines_of_their_own(&source).filter(|_| rejected)
+            {
                 (Class::AtRuleAfterABrokenStatement, next)
             } else {
                 found.push(class);
@@ -128,6 +140,8 @@ pub fn classify(source: &str) -> Vec<Class> {
 fn by_what_the_parse_does(source: &str, legacy: &str) -> Class {
     if recovers_from_bracket_errors(source) {
         Class::BracketRecovery
+    } else if layout_reports(source, "inconsistent indentation") {
+        Class::DedentToNoOpenBlock
     } else if has_unbalanced_brackets(source) {
         Class::UnbalancedBrackets
     } else if silent_comment_crosses_a_blank_line(source) {
@@ -251,6 +265,21 @@ fn with_header_word_variables_renamed(source: &str) -> Option<String> {
         renamed = renamed.replace(&format!("${word}"), "$x");
     }
     (renamed != source).then_some(renamed)
+}
+
+/// The input without the line breaks and indentation after it, if it ends in an operator
+/// or a colon: whether the statement ends before them or after is all that differs.
+fn ending_at_its_last_operator(source: &str) -> Option<String> {
+    let trimmed = source.trim_end_matches(['\n', '\r', '\x0c', ' ', '\t']);
+    (trimmed.len() < source.len() && trimmed.ends_with(['*', '/', '+', '-', '%', '=', ':']))
+        .then(|| trimmed.to_owned())
+}
+
+fn layout_reports(source: &str, message: &str) -> bool {
+    sass_parser::parse_sass_layout(source)
+        .1
+        .iter()
+        .any(|(found, _)| found.contains(message))
 }
 
 fn recovers_from_bracket_errors(source: &str) -> bool {

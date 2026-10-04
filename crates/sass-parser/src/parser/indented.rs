@@ -186,10 +186,10 @@ impl<'src> Parser<'src> {
     #[cold]
     fn drop_stale_header(&mut self) {
         self.indented.header = None;
-        let (start, end) = self.input.line_break_range(self.pos);
-        // Nothing at the line starts after a cursor in mid-line has been emitted yet.
-        if start == end && self.indented.line.index > self.pos {
-            self.find_line_start(self.pos);
+        // The line breaks before the cursor went on with the statement; those after the
+        // at-rule's `@` are decided ahead, but nothing at them has been emitted yet.
+        if self.indented.line.index > self.pos {
+            self.find_line_start(self.pos + 1);
             self.fence = self.locate_fence();
         }
     }

@@ -102,7 +102,7 @@ fn allow_listed_defects_report_what_they_should() {
 #[test]
 fn differences_are_told_apart_by_kind() {
     use layout_classes::Class::{
-        AtRuleAfterABrokenStatement, BracketRecovery, CommentAcrossBlankLine,
+        AtRuleAfterABrokenStatement, BracketRecovery, CommentAcrossBlankLine, DedentToNoOpenBlock,
         IndentationDiagnostics, OperatorContinuesALine, OperatorOrColonEndsALine,
         StrayColonEndsALine, TrailingIndentation, UnbalancedBrackets, UnterminatedComment,
         VariableNamedLikeAHeaderWord, WordOperatorBeforeAStatement,
@@ -136,6 +136,8 @@ fn differences_are_told_apart_by_kind() {
         ("=\n\n\t//\n", vec![OperatorOrColonEndsALine]),
         ("$+*//\n", vec![OperatorOrColonEndsALine]),
         ("$@\n ''", vec![AtRuleAfterABrokenStatement]),
+        ("$\n\t //\n #\n", vec![DedentToNoOpenBlock]),
+        ("@:*\n", vec![OperatorOrColonEndsALine]),
     ] {
         assert_eq!(layout_classes::classify(source), kinds, "{source:?}");
     }
@@ -585,6 +587,8 @@ fn a_variable_named_like_a_header_word_ends_the_header() {
 fn an_at_rule_after_a_broken_statement_ends_its_header() {
     check_same("+J@\n\t(\n");
     check_same("=@\n ,\n");
+    // A comma went on over the line break before the at-rule.
+    check_same("=,\x0c@\x0c ,");
     check(
         "+m@\n  (a)\n",
         expect![[r#"
