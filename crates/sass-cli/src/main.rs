@@ -133,24 +133,19 @@ fn cmd_lex(path: &Path) -> i32 {
         Err(code) => return code,
     };
 
+    // The token stream the parser starts from. For indented Sass that is the SCSS
+    // tokens with layout-dependent comment extent; where statements end and blocks
+    // open is decided by the parser, so `parse` shows those.
     if is_sass(path) {
-        let tokens = sass_parser::sass_lexer::sass_tokenize(&source);
-        let mut has_errors = false;
-        for (kind, text) in &tokens {
-            if *kind == sass_parser::syntax_kind::SyntaxKind::ERROR {
-                has_errors = true;
-            }
-            if text.is_empty() {
-                println!("{kind:?} (virtual)");
-            } else {
-                println!("{kind:?} {text:?}");
-            }
-        }
-        println!("{:?}", sass_parser::syntax_kind::SyntaxKind::EOF);
-        return if has_errors { 2 } else { 0 };
+        dump_tokens(sass_parser::lexer::IndentedLexer::crossing_blank_lines(
+            &source,
+        ))
+    } else {
+        dump_tokens(sass_parser::lexer::Lexer::new(&source))
     }
+}
 
-    let mut lexer = sass_parser::lexer::Lexer::new(&source);
+fn dump_tokens<'src>(mut lexer: impl sass_parser::lexer::TokenSource<'src>) -> i32 {
     let mut has_errors = false;
     loop {
         let (kind, text) = lexer.next_token();
