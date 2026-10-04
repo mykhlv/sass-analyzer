@@ -116,7 +116,13 @@ fn fold_block(
     let start_offset = first_non_trivia_offset(node).unwrap_or_else(|| node.text_range().start());
     let (start_line, _) = byte_to_lsp_pos(source, line_index, start_offset);
     let (end_line, _) = byte_to_lsp_pos(source, line_index, node.text_range().end());
-    let end_line = end_line.saturating_sub(1);
+    // A real `}` stays visible on its own line; an indented block's zero-width
+    // `}` sits at the end of its last body line, which must fold too.
+    let end_line = if ends_with_virtual_rbrace(node) {
+        end_line
+    } else {
+        end_line.saturating_sub(1)
+    };
     if start_line < end_line {
         out.push(FoldingRange {
             start_line,
@@ -129,6 +135,18 @@ fn fold_block(
     }
 }
 
+fn ends_with_virtual_rbrace(node: &SyntaxNode) -> bool {
+    let node_start = node.text_range().start();
+    let mut token = node.last_token();
+    while let Some(t) = token.filter(|t| t.text_range().start() >= node_start) {
+        if !t.kind().is_trivia() {
+            return t.kind() == SyntaxKind::RBRACE && t.text().is_empty();
+        }
+        token = t.prev_token();
+    }
+    false
+}
+
 fn fold_multiline_comment(
     token: &SyntaxToken,
     source: &str,
@@ -138,7 +156,12 @@ fn fold_multiline_comment(
     let range = token.text_range();
     let (start_line, _) = byte_to_lsp_pos(source, line_index, range.start());
     let (end_line, _) = byte_to_lsp_pos(source, line_index, range.end());
-    let end_line = end_line.saturating_sub(1);
+    // Indented Sass lets a loud comment end at a dedent with no `*/` line to keep.
+    let end_line = if token.text().ends_with("*/") {
+        end_line.saturating_sub(1)
+    } else {
+        end_line
+    };
     if start_line < end_line {
         out.push(FoldingRange {
             start_line,
