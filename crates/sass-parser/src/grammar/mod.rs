@@ -473,6 +473,47 @@ fn skip_until_block_end(p: &mut Parser<'_>) {
     }
 }
 
+/// Consume `open ... close`, treating content as opaque. Braced, a `{` or `}` outside
+/// interpolation ends a bracket left unclosed: no selector argument or at-rule prelude
+/// holds one, and the rules after it stay intact. The indented layout recovers at a line
+/// start instead.
+pub(crate) fn eat_balanced(p: &mut Parser<'_>, open: SyntaxKind, close: SyntaxKind) {
+    assert!(p.at(open));
+    let p = &mut *p.transparent_guard();
+    let braced = p.braced();
+    p.bump();
+    let mut depth: u32 = 1;
+    let mut interpolation: u32 = 0;
+    // A string left unclosed took the rest of its line, the closing bracket and all.
+    while !p.at_end() && depth > 0 && !p.at_unclosed_string_break() {
+        let kind = p.current();
+        if braced {
+            match kind {
+                HASH_LBRACE => interpolation += 1,
+                LBRACE | RBRACE if interpolation == 0 => break,
+                LBRACE => interpolation += 1,
+                RBRACE => interpolation -= 1,
+                _ => {}
+            }
+        }
+        if kind == open {
+            depth += 1;
+        } else if kind == close {
+            depth -= 1;
+        }
+        p.bump();
+    }
+    if braced && depth > 0 && !p.at_unclosed_string_break() {
+        // At a `{` the rule's block starts: that is where the bracket is found unclosed.
+        let msg = format!("expected {close:?}");
+        if p.at(LBRACE) {
+            p.error(msg);
+        } else {
+            p.error_after_prev(msg);
+        }
+    }
+}
+
 /// Parse a `{ ... }` block containing declarations and/or nested rules.
 pub(crate) fn block(p: &mut Parser<'_>) {
     let Ok(mut g) = p.depth_guard() else {

@@ -18,6 +18,7 @@ use crate::token_set::TokenSet;
 use super::ParseContext;
 use super::block;
 use super::declarations;
+use super::eat_balanced;
 use super::expressions;
 use super::expressions::interpolation;
 use super::lines;
@@ -142,23 +143,6 @@ fn generic_at_rule(p: &mut Parser<'_>) {
         p.expect(SEMICOLON);
     }
     let _ = m.complete(p, GENERIC_AT_RULE);
-}
-
-/// Consume balanced delimiters (parens, brackets) including outer pair.
-pub(super) fn eat_balanced(p: &mut Parser<'_>, open: SyntaxKind, close: SyntaxKind) {
-    assert!(p.at(open));
-    let p = &mut *p.transparent_guard();
-    p.bump();
-    let mut depth: u32 = 1;
-    // A string left unclosed took the rest of its line, the closing bracket and all.
-    while !p.at_end() && depth > 0 && !p.at_unclosed_string_break() {
-        if p.current() == open {
-            depth += 1;
-        } else if p.current() == close {
-            depth -= 1;
-        }
-        p.bump();
-    }
 }
 
 /// Consume tokens opaquely until a token in `stop` is reached at paren-depth 0.

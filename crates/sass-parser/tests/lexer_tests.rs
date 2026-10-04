@@ -1047,6 +1047,48 @@ fn url_interpolation_only() {
     );
 }
 
+#[test]
+fn url_prefix_is_a_url_only_in_a_document_prelude() {
+    assert_eq!(
+        lex("@-moz-document url-prefix(//a){b:url-prefix(//c)}"),
+        vec![
+            (AT, "@"),
+            (IDENT, "-moz-document"),
+            (WHITESPACE, " "),
+            (IDENT, "url-prefix"),
+            (LPAREN, "("),
+            (URL_CONTENTS, "//a"),
+            (RPAREN, ")"),
+            (LBRACE, "{"),
+            (IDENT, "b"),
+            (COLON, ":"),
+            (IDENT, "url-prefix"),
+            (LPAREN, "("),
+            (SINGLE_LINE_COMMENT, "//c)}"),
+        ]
+    );
+}
+
+#[test]
+fn document_prelude_survives_interpolated_braces() {
+    assert_eq!(
+        lex("@document #{a} url-prefix(//b)"),
+        vec![
+            (AT, "@"),
+            (IDENT, "document"),
+            (WHITESPACE, " "),
+            (HASH_LBRACE, "#{"),
+            (IDENT, "a"),
+            (RBRACE, "}"),
+            (WHITESPACE, " "),
+            (IDENT, "url-prefix"),
+            (LPAREN, "("),
+            (URL_CONTENTS, "//b"),
+            (RPAREN, ")"),
+        ]
+    );
+}
+
 // ── Comprehensive edge cases (1.17) ──────────────────────────────────
 
 #[test]

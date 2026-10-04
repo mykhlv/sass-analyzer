@@ -809,3 +809,51 @@ fn unclosed_brackets_inside_a_closed_one_unwind_with_it() {
         "#]],
     );
 }
+
+#[test]
+fn a_document_prelude_ends_with_its_line() {
+    check(
+        "@-moz-document url-prefix(http://x/)\n  a\n    b: domain($x)\n",
+        expect![[r#"
+            SOURCE_FILE@0..59
+              GENERIC_AT_RULE@0..58
+                AT@0..1 "@"
+                IDENT@1..14 "-moz-document"
+                WHITESPACE@14..15 " "
+                IDENT@15..25 "url-prefix"
+                LPAREN@25..26 "("
+                URL_CONTENTS@26..35 "http://x/"
+                RPAREN@35..36 ")"
+                BLOCK@36..58
+                  LBRACE@36..36 ""
+                  RULE_SET@36..58
+                    SELECTOR_LIST@36..40
+                      SELECTOR@36..40
+                        SIMPLE_SELECTOR@36..40
+                          WHITESPACE@36..39 "\n  "
+                          IDENT@39..40 "a"
+                    BLOCK@40..58
+                      LBRACE@40..40 ""
+                      DECLARATION@40..58
+                        PROPERTY@40..46
+                          WHITESPACE@40..45 "\n    "
+                          IDENT@45..46 "b"
+                        COLON@46..47 ":"
+                        VALUE@47..58
+                          FUNCTION_CALL@47..58
+                            WHITESPACE@47..48 " "
+                            IDENT@48..54 "domain"
+                            ARG_LIST@54..58
+                              LPAREN@54..55 "("
+                              ARG@55..57
+                                VARIABLE_REF@55..57
+                                  DOLLAR@55..56 "$"
+                                  IDENT@56..57 "x"
+                              RPAREN@57..58 ")"
+                        SEMICOLON@58..58 ""
+                      RBRACE@58..58 ""
+                  RBRACE@58..58 ""
+              WHITESPACE@58..59 "\n"
+        "#]],
+    );
+}
