@@ -31,11 +31,44 @@ enum LexContext {
     Url { paren_depth: u32 },
 }
 
+/// The prelude of a document rule, where Dart Sass reads more functions than `url(` with
+/// an unquoted argument as URL contents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DocumentPrelude {
+    /// `@document` in any case, vendor-prefixed or not, but for the exact `@-moz-document`:
+    /// `url-prefix(`.
+    Document,
+    /// `@-moz-document`: `url-prefix(` and `domain(`.
+    MozDocument,
+}
+
+impl DocumentPrelude {
+    fn of_rule(name: &str) -> Option<Self> {
+        if name == "-moz-document" {
+            return Some(Self::MozDocument);
+        }
+        let unprefixed = name
+            .strip_prefix('-')
+            .and_then(|rest| rest.split_once('-'))
+            .map_or(name, |(_, rest)| rest);
+        unprefixed
+            .eq_ignore_ascii_case("document")
+            .then_some(Self::Document)
+    }
+
+    fn takes_url(self, function: &str) -> bool {
+        function == "url-prefix" || (self == Self::MozDocument && function == "domain")
+    }
+}
+
 pub struct Lexer<'src> {
     input: &'src str,
     pos: usize,
     context_stack: Vec<LexContext>,
     pending_url_context: bool,
+    /// The last token was an `@`, so an identifier now names an at-rule.
+    after_at: bool,
+    document_prelude: Option<DocumentPrelude>,
     /// A string left unclosed has just ended the strings, interpolations and `url(` it
     /// was nested in; see [`Lexer::take_unwound`].
     unwound: bool,
@@ -48,6 +81,8 @@ impl<'src> Lexer<'src> {
             pos: 0,
             context_stack: Vec::new(),
             pending_url_context: false,
+            after_at: false,
+            document_prelude: None,
             unwound: false,
         }
     }
@@ -81,6 +116,7 @@ impl<'src> Lexer<'src> {
 
         let start = self.pos;
         let b = self.bump();
+        let after_at = std::mem::take(&mut self.after_at);
 
         let kind = match b {
             // ── Whitespace ─────────────────────────────────────────
@@ -109,6 +145,9 @@ impl<'src> Lexer<'src> {
             // ── Identifiers ────────────────────────────────────────
             b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
                 self.lex_ident();
+                if after_at {
+                    self.document_prelude = DocumentPrelude::of_rule(&self.input[start..self.pos]);
+                }
                 if self.is_unicode_range_start(start) {
                     self.lex_unicode_range()
                 } else if self.is_url_start(start) {
@@ -118,7 +157,13 @@ impl<'src> Lexer<'src> {
                     SyntaxKind::IDENT
                 }
             }
-            b'-' if self.is_ident_start_after_hyphen() => self.lex_ident(),
+            b'-' if self.is_ident_start_after_hyphen() => {
+                self.lex_ident();
+                if after_at {
+                    self.document_prelude = DocumentPrelude::of_rule(&self.input[start..self.pos]);
+                }
+                SyntaxKind::IDENT
+            }
 
             // ── Strings ──────────────────────────────────────────────
             b'"' | b'\'' => return self.lex_string(start, b),
@@ -177,13 +222,17 @@ impl<'src> Lexer<'src> {
             }
 
             // ── Single-char punctuation ────────────────────────────
-            b';' => SyntaxKind::SEMICOLON,
+            b';' => {
+                self.end_prelude_outside_contexts();
+                SyntaxKind::SEMICOLON
+            }
             b':' => SyntaxKind::COLON,
             b',' => SyntaxKind::COMMA,
             b'.' => SyntaxKind::DOT,
             b'(' => SyntaxKind::LPAREN,
             b')' => SyntaxKind::RPAREN,
             b'{' => {
+                self.end_prelude_outside_contexts();
                 if let Some(LexContext::Interpolation { brace_depth }) =
                     self.context_stack.last_mut()
                 {
@@ -192,6 +241,7 @@ impl<'src> Lexer<'src> {
                 SyntaxKind::LBRACE
             }
             b'}' => {
+                self.end_prelude_outside_contexts();
                 let pop = matches!(
                     self.context_stack.last(),
                     Some(LexContext::Interpolation { brace_depth: 1 })
@@ -218,7 +268,10 @@ impl<'src> Lexer<'src> {
             b'&' => SyntaxKind::AMP,
             b'~' => SyntaxKind::TILDE,
             b'|' => SyntaxKind::PIPE,
-            b'@' => SyntaxKind::AT,
+            b'@' => {
+                self.after_at = true;
+                SyntaxKind::AT
+            }
             b'$' => SyntaxKind::DOLLAR,
             b'#' => SyntaxKind::HASH,
 
@@ -253,6 +306,19 @@ impl<'src> Lexer<'src> {
     fn reset_context(&mut self) {
         self.context_stack.clear();
         self.pending_url_context = false;
+        self.document_prelude = None;
+    }
+
+    /// End the prelude of a document rule, which `;`, `{` and `}` outside interpolation do,
+    /// and in the indented syntax a line break outside brackets.
+    pub(crate) fn end_prelude(&mut self) {
+        self.document_prelude = None;
+    }
+
+    fn end_prelude_outside_contexts(&mut self) {
+        if self.context_stack.is_empty() {
+            self.end_prelude();
+        }
     }
 
     /// A string ends unclosed at a newline or the end of input, and with it everything it
@@ -441,8 +507,11 @@ impl<'src> Lexer<'src> {
     }
 
     fn is_url_start(&self, start: usize) -> bool {
-        self.pos - start == 3
-            && self.input[start..self.pos].eq_ignore_ascii_case("url")
+        let name = &self.input[start..self.pos];
+        (name.eq_ignore_ascii_case("url")
+            || self
+                .document_prelude
+                .is_some_and(|prelude| prelude.takes_url(name)))
             && self.peek() == Some(b'(')
             && self.should_enter_url_context()
     }

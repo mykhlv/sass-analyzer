@@ -173,6 +173,7 @@ impl<'src> IndentedLexer<'src> {
         if !self.in_continuation_line {
             self.silent_comment = None;
             if self.depth == 0 {
+                self.lexer.end_prelude();
                 self.line_has_content = false;
                 self.column = indent_after_last_newline(whitespace);
             }

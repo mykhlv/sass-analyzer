@@ -1262,6 +1262,457 @@ fn generic_at_rule_block() {
     );
 }
 
+#[test]
+fn generic_at_rule_unclosed_paren_keeps_later_rules() {
+    check(
+        "@foo (a\n.x { y: z; }\n.w { v: u; }\n",
+        expect![[r#"
+            SOURCE_FILE@0..34
+              GENERIC_AT_RULE@0..20
+                AT@0..1 "@"
+                IDENT@1..4 "foo"
+                WHITESPACE@4..5 " "
+                LPAREN@5..6 "("
+                IDENT@6..7 "a"
+                WHITESPACE@7..8 "\n"
+                DOT@8..9 "."
+                IDENT@9..10 "x"
+                BLOCK@10..20
+                  WHITESPACE@10..11 " "
+                  LBRACE@11..12 "{"
+                  DECLARATION@12..18
+                    PROPERTY@12..14
+                      WHITESPACE@12..13 " "
+                      IDENT@13..14 "y"
+                    COLON@14..15 ":"
+                    VALUE@15..17
+                      VALUE@15..17
+                        WHITESPACE@15..16 " "
+                        IDENT@16..17 "z"
+                    SEMICOLON@17..18 ";"
+                  WHITESPACE@18..19 " "
+                  RBRACE@19..20 "}"
+              RULE_SET@20..33
+                SELECTOR_LIST@20..23
+                  SELECTOR@20..23
+                    SIMPLE_SELECTOR@20..23
+                      WHITESPACE@20..21 "\n"
+                      DOT@21..22 "."
+                      IDENT@22..23 "w"
+                BLOCK@23..33
+                  WHITESPACE@23..24 " "
+                  LBRACE@24..25 "{"
+                  DECLARATION@25..31
+                    PROPERTY@25..27
+                      WHITESPACE@25..26 " "
+                      IDENT@26..27 "v"
+                    COLON@27..28 ":"
+                    VALUE@28..30
+                      VALUE@28..30
+                        WHITESPACE@28..29 " "
+                        IDENT@29..30 "u"
+                    SEMICOLON@30..31 ";"
+                  WHITESPACE@31..32 " "
+                  RBRACE@32..33 "}"
+              WHITESPACE@33..34 "\n"
+            errors:
+              11..12: expected RPAREN
+        "#]],
+    );
+}
+
+#[test]
+fn generic_at_rule_unclosed_paren_at_eof() {
+    check(
+        "@foo (a",
+        expect![[r#"
+        SOURCE_FILE@0..7
+          GENERIC_AT_RULE@0..7
+            AT@0..1 "@"
+            IDENT@1..4 "foo"
+            WHITESPACE@4..5 " "
+            LPAREN@5..6 "("
+            IDENT@6..7 "a"
+        errors:
+          7..7: expected RPAREN
+    "#]],
+    );
+}
+
+#[test]
+fn generic_at_rule_brace_in_parens() {
+    check(
+        "@foo (a {b});",
+        expect![[r#"
+        SOURCE_FILE@0..13
+          GENERIC_AT_RULE@0..11
+            AT@0..1 "@"
+            IDENT@1..4 "foo"
+            WHITESPACE@4..5 " "
+            LPAREN@5..6 "("
+            IDENT@6..7 "a"
+            BLOCK@7..11
+              WHITESPACE@7..8 " "
+              LBRACE@8..9 "{"
+              RULE_SET@9..10
+                SELECTOR_LIST@9..10
+                  SELECTOR@9..10
+                    SIMPLE_SELECTOR@9..10
+                      IDENT@9..10 "b"
+              RBRACE@10..11 "}"
+          ERROR@11..12
+            RPAREN@11..12 ")"
+          SEMICOLON@12..13 ";"
+        errors:
+          8..9: expected RPAREN
+          10..10: expected `{`
+          11..12: expected rule
+    "#]],
+    );
+}
+
+#[test]
+fn generic_at_rule_semicolon_in_parens() {
+    check(
+        "@foo (a;b);",
+        expect![[r#"
+        SOURCE_FILE@0..11
+          GENERIC_AT_RULE@0..11
+            AT@0..1 "@"
+            IDENT@1..4 "foo"
+            WHITESPACE@4..5 " "
+            LPAREN@5..6 "("
+            IDENT@6..7 "a"
+            SEMICOLON@7..8 ";"
+            IDENT@8..9 "b"
+            RPAREN@9..10 ")"
+            SEMICOLON@10..11 ";"
+    "#]],
+    );
+}
+
+#[test]
+fn generic_at_rule_interpolated_brace_in_parens() {
+    check(
+        r#"@foo (#{"{"});"#,
+        expect![[r##"
+        SOURCE_FILE@0..14
+          GENERIC_AT_RULE@0..14
+            AT@0..1 "@"
+            IDENT@1..4 "foo"
+            WHITESPACE@4..5 " "
+            LPAREN@5..6 "("
+            HASH_LBRACE@6..8 "#{"
+            QUOTED_STRING@8..11 "\"{\""
+            RBRACE@11..12 "}"
+            RPAREN@12..13 ")"
+            SEMICOLON@13..14 ";"
+    "##]],
+    );
+}
+
+// ── Document rules ──────────────────────────────────────────────────────
+
+#[test]
+fn moz_document_url_prefix() {
+    check(
+        "@-moz-document url-prefix(http://x.org/a/) { a { b: c } }",
+        expect![[r#"
+            SOURCE_FILE@0..57
+              GENERIC_AT_RULE@0..57
+                AT@0..1 "@"
+                IDENT@1..14 "-moz-document"
+                WHITESPACE@14..15 " "
+                IDENT@15..25 "url-prefix"
+                LPAREN@25..26 "("
+                URL_CONTENTS@26..41 "http://x.org/a/"
+                RPAREN@41..42 ")"
+                BLOCK@42..57
+                  WHITESPACE@42..43 " "
+                  LBRACE@43..44 "{"
+                  RULE_SET@44..55
+                    SELECTOR_LIST@44..46
+                      SELECTOR@44..46
+                        SIMPLE_SELECTOR@44..46
+                          WHITESPACE@44..45 " "
+                          IDENT@45..46 "a"
+                    BLOCK@46..55
+                      WHITESPACE@46..47 " "
+                      LBRACE@47..48 "{"
+                      DECLARATION@48..53
+                        PROPERTY@48..50
+                          WHITESPACE@48..49 " "
+                          IDENT@49..50 "b"
+                        COLON@50..51 ":"
+                        VALUE@51..53
+                          VALUE@51..53
+                            WHITESPACE@51..52 " "
+                            IDENT@52..53 "c"
+                      WHITESPACE@53..54 " "
+                      RBRACE@54..55 "}"
+                  WHITESPACE@55..56 " "
+                  RBRACE@56..57 "}"
+        "#]],
+    );
+}
+
+#[test]
+fn moz_document_function_list() {
+    check(
+        "@-moz-document domain(a.org), url-prefix(), url(http://a/b) {}",
+        expect![[r#"
+            SOURCE_FILE@0..62
+              GENERIC_AT_RULE@0..62
+                AT@0..1 "@"
+                IDENT@1..14 "-moz-document"
+                WHITESPACE@14..15 " "
+                IDENT@15..21 "domain"
+                LPAREN@21..22 "("
+                URL_CONTENTS@22..27 "a.org"
+                RPAREN@27..28 ")"
+                COMMA@28..29 ","
+                WHITESPACE@29..30 " "
+                IDENT@30..40 "url-prefix"
+                LPAREN@40..41 "("
+                RPAREN@41..42 ")"
+                COMMA@42..43 ","
+                WHITESPACE@43..44 " "
+                IDENT@44..47 "url"
+                LPAREN@47..48 "("
+                URL_CONTENTS@48..58 "http://a/b"
+                RPAREN@58..59 ")"
+                BLOCK@59..62
+                  WHITESPACE@59..60 " "
+                  LBRACE@60..61 "{"
+                  RBRACE@61..62 "}"
+        "#]],
+    );
+}
+
+#[test]
+fn document_url_prefix() {
+    check(
+        "@document url-prefix(//x.org/) {}",
+        expect![[r#"
+        SOURCE_FILE@0..33
+          GENERIC_AT_RULE@0..33
+            AT@0..1 "@"
+            IDENT@1..9 "document"
+            WHITESPACE@9..10 " "
+            IDENT@10..20 "url-prefix"
+            LPAREN@20..21 "("
+            URL_CONTENTS@21..29 "//x.org/"
+            RPAREN@29..30 ")"
+            BLOCK@30..33
+              WHITESPACE@30..31 " "
+              LBRACE@31..32 "{"
+              RBRACE@32..33 "}"
+    "#]],
+    );
+}
+
+#[test]
+fn document_domain_is_not_a_url() {
+    // Only `@-moz-document` reads `domain(` as a URL, as in Dart Sass.
+    check(
+        "@document domain(a//b);",
+        expect![[r#"
+        SOURCE_FILE@0..23
+          GENERIC_AT_RULE@0..18
+            AT@0..1 "@"
+            IDENT@1..9 "document"
+            WHITESPACE@9..10 " "
+            IDENT@10..16 "domain"
+            LPAREN@16..17 "("
+            IDENT@17..18 "a"
+          SINGLE_LINE_COMMENT@18..23 "//b);"
+        errors:
+          18..18: expected RPAREN
+    "#]],
+    );
+}
+
+#[test]
+fn moz_document_unclosed_url_prefix() {
+    check(
+        "@-moz-document url-prefix(http://x",
+        expect![[r#"
+        SOURCE_FILE@0..34
+          GENERIC_AT_RULE@0..34
+            AT@0..1 "@"
+            IDENT@1..14 "-moz-document"
+            WHITESPACE@14..15 " "
+            IDENT@15..25 "url-prefix"
+            LPAREN@25..26 "("
+            URL_CONTENTS@26..34 "http://x"
+        errors:
+          34..34: expected RPAREN
+    "#]],
+    );
+}
+
+#[test]
+fn domain_function_outside_document_prelude() {
+    check(
+        "@-moz-document domain(a) { a { b: domain($x) } }\nc { d: domain($y) }",
+        expect![[r#"
+            SOURCE_FILE@0..68
+              GENERIC_AT_RULE@0..48
+                AT@0..1 "@"
+                IDENT@1..14 "-moz-document"
+                WHITESPACE@14..15 " "
+                IDENT@15..21 "domain"
+                LPAREN@21..22 "("
+                URL_CONTENTS@22..23 "a"
+                RPAREN@23..24 ")"
+                BLOCK@24..48
+                  WHITESPACE@24..25 " "
+                  LBRACE@25..26 "{"
+                  RULE_SET@26..46
+                    SELECTOR_LIST@26..28
+                      SELECTOR@26..28
+                        SIMPLE_SELECTOR@26..28
+                          WHITESPACE@26..27 " "
+                          IDENT@27..28 "a"
+                    BLOCK@28..46
+                      WHITESPACE@28..29 " "
+                      LBRACE@29..30 "{"
+                      DECLARATION@30..44
+                        PROPERTY@30..32
+                          WHITESPACE@30..31 " "
+                          IDENT@31..32 "b"
+                        COLON@32..33 ":"
+                        VALUE@33..44
+                          FUNCTION_CALL@33..44
+                            WHITESPACE@33..34 " "
+                            IDENT@34..40 "domain"
+                            ARG_LIST@40..44
+                              LPAREN@40..41 "("
+                              ARG@41..43
+                                VARIABLE_REF@41..43
+                                  DOLLAR@41..42 "$"
+                                  IDENT@42..43 "x"
+                              RPAREN@43..44 ")"
+                      WHITESPACE@44..45 " "
+                      RBRACE@45..46 "}"
+                  WHITESPACE@46..47 " "
+                  RBRACE@47..48 "}"
+              RULE_SET@48..68
+                SELECTOR_LIST@48..50
+                  SELECTOR@48..50
+                    SIMPLE_SELECTOR@48..50
+                      WHITESPACE@48..49 "\n"
+                      IDENT@49..50 "c"
+                BLOCK@50..68
+                  WHITESPACE@50..51 " "
+                  LBRACE@51..52 "{"
+                  DECLARATION@52..66
+                    PROPERTY@52..54
+                      WHITESPACE@52..53 " "
+                      IDENT@53..54 "d"
+                    COLON@54..55 ":"
+                    VALUE@55..66
+                      FUNCTION_CALL@55..66
+                        WHITESPACE@55..56 " "
+                        IDENT@56..62 "domain"
+                        ARG_LIST@62..66
+                          LPAREN@62..63 "("
+                          ARG@63..65
+                            VARIABLE_REF@63..65
+                              DOLLAR@63..64 "$"
+                              IDENT@64..65 "y"
+                          RPAREN@65..66 ")"
+                  WHITESPACE@66..67 " "
+                  RBRACE@67..68 "}"
+        "#]],
+    );
+}
+
+#[test]
+fn css_function_unclosed_params() {
+    check(
+        "@function --f(a\n{ result: 1; }\n.x { y: z; }",
+        expect![[r#"
+            SOURCE_FILE@0..43
+              GENERIC_AT_RULE@0..30
+                AT@0..1 "@"
+                IDENT@1..9 "function"
+                WHITESPACE@9..10 " "
+                IDENT@10..13 "--f"
+                LPAREN@13..14 "("
+                IDENT@14..15 "a"
+                BLOCK@15..30
+                  WHITESPACE@15..16 "\n"
+                  LBRACE@16..17 "{"
+                  DECLARATION@17..28
+                    PROPERTY@17..24
+                      WHITESPACE@17..18 " "
+                      IDENT@18..24 "result"
+                    COLON@24..25 ":"
+                    VALUE@25..27
+                      WHITESPACE@25..26 " "
+                      NUMBER@26..27 "1"
+                    SEMICOLON@27..28 ";"
+                  WHITESPACE@28..29 " "
+                  RBRACE@29..30 "}"
+              RULE_SET@30..43
+                SELECTOR_LIST@30..33
+                  SELECTOR@30..33
+                    SIMPLE_SELECTOR@30..33
+                      WHITESPACE@30..31 "\n"
+                      DOT@31..32 "."
+                      IDENT@32..33 "x"
+                BLOCK@33..43
+                  WHITESPACE@33..34 " "
+                  LBRACE@34..35 "{"
+                  DECLARATION@35..41
+                    PROPERTY@35..37
+                      WHITESPACE@35..36 " "
+                      IDENT@36..37 "y"
+                    COLON@37..38 ":"
+                    VALUE@38..40
+                      VALUE@38..40
+                        WHITESPACE@38..39 " "
+                        IDENT@39..40 "z"
+                    SEMICOLON@40..41 ";"
+                  WHITESPACE@41..42 " "
+                  RBRACE@42..43 "}"
+            errors:
+              16..17: expected RPAREN
+        "#]],
+    );
+}
+
+#[test]
+fn import_url_unclosed() {
+    // The `{` inside `url(` is URL text, so the rest of the file is the URL's.
+    check(
+        "@import url(a\n.x { y: z; }",
+        expect![[r#"
+        SOURCE_FILE@0..26
+          IMPORT_RULE@0..26
+            AT@0..1 "@"
+            IDENT@1..7 "import"
+            WHITESPACE@7..8 " "
+            IDENT@8..11 "url"
+            LPAREN@11..12 "("
+            URL_CONTENTS@12..13 "a"
+            WHITESPACE@13..14 "\n"
+            URL_CONTENTS@14..16 ".x"
+            WHITESPACE@16..17 " "
+            URL_CONTENTS@17..18 "{"
+            WHITESPACE@18..19 " "
+            URL_CONTENTS@19..21 "y:"
+            WHITESPACE@21..22 " "
+            URL_CONTENTS@22..24 "z;"
+            WHITESPACE@24..25 " "
+            URL_CONTENTS@25..26 "}"
+        errors:
+          26..26: expected RPAREN
+    "#]],
+    );
+}
+
 // ── Error recovery ──────────────────────────────────────────────────────
 
 #[test]

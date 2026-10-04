@@ -36,6 +36,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pseudo-class or attribute selector left unclosed, as in `.a:not(.b`, is now reported
   too and ends at the next `{` or `}`, where it previously swallowed every rule after it
   up to the end of the file
+- Parser: a `(` left unclosed in the prelude of an unknown at-rule, as in `@foo (a`, or in
+  the parameters of a CSS `@function`, is reported as "expected RPAREN" and ends at the
+  next `{` or `}`, as in Dart Sass. It used to swallow every rule after it into the
+  prelude without a diagnostic. In `@-moz-document` and `@document`, an unquoted
+  `url-prefix(…)` argument, and `domain(…)` in `@-moz-document`, is read as a URL like
+  `url(…)`, so the `//` in `url-prefix(http://…)` no longer starts a comment that hid the
+  `)` and the rest of its line
 - Parser: a nested `name:value` statement holding something only a selector can, as in
   `div:hover .x` or `a:not(.b)`, is read as a rule missing its `{`, as Dart Sass reads it.
   The first was silently accepted as a declaration, and the second reported two
