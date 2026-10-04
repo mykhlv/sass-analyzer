@@ -22,6 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pseudo-class or attribute selector left unclosed, as in `.a:not(.b`, is now reported
   too and ends at the next `{` or `}`, where it previously swallowed every rule after it
   up to the end of the file
+- Parser: a nested `name:value` statement holding something only a selector can, as in
+  `div:hover .x` or `a:not(.b)`, is read as a rule missing its `{`, as Dart Sass reads it.
+  The first was silently accepted as a declaration, and the second reported two
+  unrelated expression errors, or one in indented Sass, where such a line is a selector
+  with no body and is legal. The `.name: value`, `#name: value` and `:name: value`
+  property hacks parse as declarations, like `*name: value`
 - Parser: indented Sass at-rule headers continue correctly after arguments again —
   `@for $i` followed by an indented `from 1 through 10`, `@each $a` followed by `in b, c`,
   and `@function a` followed by `()` regressed in 0.3.4 (indented Sass compliance

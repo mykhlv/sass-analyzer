@@ -952,3 +952,406 @@ fn indented_selector_lines_without_a_body_are_legal() {
         );
     }
 }
+
+// ── Declaration or selector, as Dart Sass reads it ──────────────────────
+//
+// Dart tries `name:ident …` as a declaration first and falls back to a selector only
+// when the value does not parse. Verified against Dart Sass 1.105.1.
+
+#[allow(clippy::needless_pass_by_value)]
+fn check_sass(source: &str, expect: expect_test::Expect) {
+    use std::fmt::Write;
+    let (green, errors) = sass_parser::parse_sass(source);
+    let tree = sass_parser::syntax::SyntaxNode::new_root(green);
+    assert_eq!(
+        tree.text().to_string(),
+        source,
+        "lossless round-trip failed"
+    );
+    let mut buf = sass_parser::syntax::debug_tree(&tree);
+    if !errors.is_empty() {
+        buf.push_str("errors:\n");
+        for (msg, range) in &errors {
+            let _ = writeln!(buf, "  {range:?}: {msg}");
+        }
+    }
+    expect.assert_eq(&buf);
+}
+
+#[test]
+fn pseudo_like_name_value_pair_is_a_declaration() {
+    // Dart compiles this to `.a { div: hover; }`, without an error.
+    check(
+        ".a { div:hover }",
+        expect![[r#"
+        SOURCE_FILE@0..16
+          RULE_SET@0..16
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            BLOCK@2..16
+              WHITESPACE@2..3 " "
+              LBRACE@3..4 "{"
+              DECLARATION@4..14
+                PROPERTY@4..8
+                  WHITESPACE@4..5 " "
+                  IDENT@5..8 "div"
+                COLON@8..9 ":"
+                VALUE@9..14
+                  VALUE@9..14
+                    IDENT@9..14 "hover"
+              WHITESPACE@14..15 " "
+              RBRACE@15..16 "}"
+    "#]],
+    );
+}
+
+#[test]
+fn property_hack_with_a_pseudo_like_value_is_a_declaration() {
+    // Dart compiles this to `.a { .b: hover; }`, without an error.
+    check(
+        ".a { .b:hover }",
+        expect![[r#"
+        SOURCE_FILE@0..15
+          RULE_SET@0..15
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            BLOCK@2..15
+              WHITESPACE@2..3 " "
+              LBRACE@3..4 "{"
+              DECLARATION@4..13
+                PROPERTY@4..7
+                  WHITESPACE@4..5 " "
+                  DOT@5..6 "."
+                  IDENT@6..7 "b"
+                COLON@7..8 ":"
+                VALUE@8..13
+                  VALUE@8..13
+                    IDENT@8..13 "hover"
+              WHITESPACE@13..14 " "
+              RBRACE@14..15 "}"
+    "#]],
+    );
+}
+
+#[test]
+fn property_hacks_stay_declarations() {
+    for source in [
+        ".a { #b:hover }\n",
+        ".a { :b:hover }\n",
+        ".a { *b:hover }\n",
+        ".a { .b-c:hover; .d: e }\n",
+        ".a { .b :hover }\n",
+        ".a { . b: c }\n",
+        ".a { .b:#{c} }\n",
+        ".a { .b:-c }\n",
+        ".a { .b:c d }\n",
+    ] {
+        let errors = scss_errors(source);
+        assert!(errors.is_empty(), "{source:?}: {errors:?}");
+    }
+}
+
+#[test]
+fn property_hacks_with_a_block_stay_selectors() {
+    check(
+        ".a { .b:hover { c: d } }",
+        expect![[r#"
+        SOURCE_FILE@0..24
+          RULE_SET@0..24
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            BLOCK@2..24
+              WHITESPACE@2..3 " "
+              LBRACE@3..4 "{"
+              RULE_SET@4..22
+                SELECTOR_LIST@4..13
+                  SELECTOR@4..13
+                    SIMPLE_SELECTOR@4..7
+                      WHITESPACE@4..5 " "
+                      DOT@5..6 "."
+                      IDENT@6..7 "b"
+                    PSEUDO_SELECTOR@7..13
+                      COLON@7..8 ":"
+                      IDENT@8..13 "hover"
+                BLOCK@13..22
+                  WHITESPACE@13..14 " "
+                  LBRACE@14..15 "{"
+                  DECLARATION@15..20
+                    PROPERTY@15..17
+                      WHITESPACE@15..16 " "
+                      IDENT@16..17 "c"
+                    COLON@17..18 ":"
+                    VALUE@18..20
+                      VALUE@18..20
+                        WHITESPACE@18..19 " "
+                        IDENT@19..20 "d"
+                  WHITESPACE@20..21 " "
+                  RBRACE@21..22 "}"
+              WHITESPACE@22..23 " "
+              RBRACE@23..24 "}"
+    "#]],
+    );
+}
+
+#[test]
+fn value_that_only_a_selector_holds_makes_a_selector() {
+    // Dart: `expected "{"` after `.x`.
+    check(
+        ".a { div:hover .x }\n.b { c: d }",
+        expect![[r#"
+        SOURCE_FILE@0..31
+          RULE_SET@0..19
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            BLOCK@2..19
+              WHITESPACE@2..3 " "
+              LBRACE@3..4 "{"
+              RULE_SET@4..17
+                SELECTOR_LIST@4..17
+                  SELECTOR@4..17
+                    SIMPLE_SELECTOR@4..8
+                      WHITESPACE@4..5 " "
+                      IDENT@5..8 "div"
+                    PSEUDO_SELECTOR@8..14
+                      COLON@8..9 ":"
+                      IDENT@9..14 "hover"
+                    SIMPLE_SELECTOR@14..17
+                      WHITESPACE@14..15 " "
+                      DOT@15..16 "."
+                      IDENT@16..17 "x"
+              WHITESPACE@17..18 " "
+              RBRACE@18..19 "}"
+          RULE_SET@19..31
+            SELECTOR_LIST@19..22
+              SELECTOR@19..22
+                SIMPLE_SELECTOR@19..22
+                  WHITESPACE@19..20 "\n"
+                  DOT@20..21 "."
+                  IDENT@21..22 "b"
+            BLOCK@22..31
+              WHITESPACE@22..23 " "
+              LBRACE@23..24 "{"
+              DECLARATION@24..29
+                PROPERTY@24..26
+                  WHITESPACE@24..25 " "
+                  IDENT@25..26 "c"
+                COLON@26..27 ":"
+                VALUE@27..29
+                  VALUE@27..29
+                    WHITESPACE@27..28 " "
+                    IDENT@28..29 "d"
+              WHITESPACE@29..30 " "
+              RBRACE@30..31 "}"
+        errors:
+          17..17: expected `{`
+    "#]],
+    );
+}
+
+#[test]
+fn pseudo_function_with_a_selector_argument_is_a_selector() {
+    // Dart: `expected "{"` after `)`.
+    check(
+        ".a { a:not(.b) }",
+        expect![[r#"
+        SOURCE_FILE@0..16
+          RULE_SET@0..16
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            BLOCK@2..16
+              WHITESPACE@2..3 " "
+              LBRACE@3..4 "{"
+              RULE_SET@4..14
+                SELECTOR_LIST@4..14
+                  SELECTOR@4..14
+                    SIMPLE_SELECTOR@4..6
+                      WHITESPACE@4..5 " "
+                      IDENT@5..6 "a"
+                    PSEUDO_SELECTOR@6..14
+                      COLON@6..7 ":"
+                      IDENT@7..10 "not"
+                      LPAREN@10..11 "("
+                      DOT@11..12 "."
+                      IDENT@12..13 "b"
+                      RPAREN@13..14 ")"
+              WHITESPACE@14..15 " "
+              RBRACE@15..16 "}"
+        errors:
+          14..14: expected `{`
+    "#]],
+    );
+}
+
+#[test]
+fn selector_only_value_ended_by_a_semicolon_keeps_the_next_declaration() {
+    // Dart rejects the value: "Expected digit." at `.c`.
+    check(
+        ".a { a:b .c; d: e }",
+        expect![[r#"
+        SOURCE_FILE@0..19
+          RULE_SET@0..19
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            BLOCK@2..19
+              WHITESPACE@2..3 " "
+              LBRACE@3..4 "{"
+              RULE_SET@4..11
+                SELECTOR_LIST@4..11
+                  SELECTOR@4..11
+                    SIMPLE_SELECTOR@4..6
+                      WHITESPACE@4..5 " "
+                      IDENT@5..6 "a"
+                    PSEUDO_SELECTOR@6..8
+                      COLON@6..7 ":"
+                      IDENT@7..8 "b"
+                    SIMPLE_SELECTOR@8..11
+                      WHITESPACE@8..9 " "
+                      DOT@9..10 "."
+                      IDENT@10..11 "c"
+              SEMICOLON@11..12 ";"
+              DECLARATION@12..17
+                PROPERTY@12..14
+                  WHITESPACE@12..13 " "
+                  IDENT@13..14 "d"
+                COLON@14..15 ":"
+                VALUE@15..17
+                  VALUE@15..17
+                    WHITESPACE@15..16 " "
+                    IDENT@16..17 "e"
+              WHITESPACE@17..18 " "
+              RBRACE@18..19 "}"
+        errors:
+          11..11: expected `{`
+    "#]],
+    );
+}
+
+#[test]
+fn selector_shaped_statements_without_a_block_are_one_error_each() {
+    for source in [
+        ".a { div:hover .x }\n",
+        ".a { div:hover, .x }\n",
+        ".a { div:hover ~ span }\n",
+        ".a { a:hover:focus }\n",
+        ".a { a:b::c }\n",
+        ".a { a:b(1).c }\n",
+        ".a { .b:hover .c }\n",
+        ".a { .b:not(.c) }\n",
+        ".a { .b.c:hover }\n",
+    ] {
+        let errors = scss_errors(source);
+        let messages: Vec<_> = errors.iter().map(|(m, _)| m.as_str()).collect();
+        assert_eq!(messages, ["expected `{`"], "{source:?}: {errors:?}");
+    }
+}
+
+#[test]
+fn values_with_dotted_names_stay_declarations() {
+    for source in [
+        "@use \"sass:math\";\n.a { width:math.div(4, 2) }\n",
+        ".a { b:map.$c }\n",
+        ".a { filter:progid:DXImageTransform.Microsoft.Alpha(Opacity=80) }\n",
+        ".a { display:expression(this.runtimeStyle.display = \"inline\") }\n",
+        ".a { b:c, d }\n",
+        ".a { b:c [d] }\n",
+    ] {
+        let errors = scss_errors(source);
+        assert!(errors.is_empty(), "{source:?}: {errors:?}");
+    }
+}
+
+#[test]
+fn indented_pseudo_function_line_without_a_body_is_a_selector() {
+    // Dart warns that the selector has no properties, but reports no error.
+    check_sass(
+        ".a\n  a:not(.b)\n",
+        expect![[r#"
+        SOURCE_FILE@0..15
+          RULE_SET@0..14
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            BLOCK@2..14
+              LBRACE@2..2 ""
+              RULE_SET@2..14
+                SELECTOR_LIST@2..14
+                  SELECTOR@2..14
+                    SIMPLE_SELECTOR@2..6
+                      WHITESPACE@2..5 "\n  "
+                      IDENT@5..6 "a"
+                    PSEUDO_SELECTOR@6..14
+                      COLON@6..7 ":"
+                      IDENT@7..10 "not"
+                      LPAREN@10..11 "("
+                      DOT@11..12 "."
+                      IDENT@12..13 "b"
+                      RPAREN@13..14 ")"
+              SEMICOLON@14..14 ""
+              RBRACE@14..14 ""
+          WHITESPACE@14..15 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn indented_property_hack_with_a_pseudo_like_value_is_a_selector() {
+    // Dart reads `foo:bar` as a selector in the indented syntax, a hack or not.
+    check_sass(
+        ".a\n  .b:hover\n  .c: d\n",
+        expect![[r#"
+        SOURCE_FILE@0..22
+          RULE_SET@0..21
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            BLOCK@2..21
+              LBRACE@2..2 ""
+              RULE_SET@2..13
+                SELECTOR_LIST@2..13
+                  SELECTOR@2..13
+                    SIMPLE_SELECTOR@2..7
+                      WHITESPACE@2..5 "\n  "
+                      DOT@5..6 "."
+                      IDENT@6..7 "b"
+                    PSEUDO_SELECTOR@7..13
+                      COLON@7..8 ":"
+                      IDENT@8..13 "hover"
+              SEMICOLON@13..13 ""
+              DECLARATION@13..21
+                PROPERTY@13..18
+                  WHITESPACE@13..16 "\n  "
+                  DOT@16..17 "."
+                  IDENT@17..18 "c"
+                COLON@18..19 ":"
+                VALUE@19..21
+                  VALUE@19..21
+                    WHITESPACE@19..20 " "
+                    IDENT@20..21 "d"
+                SEMICOLON@21..21 ""
+              RBRACE@21..21 ""
+          WHITESPACE@21..22 "\n"
+    "#]],
+    );
+}

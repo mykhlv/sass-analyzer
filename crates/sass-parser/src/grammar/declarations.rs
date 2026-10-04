@@ -82,9 +82,13 @@ fn custom_property_declaration(p: &mut Parser<'_>) {
 /// Parse a property name, including interpolation.
 ///
 /// Handles: `color`, `--custom`, `#{$prop}`, `border-#{$side}`,
-/// `#{$a}-#{$b}`, `#{$ns}-#{$prop}-color`.
+/// `#{$a}-#{$b}`, `#{$ns}-#{$prop}-color`, and the hacks `*color`, `.color`, `#color`,
+/// `:color`.
 fn property(p: &mut Parser<'_>) {
     let m = p.start();
+    if p.at(DOT) || p.at(HASH) || p.at(COLON) || p.at(STAR) {
+        p.bump();
+    }
     if !p.at(IDENT) && !p.at(HASH_LBRACE) && !p.at(MINUS) && !p.at(STAR) {
         p.error("expected property name");
         let _ = m.complete(p, PROPERTY);
