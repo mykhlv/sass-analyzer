@@ -16,6 +16,7 @@ use crate::workspace;
 
 mod basics;
 mod call_hierarchy;
+mod code_actions;
 mod completion;
 mod config_commands;
 mod config_roots;
@@ -273,4 +274,57 @@ async fn do_initialize_with(
     .await;
 
     resp
+}
+
+async fn open_document(writer: &mut (impl AsyncWriteExt + Unpin), uri: &str, text: &str) {
+    send_msg(
+        writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": uri,
+                    "languageId": language_id(uri),
+                    "version": 1,
+                    "text": text
+                }
+            }
+        }),
+    )
+    .await;
+}
+
+/// Apply LSP `TextEdit`s (as JSON) to `source`. The inputs are ASCII, so a
+/// UTF-16 column is a byte column. A position past the last line clamps to EOF,
+/// as editors do.
+fn apply_lsp_edits(source: &str, edits: &[Value]) -> String {
+    let offset = |pos: &Value| {
+        let line = usize::try_from(pos["line"].as_u64().unwrap()).unwrap();
+        let character = usize::try_from(pos["character"].as_u64().unwrap()).unwrap();
+        let line_start: usize = source.split_inclusive('\n').take(line).map(str::len).sum();
+        (line_start + character).min(source.len())
+    };
+    let mut ranges: Vec<(usize, usize, &str)> = edits
+        .iter()
+        .map(|e| {
+            (
+                offset(&e["range"]["start"]),
+                offset(&e["range"]["end"]),
+                e["newText"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    ranges.sort_by_key(|r| std::cmp::Reverse(r.0));
+    let mut out = source.to_owned();
+    for (start, end, text) in ranges {
+        out.replace_range(start..end, text);
+    }
+    out
+}
+
+/// Assert that `source` parses as indented Sass with no errors.
+fn assert_parses_as_sass(source: &str) {
+    let (_, errors) = sass_parser::parse_sass(source);
+    assert!(errors.is_empty(), "parse errors in:\n{source}\n{errors:?}");
 }
