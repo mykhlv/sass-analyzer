@@ -120,8 +120,14 @@ fn generic_at_rule(p: &mut Parser<'_>) {
         }
         consumed_name = true;
     }
-    // Consume tokens until ; or { block } at depth 0
-    while !p.at(SEMICOLON) && !p.at(LBRACE) && !p.at(RBRACE) && !p.at_end() {
+    // Consume tokens until ; or { block } at depth 0, or the line break of a string left
+    // unclosed, which most likely took the `;`.
+    while !p.at(SEMICOLON)
+        && !p.at(LBRACE)
+        && !p.at(RBRACE)
+        && !p.at_end()
+        && !p.at_unclosed_string_break()
+    {
         if p.at(LPAREN) {
             eat_balanced(p, LPAREN, RPAREN);
         } else if p.at(HASH_LBRACE) {
@@ -144,7 +150,8 @@ pub(super) fn eat_balanced(p: &mut Parser<'_>, open: SyntaxKind, close: SyntaxKi
     let p = &mut *p.transparent_guard();
     p.bump();
     let mut depth: u32 = 1;
-    while !p.at_end() && depth > 0 {
+    // A string left unclosed took the rest of its line, the closing bracket and all.
+    while !p.at_end() && depth > 0 && !p.at_unclosed_string_break() {
         if p.current() == open {
             depth += 1;
         } else if p.current() == close {

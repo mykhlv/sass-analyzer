@@ -2371,6 +2371,64 @@ fn that_took_the_semicolon_of_a_statement() {
     }
 }
 
+#[test]
+fn that_took_the_semicolon_of_an_unknown_at_rule() {
+    // The prelude of an unknown at-rule runs on to the next `;` or `{`: without the
+    // string's line break ending it, `.a` would read as the prelude and its block as
+    // the at-rule's.
+    common::check(
+        "@foo \"x;\n.a { b: c; }\n",
+        expect![[r#"
+            SOURCE_FILE@0..22
+              GENERIC_AT_RULE@0..8
+                AT@0..1 "@"
+                IDENT@1..4 "foo"
+                WHITESPACE@4..5 " "
+                QUOTED_STRING@5..8 "\"x;"
+              RULE_SET@8..21
+                SELECTOR_LIST@8..11
+                  SELECTOR@8..11
+                    SIMPLE_SELECTOR@8..11
+                      WHITESPACE@8..9 "\n"
+                      DOT@9..10 "."
+                      IDENT@10..11 "a"
+                BLOCK@11..21
+                  WHITESPACE@11..12 " "
+                  LBRACE@12..13 "{"
+                  DECLARATION@13..19
+                    PROPERTY@13..15
+                      WHITESPACE@13..14 " "
+                      IDENT@14..15 "b"
+                    COLON@15..16 ":"
+                    VALUE@16..18
+                      VALUE@16..18
+                        WHITESPACE@16..17 " "
+                        IDENT@17..18 "c"
+                    SEMICOLON@18..19 ";"
+                  WHITESPACE@19..20 " "
+                  RBRACE@20..21 "}"
+              WHITESPACE@21..22 "\n"
+            errors:
+              5..8: unterminated string
+        "#]],
+    );
+    for (source, rules, declared) in [
+        ("@foo (\"x);\n.a { b: c; }\n", &[".a"][..], &["b: c;"][..]),
+        ("@foo \"x\n.a { b: c; }\n", &[".a"], &["b: c;"]),
+        (".r {\n  @foo \"x;\n  b: c;\n}\n", &[".r"], &["b: c;"]),
+        // A comma the string took leaves the prelude going on.
+        ("@foo \"x,\n  y;\n.a { b: c; }\n", &[".a"], &["b: c;"]),
+    ] {
+        assert_eq!(
+            errors(parse_scss, source),
+            ["unterminated string"],
+            "{source:?}"
+        );
+        assert_eq!(top_level_rules(parse_scss, source), rules, "{source:?}");
+        assert_eq!(declarations(parse_scss, source), declared, "{source:?}");
+    }
+}
+
 // ── Selectors and at-rules ───────────────────────────────────────────
 
 #[test]

@@ -18,13 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   error below a single stray quote. An escaped newline still continues a string. Inside a
   map, list or argument list spanning lines, or after a comma the string took, the next
   line is read as the next item, since the string most likely took the comma with it.
-  Otherwise the statement ends at the line break too, as in `b: "x;`, `--b: f("x);` or
-  `@include m("x);`, with no further diagnostics for the `;` or `)` the string took: the
-  next line parses as a statement of its own, so a declaration there keeps its symbol,
-  hover and diagnostics. In SCSS, a string that took the `}` closing its block, as in
-  `.a { b: "x }`, or the `{` opening a body, as in `@include m("x) {`, has that brace put
-  back where the indentation of the next line agrees, so the rules after it keep their
-  nesting. An unclosed `@use` or `@import` path still resolves to its module
+  Otherwise the statement ends at the line break too, as in `b: "x;`, `--b: f("x);`,
+  `@include m("x);` or an unknown at-rule's `@foo "x;`, with no further diagnostics for
+  the `;` or `)` the string took: the next line parses as a statement of its own, so a
+  declaration there keeps its symbol, hover and diagnostics. In SCSS, a string that took
+  the `}` closing its block, as in `.a { b: "x }`, or the `{` opening a body, as in
+  `@include m("x) {`, has that brace put back where the indentation of the next line
+  agrees, so the rules after it keep their nesting. An unclosed `@use` or `@import` path
+  still resolves to its module
 - Parser: nested selector lists containing an attribute selector or a pseudo-class with
   arguments are no longer misparsed as nested properties — `p:nth-child(2) { }` inside a
   rule was silently turned into a property, and `button:hover, [type="b"] { }` produced a
