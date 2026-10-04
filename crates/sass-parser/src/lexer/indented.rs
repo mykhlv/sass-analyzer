@@ -25,6 +25,9 @@ pub struct IndentedLexer<'src> {
     /// Depth of `(`, `[` and `#{`; a newline inside them is not a line break of the layout,
     /// so a comment there never starts a statement.
     depth: u32,
+    /// `depth` where the SCSS lexer last entered a string, interpolation or `url(` from
+    /// outside all of them: what is left when a string left unclosed ends them all.
+    depth_outside_contexts: u32,
     /// A significant token has been seen since the last line break at depth 0.
     line_has_content: bool,
     /// Indentation of the current line, measured at the last line break at depth 0.
@@ -42,6 +45,7 @@ impl<'src> IndentedLexer<'src> {
         Self {
             lexer: Lexer::new(input),
             depth: 0,
+            depth_outside_contexts: 0,
             line_has_content: false,
             column: 0,
             silent_comment: None,
@@ -86,9 +90,17 @@ impl<'src> IndentedLexer<'src> {
     /// one above it (`.a,` / `// c` / `  .b`): there the comment is an ordinary one, and only
     /// a caller that tracks continuations knows. `true` defers to the layout.
     pub fn next_token_where(&mut self, statement_position: bool) -> (SyntaxKind, &'src str) {
+        let outside_contexts = self.lexer.context_stack.is_empty();
+        let depth = self.depth;
         let (kind, text) = self.lexer.next_token();
+        let unwound = self.lexer.take_unwound();
         if self.in_continuation_line {
             return self.continuation_token(kind, text);
+        }
+        if unwound {
+            self.depth = self.depth_outside_contexts;
+        } else if outside_contexts && !self.lexer.context_stack.is_empty() {
+            self.depth_outside_contexts = depth;
         }
         match kind {
             SyntaxKind::WHITESPACE => {

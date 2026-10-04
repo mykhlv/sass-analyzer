@@ -244,7 +244,8 @@ fn eat_balanced_brackets(p: &mut Parser<'_>) {
     let p = &mut *p.transparent_guard();
     p.bump(); // [
     let mut depth: u32 = 1;
-    while !p.at_end() && depth > 0 {
+    // A string left unclosed took the rest of its line, `]` and all.
+    while !p.at_end() && depth > 0 && !p.at_unclosed_string_break() {
         match p.current() {
             LBRACKET => {
                 depth += 1;
