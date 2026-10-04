@@ -202,6 +202,72 @@ fn a_comma_continues_across_a_blank_line() {
     check_same(".a,\n\n.b\n  c: d\n");
 }
 
+/// Every list the grammar reads outside brackets goes on after a comma at the end of a
+/// line, with or without a blank line after it, as in legacy.
+#[test]
+fn every_comma_separated_list_goes_on_after_a_comma() {
+    for source in [
+        ".a,\n  .b\n  c: d\n",
+        ".a\n  @extend .b,\n    .c\n",
+        "@each $a,\n  $b in c\n  d: e\n",
+        "@each $a in b,\n  c\n  d: e\n",
+        ".a\n  b: c,\n    d\n",
+        "$a: 1,\n  2\n",
+        "@use \"a\" show b,\n  c\n",
+        "@import \"a\",\n  \"b\"\n",
+        "@layer a,\n  b\n",
+        "@keyframes k\n  10%,\n    20%\n    a: b\n",
+        "@foo\n  10%,\n  20%\n    a: b\n",
+        "@media screen,\n  print\n  .a\n    b: c\n",
+        "@foo a,\n  b\n  c: d\n",
+        ".a\n  --x: a,\n    b\n",
+    ] {
+        check_same(source);
+        check_same(&source.replacen(",\n", ",\n\n", 1));
+    }
+}
+
+/// The keyframe selectors of an unknown at-rule's block: the comma joins `20%` to `10%`,
+/// and the block below belongs to both.
+#[test]
+fn a_comma_continues_a_keyframe_list_in_an_unknown_at_rule() {
+    check_same("@foo\n  10%,\n  20%\n    a: b\n");
+    check(
+        "@foo\n  10%,\n  20%\n    a: b\n",
+        expect![[r#"
+            SOURCE_FILE@0..27
+              GENERIC_AT_RULE@0..26
+                AT@0..1 "@"
+                IDENT@1..4 "foo"
+                BLOCK@4..26
+                  LBRACE@4..4 ""
+                  KEYFRAME_SELECTOR@4..26
+                    WHITESPACE@4..7 "\n  "
+                    NUMBER@7..9 "10"
+                    PERCENT@9..10 "%"
+                    COMMA@10..11 ","
+                    WHITESPACE@11..14 "\n  "
+                    NUMBER@14..16 "20"
+                    PERCENT@16..17 "%"
+                    BLOCK@17..26
+                      LBRACE@17..17 ""
+                      DECLARATION@17..26
+                        PROPERTY@17..23
+                          WHITESPACE@17..22 "\n    "
+                          IDENT@22..23 "a"
+                        COLON@23..24 ":"
+                        VALUE@24..26
+                          VALUE@24..26
+                            WHITESPACE@24..25 " "
+                            IDENT@25..26 "b"
+                        SEMICOLON@26..26 ""
+                      RBRACE@26..26 ""
+                  RBRACE@26..26 ""
+              WHITESPACE@26..27 "\n"
+        "#]],
+    );
+}
+
 #[test]
 fn a_selector_list_scanned_across_a_continued_line_stays_a_selector() {
     // The declaration-or-selector scan sees past the comma on the first line.

@@ -469,6 +469,7 @@ fn generic_keyframe_block(p: &mut Parser<'_>) {
         if !p.eat(COMMA) {
             break;
         }
+        p.continue_line_across_blank();
     }
     if p.at(LBRACE) {
         block(p);
