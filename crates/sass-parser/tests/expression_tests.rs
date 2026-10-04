@@ -3053,6 +3053,88 @@ fn calc_deeply_nested_parens() {
 }
 
 #[test]
+fn calc_space_separated_values_unclosed() {
+    check(
+        "a{b:calc(1 calc(2 (3",
+        expect![[r#"
+            SOURCE_FILE@0..20
+              RULE_SET@0..20
+                SELECTOR_LIST@0..1
+                  SELECTOR@0..1
+                    SIMPLE_SELECTOR@0..1
+                      IDENT@0..1 "a"
+                BLOCK@1..20
+                  LBRACE@1..2 "{"
+                  DECLARATION@2..20
+                    PROPERTY@2..3
+                      IDENT@2..3 "b"
+                    COLON@3..4 ":"
+                    VALUE@4..20
+                      CALCULATION@4..20
+                        IDENT@4..8 "calc"
+                        LPAREN@8..9 "("
+                        CALC_SUM@9..20
+                          CALC_VALUE@9..10
+                            NUMBER_LITERAL@9..10
+                              NUMBER@9..10 "1"
+                          CALCULATION@10..20
+                            WHITESPACE@10..11 " "
+                            IDENT@11..15 "calc"
+                            LPAREN@15..16 "("
+                            CALC_SUM@16..20
+                              CALC_VALUE@16..17
+                                NUMBER_LITERAL@16..17
+                                  NUMBER@16..17 "2"
+                              CALC_VALUE@17..20
+                                WHITESPACE@17..18 " "
+                                LPAREN@18..19 "("
+                                CALC_VALUE@19..20
+                                  NUMBER_LITERAL@19..20
+                                    NUMBER@19..20 "3"
+            errors:
+              20..20: expected RPAREN
+              20..20: expected RPAREN
+              20..20: expected RPAREN
+              20..20: expected RBRACE
+        "#]],
+    );
+}
+
+#[test]
+fn calc_space_separated_values_past_nesting_limit() {
+    // Regression (fuzz OOM): at the nesting limit `calc_value` consumes nothing, and the
+    // loop over space-separated calc values retried the same token forever, adding a
+    // "nesting too deep" error each time until memory ran out.
+    let levels = "calc(".repeat(1_000);
+    for (parse, source) in [
+        (
+            sass_parser::parse_scss as fn(&str) -> _,
+            format!("a{{b:{levels}"),
+        ),
+        (
+            sass_parser::parse_scss,
+            format!("a{{b:calc({}x y", "(".repeat(254)),
+        ),
+        (sass_parser::parse_scss, format!("a{{b:var({levels}")),
+        (sass_parser::parse_sass, format!("a\n  b: {levels}\n")),
+    ] {
+        let (green, errors) = parse(&source);
+        let tree = SyntaxNode::new_root(green);
+        assert_eq!(tree.text().to_string(), source, "lossless round-trip");
+        assert!(
+            errors.iter().any(|(msg, _)| msg == "nesting too deep"),
+            "{errors:?}"
+        );
+        assert!(
+            errors.len() <= 2 * source.len(),
+            "{} errors for {} bytes",
+            errors.len(),
+            source.len()
+        );
+    }
+}
+
+#[test]
 fn css_value_not_is_plain_ident() {
     // Regression: `not` was always parsed as unary prefix, even in CssValue context
     check(

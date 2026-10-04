@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   selectors, and a body starting with `:hover` no longer escapes its `@mixin` — the latter
   previously reparented the mixin's contents into the enclosing scope with no diagnostic,
   which misled go-to-definition and semantic diagnostics
+- Parser: a calculation nested past the parser's depth limit (about 250 levels of unclosed
+  `calc(`, `min(` or `(`) no longer hangs the parser until it runs out of memory; it
+  reports "nesting too deep" and goes on. A 1 KB file could exhaust tens of gigabytes
 - LSP: indented `.sass` files are no longer re-parsed with the SCSS parser after the tree
   cache evicts them, which silently produced a file with no declarations
 - LSP: find-references and rename no longer re-parse every file in the workspace, which
