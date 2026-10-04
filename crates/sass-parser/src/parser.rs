@@ -58,6 +58,8 @@ pub struct Parser<'src> {
     /// deep in brackets each one lies, and the guards end a bracket that an error left
     /// unclosed.
     transparent: u32,
+    /// Where the innermost of those brackets opens.
+    bracket_start: TextSize,
     /// The last virtual token emitted: the cursor position and the trivia index it
     /// went at. Trivia before that index lies in front of it, not in front of the
     /// token at the cursor, which `has_whitespace_before` must not see.
@@ -68,6 +70,9 @@ pub struct Parser<'src> {
     unclosed_strings: u32,
     /// The cursor right after the last of them; see [`Parser::at_unclosed_string_break`].
     unclosed_string_end: usize,
+    /// Where the last of them starts, and how its text ends.
+    unclosed_string_start: TextSize,
+    unclosed_string_tail: StringTail,
     /// Where each interpolated string bumped and not yet ended starts. One the lexer ended
     /// unclosed right after an interpolation never sees its `STRING_END`, and stays: it
     /// lies below every string opened after it, so it is never taken for one of them.
@@ -94,10 +99,13 @@ impl<'src> Parser<'src> {
             layout,
             fence,
             transparent: 0,
+            bracket_start: TextSize::from(0),
             last_virtual: (usize::MAX, 0),
             indented: IndentedState::new(),
             unclosed_strings: 0,
             unclosed_string_end: usize::MAX,
+            unclosed_string_start: TextSize::from(0),
+            unclosed_string_tail: StringTail::Plain,
             open_strings: Vec::new(),
         };
         if layout == Layout::Indented {
@@ -242,7 +250,7 @@ impl<'src> Parser<'src> {
     fn check_string_end(&mut self, start: TextSize, end_text: &str, end: TextSize) {
         let quote = self.source.as_bytes()[usize::from(start)];
         if !crate::lexer::closes_string(end_text, quote) {
-            self.unclosed_string(TextRange::new(start, end));
+            self.unclosed_string(TextRange::new(start, end), end_text);
         }
     }
 
@@ -252,7 +260,7 @@ impl<'src> Parser<'src> {
         if let Some(prev) = self.pos.checked_sub(1)
             && let Some(start) = self.open_strings.pop()
         {
-            self.unclosed_string(TextRange::new(start, self.input.range(prev).end()));
+            self.unclosed_string(TextRange::new(start, self.input.range(prev).end()), "");
         }
     }
 
@@ -263,25 +271,67 @@ impl<'src> Parser<'src> {
         self.unclosed_strings
     }
 
-    /// Whether the cursor is inside brackets, right after a string left unclosed. Its line
-    /// break most likely stands for the comma that the string swallowed with the rest of
-    /// its line: `(a: "x,` / `b: 2)`.
+    /// Whether the cursor is right after a string left unclosed, at the line break that
+    /// ended it. Where [`Parser::eat_unclosed_string_break`] takes that break for a comma,
+    /// the list goes on; otherwise the string most likely swallowed the end of its
+    /// construct, `m("x);`, which ends at the break unless the line after closes it.
     pub fn at_unclosed_string_break(&self) -> bool {
-        self.transparent > 0 && self.pos == self.unclosed_string_end
+        self.pos == self.unclosed_string_end
+            && (self.unclosed_string_break_is_comma() || self.at_unclosed_string_stop())
     }
 
-    /// Take the line break at [`Parser::at_unclosed_string_break`] as a comma, once.
+    /// Take the line break at [`Parser::at_unclosed_string_break`] as a comma, once. Inside
+    /// brackets, it stands for the comma the string swallowed with the rest of its line,
+    /// `(a: "x,` / `b: 2)`, or the one a list laid out an item per line puts there:
+    /// `f(` / `"x` / `2)`.
     pub fn eat_unclosed_string_break(&mut self) -> bool {
-        let at = self.at_unclosed_string_break();
+        let at = self.pos == self.unclosed_string_end && self.unclosed_string_break_is_comma();
         if at {
             self.unclosed_string_end = usize::MAX;
         }
         at
     }
 
-    fn unclosed_string(&mut self, range: TextRange) {
+    /// Whether the innermost bracket takes the break for a comma. Asked again as each
+    /// bracket ends: `(` / `a: f("x` / `b: 2)` stops `f(` but goes on with the map.
+    fn unclosed_string_break_is_comma(&self) -> bool {
+        self.transparent > 0
+            && match self.unclosed_string_tail {
+                StringTail::Comma => true,
+                StringTail::Closer => false,
+                // A bracket opened at the break itself is not the string's.
+                StringTail::Plain => {
+                    self.bracket_start < self.unclosed_string_start
+                        && self.source
+                            [TextRange::new(self.bracket_start, self.unclosed_string_start)]
+                        .contains('\n')
+                }
+            }
+    }
+
+    fn at_unclosed_string_stop(&self) -> bool {
+        self.pos == self.unclosed_string_end
+            && self.unclosed_string_tail != StringTail::Comma
+            && !self.unclosed_string_break_is_comma()
+            && !matches!(
+                self.current(),
+                SyntaxKind::RPAREN | SyntaxKind::RBRACKET | SyntaxKind::COMMA
+            )
+    }
+
+    /// Report the string at `range`, whose text ends in `tail`.
+    fn unclosed_string(&mut self, range: TextRange, tail: &str) {
         self.unclosed_strings += 1;
         self.unclosed_string_end = self.pos;
+        self.unclosed_string_start = range.start();
+        let tail = tail.trim_end();
+        self.unclosed_string_tail = if tail.ends_with(',') {
+            StringTail::Comma
+        } else if tail.ends_with([')', ']', ';', '{', '}']) {
+            StringTail::Closer
+        } else {
+            StringTail::Plain
+        };
         self.error_at(range, "unterminated string");
     }
 
@@ -331,6 +381,15 @@ impl<'src> Parser<'src> {
     pub fn expect(&mut self, kind: SyntaxKind) -> bool {
         if self.eat(kind) {
             return true;
+        }
+        // Swallowed by a string left unclosed, already reported. A `}` is not: the block
+        // it closes spans lines, so a missing one is a separate mistake.
+        if matches!(
+            kind,
+            SyntaxKind::RPAREN | SyntaxKind::RBRACKET | SyntaxKind::SEMICOLON
+        ) && self.at_unclosed_string_stop()
+        {
+            return false;
         }
         self.error(format!("expected {kind:?}"));
         false
@@ -439,12 +498,28 @@ impl<'src> Parser<'src> {
     /// so a bracket left unclosed by an error does not outlive the function that opened
     /// it: in the indented layout, the line breaks after it count again.
     pub fn transparent_guard(&mut self) -> TransparentGuard<'_, 'src> {
+        debug_assert!(self.pos < self.fence.index, "transparent_guard at a fence");
+        let outer_start =
+            std::mem::replace(&mut self.bracket_start, self.input.range(self.pos).start());
         self.transparent += 1;
         if self.layout == Layout::Indented {
             self.enter_bracket();
         }
-        TransparentGuard { parser: self }
+        TransparentGuard {
+            parser: self,
+            outer_start,
+        }
     }
+}
+
+/// How the text of a string left unclosed ends, before the line break that ended it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StringTail {
+    /// In a comma it swallowed.
+    Comma,
+    /// In a token that closes a construct: `)`, `]`, `;`, `{` or `}`.
+    Closer,
+    Plain,
 }
 
 fn eof_fence(input: &Input) -> Fence {
@@ -582,6 +657,7 @@ impl Drop for DepthGuard<'_, '_> {
 
 pub struct TransparentGuard<'p, 'src> {
     parser: &'p mut Parser<'src>,
+    outer_start: TextSize,
 }
 
 impl<'src> std::ops::Deref for TransparentGuard<'_, 'src> {
@@ -601,6 +677,7 @@ impl<'src> std::ops::DerefMut for TransparentGuard<'_, 'src> {
 impl Drop for TransparentGuard<'_, '_> {
     fn drop(&mut self) {
         self.parser.transparent -= 1;
+        self.parser.bracket_start = self.outer_start;
         if self.parser.layout == Layout::Indented {
             self.parser.exit_bracket();
         }
