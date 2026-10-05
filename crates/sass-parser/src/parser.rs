@@ -315,8 +315,32 @@ impl<'src> Parser<'src> {
                         && self.source
                             [TextRange::new(self.bracket_start, self.unclosed_string_start)]
                         .contains('\n')
+                        && !self.at_statement_beneath_bracket()
                 }
             }
+    }
+
+    /// Whether the line after the break starts a statement no deeper than the line that
+    /// opened the innermost bracket: the statement after the string's, not the next item.
+    /// `b: f(` / `"x` / `c: d;` ends the call there, while the items of `$m: (` / `a: "x`
+    /// / `b: 2` lie deeper than its opening line.
+    fn at_statement_beneath_bracket(&self) -> bool {
+        if self.pos >= self.input.len() {
+            return false;
+        }
+        let statement = match self.current() {
+            SyntaxKind::AT | SyntaxKind::RBRACE => true,
+            SyntaxKind::DOLLAR => {
+                self.nth(1) == SyntaxKind::IDENT && self.nth(2) == SyntaxKind::COLON
+            }
+            SyntaxKind::IDENT => {
+                self.nth(1) == SyntaxKind::COLON && !self.nth_has_whitespace_before(1)
+            }
+            _ => false,
+        };
+        statement
+            && self.line_indent(self.input.range(self.pos).start())
+                <= self.line_indent(self.bracket_start)
     }
 
     fn at_unclosed_string_stop(&self) -> bool {

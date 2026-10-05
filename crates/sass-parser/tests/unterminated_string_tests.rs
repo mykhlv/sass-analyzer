@@ -1948,6 +1948,99 @@ fn in_brackets_opened_on_an_earlier_line() {
 }
 
 #[test]
+fn in_brackets_opened_on_an_earlier_line_before_a_statement() {
+    // A next line shaped like a statement, no deeper than the line that opened the
+    // bracket, is the statement after the string's, not the next item: `c: d` keeps its
+    // declaration instead of becoming an argument of `f`.
+    common::check(
+        "a {\n  b: f(\n    \"x\n  c: d;\n}\n.e { f: g; }\n",
+        expect![[r#"
+            SOURCE_FILE@0..42
+              RULE_SET@0..28
+                SELECTOR_LIST@0..1
+                  SELECTOR@0..1
+                    SIMPLE_SELECTOR@0..1
+                      IDENT@0..1 "a"
+                BLOCK@1..28
+                  WHITESPACE@1..2 " "
+                  LBRACE@2..3 "{"
+                  DECLARATION@3..18
+                    PROPERTY@3..7
+                      WHITESPACE@3..6 "\n  "
+                      IDENT@6..7 "b"
+                    COLON@7..8 ":"
+                    VALUE@8..18
+                      FUNCTION_CALL@8..18
+                        WHITESPACE@8..9 " "
+                        IDENT@9..10 "f"
+                        ARG_LIST@10..18
+                          LPAREN@10..11 "("
+                          ARG@11..18
+                            STRING_LITERAL@11..18
+                              WHITESPACE@11..16 "\n    "
+                              QUOTED_STRING@16..18 "\"x"
+                  DECLARATION@18..26
+                    PROPERTY@18..22
+                      WHITESPACE@18..21 "\n  "
+                      IDENT@21..22 "c"
+                    COLON@22..23 ":"
+                    VALUE@23..25
+                      VALUE@23..25
+                        WHITESPACE@23..24 " "
+                        IDENT@24..25 "d"
+                    SEMICOLON@25..26 ";"
+                  WHITESPACE@26..27 "\n"
+                  RBRACE@27..28 "}"
+              RULE_SET@28..41
+                SELECTOR_LIST@28..31
+                  SELECTOR@28..31
+                    SIMPLE_SELECTOR@28..31
+                      WHITESPACE@28..29 "\n"
+                      DOT@29..30 "."
+                      IDENT@30..31 "e"
+                BLOCK@31..41
+                  WHITESPACE@31..32 " "
+                  LBRACE@32..33 "{"
+                  DECLARATION@33..39
+                    PROPERTY@33..35
+                      WHITESPACE@33..34 " "
+                      IDENT@34..35 "f"
+                    COLON@35..36 ":"
+                    VALUE@36..38
+                      VALUE@36..38
+                        WHITESPACE@36..37 " "
+                        IDENT@37..38 "g"
+                    SEMICOLON@38..39 ";"
+                  WHITESPACE@39..40 " "
+                  RBRACE@40..41 "}"
+              WHITESPACE@41..42 "\n"
+            errors:
+              16..18: unterminated string
+        "#]],
+    );
+    for (source, declared) in [
+        ("a {\n  b: f(\n    \"x\n  $c: d;\n}\n", &["$c: d;"][..]),
+        (
+            "a {\n  b: f(\n    \"x\n  @include m;\n  c: d;\n}\n",
+            &["c: d;"],
+        ),
+        ("a {\n  b: f(\n    \"x\n}\n.e { f: g; }\n", &["f: g;"]),
+        ("$m: (\n  a: \"x\n$c: d;\n", &["$c: d;"]),
+        // Deeper than the opening line: the next item of the map, as before.
+        ("$m: (\n  a: \"x\n  b: 2\n);\n$c: d;\n", &["$c: d;"]),
+    ] {
+        assert_eq!(
+            errors(parse_scss, source),
+            ["unterminated string"],
+            "{source:?}"
+        );
+        let mut found = declarations(parse_scss, source);
+        found.retain(|text| !text.starts_with("b:") && !text.starts_with("$m:"));
+        assert_eq!(found, declared, "{source:?}");
+    }
+}
+
+#[test]
 fn in_brackets_opened_on_its_line() {
     // `f("x` ends at the line break, and the declaration with it, as when the next line is
     // a declaration of its own; what the string should have closed there is left over.
