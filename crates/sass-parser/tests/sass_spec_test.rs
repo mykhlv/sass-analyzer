@@ -27,7 +27,7 @@ mod tree_shape;
 #[path = "common/virtual_tokens.rs"]
 mod virtual_tokens;
 
-use tree_shape::{Shape, describe_record_diff, record_key};
+use tree_shape::{Shape, describe_record_diff, describe_record_diff_with, record_key};
 
 // ── HRX parser ──────────────────────────────────────────────────────
 
@@ -244,7 +244,14 @@ struct CaseResult {
     first_errors: Vec<String>,
     /// Shape record, kept for the cases dart-sass accepts.
     shape: Option<String>,
+    /// Noisy-error record, kept for the cases dart-sass rejects where we report
+    /// more than [`MAX_DIAGNOSTICS`].
+    noisy: Option<String>,
 }
+
+/// Most diagnostics one syntax error may produce before its recovery counts as a
+/// cascade.
+const MAX_DIAGNOSTICS: usize = 3;
 
 fn classify(case: &TestCase, our_errors: usize) -> Outcome {
     let we_ok = our_errors == 0;
@@ -560,12 +567,20 @@ fn sass_spec_compatibility() {
                     .map(|(msg, range)| format!("{range:?}: {msg}"))
                     .collect();
 
-                let shape = case.expects_success.then(|| {
-                    let group = match case.syntax {
-                        Syntax::Scss => "scss",
-                        Syntax::Sass => "sass",
-                    };
-                    Shape::of(&tree).record(group, &case.display_path, errors.len())
+                let group = match case.syntax {
+                    Syntax::Scss => "scss",
+                    Syntax::Sass => "sass",
+                };
+                let shape = case
+                    .expects_success
+                    .then(|| Shape::of(&tree).record(group, &case.display_path, errors.len()));
+                let noisy = (case.expects_error && errors.len() > MAX_DIAGNOSTICS).then(|| {
+                    format!(
+                        "{group}\t{}\t{}\t{}",
+                        case.display_path.replace('\\', "/"),
+                        errors.len(),
+                        errors[0].0.replace(['\t', '\n'], " "),
+                    )
                 });
 
                 CaseResult {
@@ -574,6 +589,7 @@ fn sass_spec_compatibility() {
                     our_error_count: errors.len(),
                     first_errors,
                     shape,
+                    noisy,
                 }
             })
             .collect()
@@ -613,16 +629,24 @@ fn sass_spec_compatibility() {
         }
     }
 
-    check_shapes(scss_results.iter().chain(&sass_results));
+    // Both baselines are checked before either fails, so one run reports every drift.
+    let failures: Vec<String> = [
+        check_shapes(scss_results.iter().chain(&sass_results)),
+        check_noisy_errors(scss_results.iter().chain(&sass_results)),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 /// Compare the tree shape of every case dart-sass accepts with the tracked
-/// `sass-spec-shapes.txt`, failing with a per-case diff on any difference.
+/// `sass-spec-shapes.txt`, returning a per-case diff on any difference.
 ///
 /// The match rates above count a valid input as compatible whenever it parses
 /// without errors, so a valid input misparsed with no diagnostic passes them.
 /// Recording its shape catches that, for syntax the corpora do not cover.
-fn check_shapes<'a>(results: impl Iterator<Item = &'a CaseResult>) {
+fn check_shapes<'a>(results: impl Iterator<Item = &'a CaseResult>) -> Option<String> {
     const BASELINE: &str = "sass-spec-shapes.txt";
     const ACTUAL: &str = "sass-spec-shapes.actual.txt";
 
@@ -667,14 +691,75 @@ fn check_shapes<'a>(results: impl Iterator<Item = &'a CaseResult>) {
     }
     eprintln!("\nsass-spec tree shapes: {} valid cases", records.len());
 
-    if let Some(diff) = diff {
-        panic!(
+    diff.map(|diff| {
+        format!(
             "sass-spec tree shapes no longer match {}:\n{diff}\
              Review `diff {} {}`. If every change is intended, copy the .actual \
              file over the baseline and commit it.",
             baseline_path.display(),
             baseline_path.display(),
             actual_path.display(),
-        );
+        )
+    })
+}
+
+/// Compare every case dart-sass rejects where we report more than
+/// [`MAX_DIAGNOSTICS`] with the tracked `sass-spec-noisy-errors.txt`, returning a
+/// per-case diff on any difference.
+///
+/// sass-spec only checks that an invalid input errors, so a recovery that turns one
+/// typo into a cascade of diagnostics passes it. This baseline is a ratchet: a new
+/// offender, a changed count and a fixed case all show up as a difference.
+fn check_noisy_errors<'a>(results: impl Iterator<Item = &'a CaseResult>) -> Option<String> {
+    const BASELINE: &str = "sass-spec-noisy-errors.txt";
+    const ACTUAL: &str = "sass-spec-noisy-errors.actual.txt";
+    const COLUMNS: [&str; 4] = ["syntax", "path", "errors", "first_error"];
+
+    let mut records: Vec<String> = results.filter_map(|r| r.noisy.clone()).collect();
+    records.sort();
+
+    let mut out = format!(
+        "# sass-spec noisy-error baseline: one record per case dart-sass rejects where\n\
+         # the parser reports more than {MAX_DIAGNOSTICS} diagnostics.\n\
+         # Checked with:\n\
+         #   cargo test -p sass-parser --test sass_spec_test -- --ignored sass_spec_compatibility\n\
+         # A run that differs writes test-corpus/{ACTUAL} instead of this file;\n\
+         # once every change in it is reviewed as intended, copy it over this one.\n\
+         # Columns: syntax, case, parse errors, first error message. A new offender,\n\
+         # a changed count and a case that drops out all fail, so every change to this\n\
+         # list is a reviewed one.\n"
+    );
+    for record in &records {
+        out.push_str(record);
+        out.push('\n');
     }
+
+    let test_corpus = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test-corpus");
+    let baseline_path = test_corpus.join(BASELINE);
+    let actual_path = test_corpus.join(ACTUAL);
+    let committed = std::fs::read_to_string(&baseline_path).unwrap_or_default();
+    let old: Vec<&str> = committed.lines().filter(|l| !l.starts_with('#')).collect();
+    let diff = describe_record_diff_with(&old, &records, &COLUMNS, "now within the limit");
+
+    if diff.is_none() {
+        std::fs::write(&baseline_path, &out).expect("write noisy-error baseline");
+        let _ = std::fs::remove_file(&actual_path);
+    } else {
+        std::fs::write(&actual_path, &out).expect("write noisy-error baseline");
+    }
+    eprintln!(
+        "\nsass-spec noisy errors: {} cases with >{MAX_DIAGNOSTICS} diagnostics",
+        records.len()
+    );
+
+    diff.map(|diff| {
+        format!(
+            "sass-spec noisy errors no longer match {}:\n{diff}\
+             Review `diff {} {}`. If every change is intended, copy the .actual \
+             file over the baseline and commit it.",
+            baseline_path.display(),
+            baseline_path.display(),
+            actual_path.display(),
+        )
+    })
 }
