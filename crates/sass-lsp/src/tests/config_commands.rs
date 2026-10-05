@@ -521,15 +521,54 @@ async fn did_open_exceeding_max_file_size() {
 
 // ── Configuration & command tests ────────────────────────────────
 
+/// Read until diagnostics are published for `uri`, skipping other messages.
+async fn recv_diagnostics_for(
+    reader: &mut (impl AsyncReadExt + Unpin),
+    writer: &mut (impl AsyncWriteExt + Unpin),
+    uri: &str,
+) {
+    loop {
+        let msg = recv_msg(reader, writer).await;
+        if msg["method"] == "textDocument/publishDiagnostics" && msg["params"]["uri"] == uri {
+            return;
+        }
+    }
+}
+
 #[tokio::test]
 async fn did_change_configuration_updates_resolver() {
     let dir = std::env::temp_dir().join(format!("sass_cfg_{}", std::process::id()));
-    let _ = std::fs::create_dir_all(&dir);
+    let vendor = dir.join("vendor/scss");
+    std::fs::create_dir_all(&vendor).unwrap();
+    std::fs::write(vendor.join("_tokens.scss"), "$gap: 4px;\n").unwrap();
+    let main = dir.join("main.scss");
+    let scss = "@use \"tokens\";\na { b: tokens.$gap; }\n";
+    std::fs::write(&main, scss).unwrap();
+    let main_uri = file_uri(&main);
 
     let (mut reader, mut writer) = spawn_server();
     do_initialize_with_root(&mut reader, &mut writer, &file_uri(&dir)).await;
+    open_document(&mut writer, &main_uri, scss).await;
+    recv_diagnostics_for(&mut reader, &mut writer, &main_uri).await;
 
-    // Send a configuration change with loadPaths
+    // Line 1, `a { b: tokens.$gap; }`: the cursor on `gap`.
+    let definition = serde_json::json!({
+        "textDocument": { "uri": main_uri },
+        "position": { "line": 1, "character": 16 }
+    });
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0", "id": 300, "method": "textDocument/definition", "params": definition
+        }),
+    )
+    .await;
+    let resp = recv_response(&mut reader, &mut writer, 300).await;
+    assert!(
+        !resp["result"].to_string().contains("_tokens.scss"),
+        "{resp}"
+    );
+
     send_msg(
         &mut writer,
         &serde_json::json!({
@@ -546,43 +585,23 @@ async fn did_change_configuration_updates_resolver() {
         }),
     )
     .await;
-
-    // Server should accept the notification and still respond to requests
-    let scss = "$cfg: 1;\n";
-    send_msg(
-        &mut writer,
-        &serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "textDocument/didOpen",
-            "params": {
-                "textDocument": {
-                    "uri": "file:///cfg_test.scss",
-                    "languageId": "scss",
-                    "version": 1,
-                    "text": scss
-                }
-            }
-        }),
-    )
-    .await;
-    let _diag = recv_msg(&mut reader, &mut writer).await;
+    // The open file is re-parsed against the new resolver, which publishes its
+    // diagnostics again.
+    recv_diagnostics_for(&mut reader, &mut writer, &main_uri).await;
 
     send_msg(
         &mut writer,
         &serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 200,
-            "method": "textDocument/documentSymbol",
-            "params": {
-                "textDocument": { "uri": "file:///cfg_test.scss" }
-            }
+            "jsonrpc": "2.0", "id": 301, "method": "textDocument/definition", "params": definition
         }),
     )
     .await;
-
-    let resp = recv_msg(&mut reader, &mut writer).await;
-    let result = resp["result"].as_array().unwrap();
-    assert_eq!(result.len(), 1, "server still works after config change");
+    let resp = recv_response(&mut reader, &mut writer, 301).await;
+    assert_eq!(
+        resp["result"]["uri"],
+        file_uri(&vendor.join("_tokens.scss")),
+        "{resp}"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
