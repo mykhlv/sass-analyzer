@@ -10,8 +10,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
-use sass_parser::syntax::{SyntaxNode, debug_tree};
-use sass_parser::syntax_kind::SyntaxKind;
+use sass_parser::syntax::SyntaxNode;
 
 #[path = "common/layout_allow_list.rs"]
 mod layout_allow_list;
@@ -21,8 +20,12 @@ mod layout_classes;
 mod layout_differential;
 #[path = "common/line_facts.rs"]
 mod line_facts;
+#[path = "common/tree_shape.rs"]
+mod tree_shape;
 #[path = "common/virtual_tokens.rs"]
 mod virtual_tokens;
+
+use tree_shape::{Shape, describe_record_diff};
 
 fn corpus_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test-corpus")
@@ -53,49 +56,6 @@ fn collect_recursive(dir: &Path, out: &mut Vec<PathBuf>) {
             out.push(path);
         }
     }
-}
-
-/// A cheap summary of a tree's structure, recorded per file in the baselines.
-///
-/// The node counts make a change readable in a diff; the hash is what catches a
-/// change the counts cannot see, such as a rule moved under a different parent.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Shape {
-    rule_sets: usize,
-    declarations: usize,
-    blocks: usize,
-    tree_hash: u64,
-}
-
-impl Shape {
-    fn of(tree: &SyntaxNode) -> Self {
-        let mut shape = Shape {
-            rule_sets: 0,
-            declarations: 0,
-            blocks: 0,
-            tree_hash: fnv1a(debug_tree(tree).as_bytes()),
-        };
-        for node in tree.descendants() {
-            match node.kind() {
-                SyntaxKind::RULE_SET => shape.rule_sets += 1,
-                SyntaxKind::DECLARATION => shape.declarations += 1,
-                SyntaxKind::BLOCK => shape.blocks += 1,
-                _ => {}
-            }
-        }
-        shape
-    }
-}
-
-/// 64-bit FNV-1a: tiny, and unlike `DefaultHasher` its output is fixed, so the
-/// hashes written to a tracked file mean the same thing on every toolchain.
-fn fnv1a(bytes: &[u8]) -> u64 {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for &byte in bytes {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(0x0100_0000_01b3);
-    }
-    hash
 }
 
 struct FileResult {
@@ -268,21 +228,9 @@ fn corpus_records(name: &str, subdir: &str) -> Vec<String> {
         .iter()
         .map(|r| {
             let rel = r.path.strip_prefix(&dir).unwrap_or(&r.path);
-            let rel = rel.to_string_lossy().replace('\\', "/");
-            let s = &r.shape;
-            format!(
-                "{name}\t{rel}\t{}\t{}\t{}\t{}\t{:016x}",
-                r.error_count, s.rule_sets, s.declarations, s.blocks, s.tree_hash,
-            )
+            r.shape.record(name, &rel.to_string_lossy(), r.error_count)
         })
         .collect()
-}
-
-/// Key of a baseline record: its `<corpus>\t<path>` prefix.
-fn record_key(record: &str) -> &str {
-    let mut tabs = record.match_indices('\t').map(|(i, _)| i);
-    let _ = tabs.next();
-    tabs.next().map_or(record, |end| &record[..end])
 }
 
 fn record_errors(record: &str) -> usize {
@@ -300,54 +248,6 @@ fn committed_parsed_count(committed: &str, name: &str) -> Option<usize> {
         .lines()
         .find_map(|l| l.strip_prefix(prefix.as_str()))
         .and_then(|n| n.trim().parse().ok())
-}
-
-/// Describe how the records differ, at most a few lines per category.
-fn describe_record_diff(old: &[&str], new: &[String]) -> Option<String> {
-    const SHOWN: usize = 10;
-    let old: BTreeMap<&str, &str> = old.iter().map(|r| (record_key(r), *r)).collect();
-    let new: BTreeMap<&str, &str> = new.iter().map(|r| (record_key(r), r.as_str())).collect();
-
-    let changed: Vec<String> = new
-        .iter()
-        .filter_map(|(key, record)| {
-            let before = old.get(key)?;
-            (before != record).then(|| format!("  - {before}\n  + {record}"))
-        })
-        .collect();
-    let missing: Vec<&str> = old
-        .keys()
-        .filter(|key| !new.contains_key(*key))
-        .copied()
-        .collect();
-    let added: Vec<&str> = new
-        .keys()
-        .filter(|key| !old.contains_key(*key))
-        .copied()
-        .collect();
-    if changed.is_empty() && missing.is_empty() && added.is_empty() {
-        return None;
-    }
-
-    let mut out = String::new();
-    let _ = writeln!(
-        out,
-        "{} changed, {} no longer parsed, {} new \
-         (columns: corpus, path, errors, rule_sets, declarations, blocks, tree_hash)",
-        changed.len(),
-        missing.len(),
-        added.len(),
-    );
-    for line in changed.iter().take(SHOWN) {
-        let _ = writeln!(out, "{line}");
-    }
-    for key in missing.iter().take(SHOWN) {
-        let _ = writeln!(out, "  missing: {key}");
-    }
-    for key in added.iter().take(SHOWN) {
-        let _ = writeln!(out, "  new: {key}");
-    }
-    Some(out)
 }
 
 /// Parse every corpus of `gate` and compare the result with its tracked baseline.
@@ -696,7 +596,10 @@ fn record_diff_reports_changed_missing_and_new_files() {
         diff.starts_with("1 changed, 1 no longer parsed, 1 new"),
         "{diff}"
     );
-    assert!(diff.contains("+ c\ta.scss\t0\t1\t0\t1\t01"), "{diff}");
+    assert!(
+        diff.contains("c\ta.scss: declarations 1 → 0, tree_hash 00 → 01\n"),
+        "{diff}"
+    );
     assert!(diff.contains("missing: c\tb.scss"), "{diff}");
     assert!(diff.contains("new: c\tc.scss"), "{diff}");
 }
