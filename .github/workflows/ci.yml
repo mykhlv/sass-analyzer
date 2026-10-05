@@ -90,7 +90,8 @@ jobs:
         run: |
           if ! git diff --exit-code -- test-corpus/sass-spec-gaps.txt \
                                         test-corpus/sass-spec-sass-gaps.txt \
-                                        test-corpus/sass-spec-shapes.txt; then
+                                        test-corpus/sass-spec-shapes.txt \
+                                        test-corpus/sass-spec-noisy-errors.txt; then
             echo "::error::sass-spec compliance changed. Review the diff above and \
           commit the regenerated gap files if the change is an improvement."
             exit 1

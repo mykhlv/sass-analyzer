@@ -88,7 +88,7 @@ pub fn record_key(record: &str) -> &str {
 }
 
 /// The columns of a changed record that differ, as `name old → new`.
-fn changed_columns(before: &str, after: &str) -> String {
+fn changed_columns(before: &str, after: &str, columns: &[&str]) -> String {
     let before: Vec<&str> = before.split('\t').collect();
     let after: Vec<&str> = after.split('\t').collect();
     let len = before.len().max(after.len());
@@ -97,7 +97,7 @@ fn changed_columns(before: &str, after: &str) -> String {
             let old = before.get(i).copied().unwrap_or("-");
             let new = after.get(i).copied().unwrap_or("-");
             (old != new).then(|| {
-                let name = COLUMNS.get(i).copied().unwrap_or("column");
+                let name = columns.get(i).copied().unwrap_or("column");
                 format!("{name} {old} → {new}")
             })
         })
@@ -105,9 +105,20 @@ fn changed_columns(before: &str, after: &str) -> String {
         .join(", ")
 }
 
-/// Describe how the records differ, at most a few lines per category, or `None`
-/// when they are the same set.
+/// Describe how the shape records differ, at most a few lines per category, or
+/// `None` when they are the same set.
 pub fn describe_record_diff(old: &[&str], new: &[String]) -> Option<String> {
+    describe_record_diff_with(old, new, &COLUMNS, "no longer parsed")
+}
+
+/// [`describe_record_diff`] for records with other `columns`, naming a record
+/// that is in `old` but not in `new` as `gone`.
+pub fn describe_record_diff_with(
+    old: &[&str],
+    new: &[String],
+    columns: &[&str],
+    gone: &str,
+) -> Option<String> {
     const SHOWN: usize = 10;
     let old: BTreeMap<&str, &str> = old.iter().map(|r| (record_key(r), *r)).collect();
     let new: BTreeMap<&str, &str> = new.iter().map(|r| (record_key(r), r.as_str())).collect();
@@ -116,7 +127,8 @@ pub fn describe_record_diff(old: &[&str], new: &[String]) -> Option<String> {
         .iter()
         .filter_map(|(key, record)| {
             let before = old.get(key)?;
-            (before != record).then(|| format!("  {key}: {}", changed_columns(before, record)))
+            (before != record)
+                .then(|| format!("  {key}: {}", changed_columns(before, record, columns)))
         })
         .collect();
     let missing: Vec<&str> = old
@@ -136,7 +148,7 @@ pub fn describe_record_diff(old: &[&str], new: &[String]) -> Option<String> {
     let mut out = String::new();
     let _ = writeln!(
         out,
-        "{} changed, {} no longer parsed, {} new",
+        "{} changed, {} {gone}, {} new",
         changed.len(),
         missing.len(),
         added.len(),
@@ -150,8 +162,14 @@ pub fn describe_record_diff(old: &[&str], new: &[String]) -> Option<String> {
     for key in missing.iter().take(SHOWN) {
         let _ = writeln!(out, "  missing: {key}");
     }
+    if missing.len() > SHOWN {
+        let _ = writeln!(out, "  ... and {} more missing", missing.len() - SHOWN);
+    }
     for key in added.iter().take(SHOWN) {
         let _ = writeln!(out, "  new: {key}");
+    }
+    if added.len() > SHOWN {
+        let _ = writeln!(out, "  ... and {} more new", added.len() - SHOWN);
     }
     Some(out)
 }
