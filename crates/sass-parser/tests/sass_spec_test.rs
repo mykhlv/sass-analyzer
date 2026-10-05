@@ -10,7 +10,7 @@
 //! Run with:
 //!   `cargo test --test sass_spec_test -- --ignored --nocapture`
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
@@ -22,8 +22,12 @@ mod layout_allow_list;
 mod layout_differential;
 #[path = "common/line_facts.rs"]
 mod line_facts;
+#[path = "common/tree_shape.rs"]
+mod tree_shape;
 #[path = "common/virtual_tokens.rs"]
 mod virtual_tokens;
+
+use tree_shape::{Shape, describe_record_diff, record_key};
 
 // ── HRX parser ──────────────────────────────────────────────────────
 
@@ -238,6 +242,8 @@ struct CaseResult {
     outcome: Outcome,
     our_error_count: usize,
     first_errors: Vec<String>,
+    /// Shape record, kept for the cases dart-sass accepts.
+    shape: Option<String>,
 }
 
 fn classify(case: &TestCase, our_errors: usize) -> Outcome {
@@ -554,11 +560,20 @@ fn sass_spec_compatibility() {
                     .map(|(msg, range)| format!("{range:?}: {msg}"))
                     .collect();
 
+                let shape = case.expects_success.then(|| {
+                    let group = match case.syntax {
+                        Syntax::Scss => "scss",
+                        Syntax::Sass => "sass",
+                    };
+                    Shape::of(&tree).record(group, &case.display_path, errors.len())
+                });
+
                 CaseResult {
                     display_path: case.display_path.clone(),
                     outcome: classify(case, errors.len()),
                     our_error_count: errors.len(),
                     first_errors,
+                    shape,
                 }
             })
             .collect()
@@ -596,5 +611,70 @@ fn sass_spec_compatibility() {
                  See false negatives above for gaps to fix."
             );
         }
+    }
+
+    check_shapes(scss_results.iter().chain(&sass_results));
+}
+
+/// Compare the tree shape of every case dart-sass accepts with the tracked
+/// `sass-spec-shapes.txt`, failing with a per-case diff on any difference.
+///
+/// The match rates above count a valid input as compatible whenever it parses
+/// without errors, so a valid input misparsed with no diagnostic passes them.
+/// Recording its shape catches that, for syntax the corpora do not cover.
+fn check_shapes<'a>(results: impl Iterator<Item = &'a CaseResult>) {
+    const BASELINE: &str = "sass-spec-shapes.txt";
+    const ACTUAL: &str = "sass-spec-shapes.actual.txt";
+
+    let mut records: Vec<String> = results.filter_map(|r| r.shape.clone()).collect();
+    records.sort();
+    let keys: BTreeSet<&str> = records.iter().map(|r| record_key(r)).collect();
+    assert_eq!(
+        keys.len(),
+        records.len(),
+        "two sass-spec cases share a syntax and path, so their shapes cannot be told apart",
+    );
+
+    let mut out = format!(
+        "# sass-spec tree-shape baseline: one record per case dart-sass accepts.\n\
+         # Checked with:\n\
+         #   cargo test -p sass-parser --test sass_spec_test -- --ignored sass_spec_compatibility\n\
+         # A run that differs writes test-corpus/{ACTUAL} instead of this file;\n\
+         # once every change in it is reviewed as intended, copy it over this one.\n\
+         # Columns: syntax, case, parse errors, RULE_SET / DECLARATION / BLOCK node\n\
+         # counts, and an FNV-1a hash of the case's debug_tree. Records are compared\n\
+         # exactly: a valid input whose tree changes shape with no new error fails.\n"
+    );
+    for record in &records {
+        out.push_str(record);
+        out.push('\n');
+    }
+
+    let test_corpus = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test-corpus");
+    let baseline_path = test_corpus.join(BASELINE);
+    let actual_path = test_corpus.join(ACTUAL);
+    let committed = std::fs::read_to_string(&baseline_path).unwrap_or_default();
+    let old: Vec<&str> = committed.lines().filter(|l| !l.starts_with('#')).collect();
+    let diff = describe_record_diff(&old, &records);
+
+    // On a difference, leave the tracked baseline untouched, as the corpus gates do,
+    // so that a second run cannot read a regressed result back as the reference.
+    if diff.is_none() {
+        std::fs::write(&baseline_path, &out).expect("write shape baseline");
+        let _ = std::fs::remove_file(&actual_path);
+    } else {
+        std::fs::write(&actual_path, &out).expect("write shape baseline");
+    }
+    eprintln!("\nsass-spec tree shapes: {} valid cases", records.len());
+
+    if let Some(diff) = diff {
+        panic!(
+            "sass-spec tree shapes no longer match {}:\n{diff}\
+             Review `diff {} {}`. If every change is intended, copy the .actual \
+             file over the baseline and commit it.",
+            baseline_path.display(),
+            baseline_path.display(),
+            actual_path.display(),
+        );
     }
 }

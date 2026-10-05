@@ -81,12 +81,16 @@ jobs:
           key: sass-spec-${{ hashFiles('test-corpus/download.sh') }}
       - name: Download corpus
         run: bash test-corpus/download.sh sass-spec
+      # sass_spec_compatibility also compares the tree shape of every valid case
+      # with sass-spec-shapes.txt, failing on any difference and writing a .actual
+      # sibling instead of the tracked file.
       - name: Run sass-spec compatibility
         run: cargo test -p sass-parser --test sass_spec_test -- --ignored --nocapture
       - name: Fail on compliance drift
         run: |
           if ! git diff --exit-code -- test-corpus/sass-spec-gaps.txt \
-                                        test-corpus/sass-spec-sass-gaps.txt; then
+                                        test-corpus/sass-spec-sass-gaps.txt \
+                                        test-corpus/sass-spec-shapes.txt; then
             echo "::error::sass-spec compliance changed. Review the diff above and \
           commit the regenerated gap files if the change is an improvement."
             exit 1
