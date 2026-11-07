@@ -5,13 +5,17 @@ use crate::syntax_kind::*;
 
 fn diagnostic_rule(p: &mut Parser<'_>, kind: SyntaxKind) {
     let m = p.start();
+    let errors = p.error_count();
     p.bump(); // @
     p.bump(); // error/warn/debug
     p.continue_header(&super::lines::EXPRESSION);
     super::expressions::sass_value_list(p, super::ParseContext::SassScript);
-    if !p.at(RBRACE) && !p.at_end() {
-        p.expect(SEMICOLON);
-    }
+    let rule = match kind {
+        ERROR_RULE => "`@error`",
+        WARN_RULE => "`@warn`",
+        _ => "`@debug`",
+    };
+    super::lines::end_without_block(p, errors, rule);
     let _ = m.complete(p, kind);
 }
 

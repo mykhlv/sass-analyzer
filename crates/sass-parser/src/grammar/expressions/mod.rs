@@ -100,13 +100,10 @@ pub(crate) fn sass_value_list(p: &mut Parser<'_>, ctx: ParseContext) -> Option<C
         return Some(first);
     }
     let m = first.precede(p);
+    // A comma that ends its line ends the list there, as a trailing comma: the line
+    // break goes on only inside brackets, where it is plain whitespace.
     while p.eat(COMMA) {
-        // lenient: Dart ends a variable's value, or an `@return`, `@debug`, `@warn` or
-        // `@error` value, at a comma that ends its line, and rejects what is indented
-        // beneath: `$a: 1,` / `  2` — "Nothing may be indented beneath a variable
-        // declaration." Inside brackets the comma's line break is plain whitespace anyway.
-        p.continue_line_across_blank();
-        if !at_value_end(p) {
+        if !at_value_end(p) && !p.at_lines_beneath() {
             sass_value(p, ctx);
         }
     }
@@ -189,15 +186,15 @@ fn lhs(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarker> {
 /// Parse `$var: expr !default? !global?;`
 pub fn variable_declaration(p: &mut Parser<'_>) {
     let m = p.start();
+    let errors = p.error_count();
     // Only a declaration that starts a statement goes on across lines.
     let statement = p.at_statement_start();
-    if statement {
-        p.continue_header(&super::lines::VARIABLE);
-    }
     p.bump(); // $
-    p.expect(IDENT);
+    if p.expect(IDENT) && statement {
+        p.continue_line_across_blank();
+    }
     if p.expect(COLON) && statement {
-        p.continue_line();
+        p.continue_line_across_blank();
     }
 
     sass_value_list(p, ParseContext::SassScript);
@@ -221,9 +218,7 @@ pub fn variable_declaration(p: &mut Parser<'_>) {
         }
     }
 
-    if !p.at(RBRACE) && !p.at_end() {
-        p.expect(SEMICOLON);
-    }
+    super::lines::end_without_block(p, errors, "a variable declaration");
     let _ = m.complete(p, VARIABLE_DECL);
 }
 

@@ -1173,9 +1173,9 @@ fn comma_as_last_token_in_file() {
 // ── Blank line breaks continuation ───────────────────────────────────
 
 #[test]
-fn colon_continuation_broken_by_blank_line() {
-    // COLON at EOL does NOT continue across blank lines: the blank line ends the
-    // declaration, so `value` starts a new statement and the `$var:` is left without one.
+fn colon_continuation_goes_on_across_a_blank_line() {
+    // A variable's value is required after its colon, so the line goes on below it across
+    // a blank line too, as Dart Sass reads it.
     //
     // Pinned as a tree rather than a token stream on purpose. The token stream looks
     // plausible here — it was the shape a `check_significant` snapshot could not show that
@@ -1191,27 +1191,15 @@ fn colon_continuation_broken_by_blank_line() {
         "$var:\n\n  value\n",
         expect![[r#"
             SOURCE_FILE@0..15
-              VARIABLE_DECL@0..5
+              VARIABLE_DECL@0..14
                 DOLLAR@0..1 "$"
                 IDENT@1..4 "var"
                 COLON@4..5 ":"
-              ERROR@5..5
-                LBRACE@5..5 ""
-              RULE_SET@5..14
-                SELECTOR_LIST@5..14
-                  SELECTOR@5..14
-                    SIMPLE_SELECTOR@5..14
-                      WHITESPACE@5..9 "\n\n  "
-                      IDENT@9..14 "value"
-              SEMICOLON@14..14 ""
-              ERROR@14..14
-                RBRACE@14..14 ""
+                VALUE@5..14
+                  WHITESPACE@5..9 "\n\n  "
+                  IDENT@9..14 "value"
+                SEMICOLON@14..14 ""
               WHITESPACE@14..15 "\n"
-            errors:
-              5..5: expected expression
-              5..5: expected SEMICOLON
-              5..5: expected rule
-              14..14: expected rule
         "#]],
     );
 }
@@ -2188,10 +2176,9 @@ fn boolean_operator_still_continues_inside_a_value() {
 }
 
 #[test]
-fn boolean_operator_still_continues_a_container_query() {
-    // `@container` is a condition-taking directive like `@media`. Omitting it from the
-    // operator set turned a valid multi-line query into three diagnostics — a regression
-    // no gate could see, because no corpus and no sass-spec case uses `@container`.
+fn boolean_operator_does_not_continue_a_container_query() {
+    // As for `@media`: Dart Sass reads the deeper line as the block, and rejects the
+    // query that `and` leaves unfinished. One error, at the query.
     check_tree(
         "@container card (width > 400px) and\n  (height > 100px)\n  .a\n    color: red\n",
         expect![[r#"
@@ -2212,17 +2199,19 @@ fn boolean_operator_still_continues_a_container_query() {
                 RPAREN@30..31 ")"
                 WHITESPACE@31..32 " "
                 IDENT@32..35 "and"
-                WHITESPACE@35..38 "\n  "
-                LPAREN@38..39 "("
-                IDENT@39..45 "height"
-                WHITESPACE@45..46 " "
-                GT@46..47 ">"
-                WHITESPACE@47..48 " "
-                NUMBER@48..51 "100"
-                IDENT@51..53 "px"
-                RPAREN@53..54 ")"
-                BLOCK@54..74
-                  LBRACE@54..54 ""
+                BLOCK@35..74
+                  LBRACE@35..35 ""
+                  ERROR@35..54
+                    WHITESPACE@35..38 "\n  "
+                    LPAREN@38..39 "("
+                    IDENT@39..45 "height"
+                    WHITESPACE@45..46 " "
+                    GT@46..47 ">"
+                    WHITESPACE@47..48 " "
+                    NUMBER@48..51 "100"
+                    IDENT@51..53 "px"
+                    RPAREN@53..54 ")"
+                  SEMICOLON@54..54 ""
                   RULE_SET@54..74
                     SELECTOR_LIST@54..59
                       SELECTOR@54..59
@@ -2245,13 +2234,16 @@ fn boolean_operator_still_continues_a_container_query() {
                       RBRACE@74..74 ""
                   RBRACE@74..74 ""
               WHITESPACE@74..75 "\n"
+            errors:
+              35..35: expected container query after `and`
         "#]],
     );
 }
 
 #[test]
-fn scope_header_continues_with_to() {
-    // `to` is a header keyword for `@scope` as well as `@for` — `@scope (.a) to (.b)`.
+fn scope_header_does_not_continue_after_to() {
+    // Unlike `@for`'s, `@scope`'s `to` does not read on below its line in Dart Sass: the
+    // deeper line is the block, and the boundary is missing. One error, at the header.
     check_tree(
         "@scope (.a) to\n  (.b)\n  .c\n    color: red\n",
         expect![[r#"
@@ -2266,13 +2258,15 @@ fn scope_header_continues_with_to() {
                 RPAREN@10..11 ")"
                 WHITESPACE@11..12 " "
                 IDENT@12..14 "to"
-                WHITESPACE@14..17 "\n  "
-                LPAREN@17..18 "("
-                DOT@18..19 "."
-                IDENT@19..20 "b"
-                RPAREN@20..21 ")"
-                BLOCK@21..41
-                  LBRACE@21..21 ""
+                BLOCK@14..41
+                  LBRACE@14..14 ""
+                  ERROR@14..21
+                    WHITESPACE@14..17 "\n  "
+                    LPAREN@17..18 "("
+                    DOT@18..19 "."
+                    IDENT@19..20 "b"
+                    RPAREN@20..21 ")"
+                  SEMICOLON@21..21 ""
                   RULE_SET@21..41
                     SELECTOR_LIST@21..26
                       SELECTOR@21..26
@@ -2295,13 +2289,16 @@ fn scope_header_continues_with_to() {
                       RBRACE@41..41 ""
                   RBRACE@41..41 ""
               WHITESPACE@41..42 "\n"
+            errors:
+              14..14: expected scope boundary after `to`
         "#]],
     );
 }
 
 #[test]
-fn container_header_continues_with_a_parenthesised_query() {
-    // Start-of-line counterpart: `@container` was missing from the paren set too.
+fn container_header_does_not_continue_with_a_parenthesised_query() {
+    // `@container card` may end there, so the deeper line is its block, which Dart Sass
+    // rejects: one error for the line.
     check_tree(
         "@container card\n  (width > 400px)\n  .a\n    c: red\n",
         expect![[r#"
@@ -2311,17 +2308,19 @@ fn container_header_continues_with_a_parenthesised_query() {
                 IDENT@1..10 "container"
                 WHITESPACE@10..11 " "
                 IDENT@11..15 "card"
-                WHITESPACE@15..18 "\n  "
-                LPAREN@18..19 "("
-                IDENT@19..24 "width"
-                WHITESPACE@24..25 " "
-                GT@25..26 ">"
-                WHITESPACE@26..27 " "
-                NUMBER@27..30 "400"
-                IDENT@30..32 "px"
-                RPAREN@32..33 ")"
-                BLOCK@33..49
-                  LBRACE@33..33 ""
+                BLOCK@15..49
+                  LBRACE@15..15 ""
+                  ERROR@15..33
+                    WHITESPACE@15..18 "\n  "
+                    LPAREN@18..19 "("
+                    IDENT@19..24 "width"
+                    WHITESPACE@24..25 " "
+                    GT@25..26 ">"
+                    WHITESPACE@26..27 " "
+                    NUMBER@27..30 "400"
+                    IDENT@30..32 "px"
+                    RPAREN@32..33 ")"
+                  SEMICOLON@33..33 ""
                   RULE_SET@33..49
                     SELECTOR_LIST@33..38
                       SELECTOR@33..38
@@ -2344,14 +2343,16 @@ fn container_header_continues_with_a_parenthesised_query() {
                       RBRACE@49..49 ""
                   RBRACE@49..49 ""
               WHITESPACE@49..50 "\n"
+            errors:
+              18..19: expected declaration or nested rule
         "#]],
     );
 }
 
 #[test]
-fn boolean_operator_still_continues_a_media_query() {
-    // And in a header whose directive takes it — `media` is not an expression directive,
-    // so this needs the header branch rather than the value one.
+fn boolean_operator_does_not_continue_a_media_query() {
+    // Dart Sass reads no media query on below its line: `and` at its end leaves it
+    // unfinished, and the deeper line is the rule's block. One error, at the query.
     check_tree(
         "@media screen and\n  (min-width: 1px)\n  p: 1\n",
         expect![[r#"
@@ -2359,21 +2360,23 @@ fn boolean_operator_still_continues_a_media_query() {
               MEDIA_RULE@0..43
                 AT@0..1 "@"
                 IDENT@1..6 "media"
-                MEDIA_QUERY@6..36
+                MEDIA_QUERY@6..17
                   WHITESPACE@6..7 " "
                   IDENT@7..13 "screen"
                   WHITESPACE@13..14 " "
                   IDENT@14..17 "and"
-                  WHITESPACE@17..20 "\n  "
-                  LPAREN@20..21 "("
-                  IDENT@21..30 "min-width"
-                  COLON@30..31 ":"
-                  WHITESPACE@31..32 " "
-                  NUMBER@32..33 "1"
-                  IDENT@33..35 "px"
-                  RPAREN@35..36 ")"
-                BLOCK@36..43
-                  LBRACE@36..36 ""
+                BLOCK@17..43
+                  LBRACE@17..17 ""
+                  ERROR@17..36
+                    WHITESPACE@17..20 "\n  "
+                    LPAREN@20..21 "("
+                    IDENT@21..30 "min-width"
+                    COLON@30..31 ":"
+                    WHITESPACE@31..32 " "
+                    NUMBER@32..33 "1"
+                    IDENT@33..35 "px"
+                    RPAREN@35..36 ")"
+                  SEMICOLON@36..36 ""
                   DECLARATION@36..43
                     PROPERTY@36..40
                       WHITESPACE@36..39 "\n  "
@@ -2386,6 +2389,8 @@ fn boolean_operator_still_continues_a_media_query() {
                     SEMICOLON@43..43 ""
                   RBRACE@43..43 ""
               WHITESPACE@43..44 "\n"
+            errors:
+              17..17: expected media query after `and`
         "#]],
     );
 }
@@ -2450,9 +2455,9 @@ fn bare_else_body_can_start_with_a_variable_declaration() {
 }
 
 #[test]
-fn else_if_on_the_next_line_still_continues_the_header() {
-    // `@else`'s one real header continuation. Goes through the IDENT arm, not the DOLLAR
-    // arm, so it is unaffected by the rule above.
+fn else_if_on_the_next_line_does_not_continue_the_header() {
+    // A bare `@else` is complete, so `if $b` below it is a rule in its block, as Dart Sass
+    // reads it, whose selector stops at `$b`: one error.
     check_tree(
         "@if $a\n  p: 1\n@else\n  if $b\n    q: 2\n",
         expect![[r#"
@@ -2481,26 +2486,35 @@ fn else_if_on_the_next_line_still_continues_the_header() {
                   WHITESPACE@13..14 "\n"
                   AT@14..15 "@"
                   IDENT@15..19 "else"
-                  WHITESPACE@19..22 "\n  "
-                  IDENT@22..24 "if"
-                  VARIABLE_REF@24..27
-                    WHITESPACE@24..25 " "
-                    DOLLAR@25..26 "$"
-                    IDENT@26..27 "b"
-                  BLOCK@27..36
-                    LBRACE@27..27 ""
-                    DECLARATION@27..36
-                      PROPERTY@27..33
-                        WHITESPACE@27..32 "\n    "
-                        IDENT@32..33 "q"
-                      COLON@33..34 ":"
-                      VALUE@34..36
-                        NUMBER_LITERAL@34..36
-                          WHITESPACE@34..35 " "
-                          NUMBER@35..36 "2"
-                      SEMICOLON@36..36 ""
+                  BLOCK@19..36
+                    LBRACE@19..19 ""
+                    RULE_SET@19..24
+                      SELECTOR_LIST@19..24
+                        SELECTOR@19..24
+                          SIMPLE_SELECTOR@19..24
+                            WHITESPACE@19..22 "\n  "
+                            IDENT@22..24 "if"
+                    ERROR@24..36
+                      WHITESPACE@24..25 " "
+                      DOLLAR@25..26 "$"
+                      IDENT@26..27 "b"
+                      BLOCK@27..36
+                        LBRACE@27..27 ""
+                        DECLARATION@27..36
+                          PROPERTY@27..33
+                            WHITESPACE@27..32 "\n    "
+                            IDENT@32..33 "q"
+                          COLON@33..34 ":"
+                          VALUE@34..36
+                            NUMBER_LITERAL@34..36
+                              WHITESPACE@34..35 " "
+                              NUMBER@35..36 "2"
+                          SEMICOLON@36..36 ""
+                        RBRACE@36..36 ""
                     RBRACE@36..36 ""
               WHITESPACE@36..37 "\n"
+            errors:
+              25..26: expected newline
         "#]],
     );
 }
@@ -2642,10 +2656,9 @@ fn at_root_opens_a_body_for_an_indented_selector() {
 }
 
 #[test]
-fn at_root_header_still_continues_for_a_parenthesised_query() {
-    // The one real header continuation `@at-root` has. It survives the removal above
-    // because `continues_header` accepts LPAREN under `at-root` on the start-of-line
-    // path, which is directive-aware where the end-of-line path is not.
+fn at_root_header_does_not_continue_with_a_parenthesised_query() {
+    // A bare `@at-root` is complete, so the deeper line is its block, as in Dart Sass,
+    // which rejects it as a selector: one error for the line.
     check_tree(
         ".foo\n  @at-root\n    (without: media)\n    .bar\n      x: 1\n",
         expect![[r#"
@@ -2662,16 +2675,17 @@ fn at_root_header_still_continues_for_a_parenthesised_query() {
                     WHITESPACE@4..7 "\n  "
                     AT@7..8 "@"
                     IDENT@8..15 "at-root"
-                    AT_ROOT_QUERY@15..36
-                      WHITESPACE@15..20 "\n    "
-                      LPAREN@20..21 "("
-                      IDENT@21..28 "without"
-                      COLON@28..29 ":"
-                      WHITESPACE@29..30 " "
-                      IDENT@30..35 "media"
-                      RPAREN@35..36 ")"
-                    BLOCK@36..56
-                      LBRACE@36..36 ""
+                    BLOCK@15..56
+                      LBRACE@15..15 ""
+                      ERROR@15..36
+                        WHITESPACE@15..20 "\n    "
+                        LPAREN@20..21 "("
+                        IDENT@21..28 "without"
+                        COLON@28..29 ":"
+                        WHITESPACE@29..30 " "
+                        IDENT@30..35 "media"
+                        RPAREN@35..36 ")"
+                      SEMICOLON@36..36 ""
                       RULE_SET@36..56
                         SELECTOR_LIST@36..45
                           SELECTOR@36..45
@@ -2695,6 +2709,8 @@ fn at_root_header_still_continues_for_a_parenthesised_query() {
                       RBRACE@56..56 ""
                   RBRACE@56..56 ""
               WHITESPACE@56..57 "\n"
+            errors:
+              20..21: expected declaration or nested rule
         "#]],
     );
 }
@@ -4466,37 +4482,33 @@ fn nested_property_with_a_bare_value_under_it_is_an_error() {
     check_tree(
         ".x\n  b:\n    1px\n",
         expect![[r#"
-        SOURCE_FILE@0..16
-          RULE_SET@0..15
-            SELECTOR_LIST@0..2
-              SELECTOR@0..2
-                SIMPLE_SELECTOR@0..2
-                  DOT@0..1 "."
-                  IDENT@1..2 "x"
-            BLOCK@2..15
-              LBRACE@2..2 ""
-              NESTED_PROPERTY@2..15
-                PROPERTY@2..6
-                  WHITESPACE@2..5 "\n  "
-                  IDENT@5..6 "b"
-                COLON@6..7 ":"
-                BLOCK@7..15
-                  LBRACE@7..7 ""
-                  ERROR@7..13
-                    WHITESPACE@7..12 "\n    "
-                    NUMBER@12..13 "1"
-                  RULE_SET@13..15
-                    SELECTOR_LIST@13..15
-                      SELECTOR@13..15
-                        SIMPLE_SELECTOR@13..15
-                          IDENT@13..15 "px"
-                  SEMICOLON@15..15 ""
+            SOURCE_FILE@0..16
+              RULE_SET@0..15
+                SELECTOR_LIST@0..2
+                  SELECTOR@0..2
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "x"
+                BLOCK@2..15
+                  LBRACE@2..2 ""
+                  NESTED_PROPERTY@2..15
+                    PROPERTY@2..6
+                      WHITESPACE@2..5 "\n  "
+                      IDENT@5..6 "b"
+                    COLON@6..7 ":"
+                    BLOCK@7..15
+                      LBRACE@7..7 ""
+                      ERROR@7..15
+                        WHITESPACE@7..12 "\n    "
+                        NUMBER@12..13 "1"
+                        IDENT@13..15 "px"
+                      SEMICOLON@15..15 ""
+                      RBRACE@15..15 ""
                   RBRACE@15..15 ""
-              RBRACE@15..15 ""
-          WHITESPACE@15..16 "\n"
-        errors:
-          12..13: expected declaration or nested rule
-    "#]],
+              WHITESPACE@15..16 "\n"
+            errors:
+              12..13: expected declaration
+        "#]],
     );
 }
 
@@ -5028,40 +5040,41 @@ fn loud_comment_closer_on_a_dedented_line_is_an_error() {
     check_tree(
         "/* a\n*/\n.b\n  c: d\n",
         expect![[r#"
-        SOURCE_FILE@0..18
-          RULE_SET@0..6
-            SELECTOR_LIST@0..6
-              SELECTOR@0..6
-                SIMPLE_SELECTOR@0..6
-                  MULTI_LINE_COMMENT@0..4 "/* a"
-                  WHITESPACE@4..5 "\n"
-                  STAR@5..6 "*"
-          ERROR@6..7
-            SLASH@6..7 "/"
-          RULE_SET@7..17
-            SELECTOR_LIST@7..10
-              SELECTOR@7..10
-                SIMPLE_SELECTOR@7..10
-                  WHITESPACE@7..8 "\n"
-                  DOT@8..9 "."
-                  IDENT@9..10 "b"
-            BLOCK@10..17
-              LBRACE@10..10 ""
-              DECLARATION@10..17
-                PROPERTY@10..14
-                  WHITESPACE@10..13 "\n  "
-                  IDENT@13..14 "c"
-                COLON@14..15 ":"
-                VALUE@15..17
-                  VALUE@15..17
-                    WHITESPACE@15..16 " "
-                    IDENT@16..17 "d"
-                SEMICOLON@17..17 ""
-              RBRACE@17..17 ""
-          WHITESPACE@17..18 "\n"
-        errors:
-          6..7: expected rule
-    "#]],
+            SOURCE_FILE@0..18
+              RULE_SET@0..6
+                SELECTOR_LIST@0..6
+                  SELECTOR@0..6
+                    SIMPLE_SELECTOR@0..6
+                      MULTI_LINE_COMMENT@0..4 "/* a"
+                      WHITESPACE@4..5 "\n"
+                      STAR@5..6 "*"
+              ERROR@6..7
+                SLASH@6..7 "/"
+              SEMICOLON@7..7 ""
+              RULE_SET@7..17
+                SELECTOR_LIST@7..10
+                  SELECTOR@7..10
+                    SIMPLE_SELECTOR@7..10
+                      WHITESPACE@7..8 "\n"
+                      DOT@8..9 "."
+                      IDENT@9..10 "b"
+                BLOCK@10..17
+                  LBRACE@10..10 ""
+                  DECLARATION@10..17
+                    PROPERTY@10..14
+                      WHITESPACE@10..13 "\n  "
+                      IDENT@13..14 "c"
+                    COLON@14..15 ":"
+                    VALUE@15..17
+                      VALUE@15..17
+                        WHITESPACE@15..16 " "
+                        IDENT@16..17 "d"
+                    SEMICOLON@17..17 ""
+                  RBRACE@17..17 ""
+              WHITESPACE@17..18 "\n"
+            errors:
+              6..7: expected newline
+        "#]],
     );
 }
 

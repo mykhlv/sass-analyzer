@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without a changelog entry.
 
 ### Fixed
+- Indented Sass: a nested property below a value that ends in a comma, as in `font: bold,`
+  / `family: x`, is read as one, as in Dart Sass; it was silently taken into the value. A
+  variable's value may follow its colon after a blank line, as in `$a:` / (blank) / `b`,
+  which reported four errors
 - Parser: an unterminated quoted string is now reported as "unterminated string" and ends
   at the end of its line, as in CSS and Dart Sass, in both SCSS and indented Sass. It used
   to swallow the rest of the file without a diagnostic of its own, hiding every symbol and
@@ -137,12 +141,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of two, with no diagnostic — and became visible only when the merged result
   could not parse, as in `@if $from` leaving its `@else` without a matching `@if`. These
   keywords now continue only where they can legitimately occur: in the header of a
-  directive that takes them — including `@container` and `@scope`, whose `and` and `to`
-  the narrowed sets initially missed — or, for the boolean operators `and`/`or`/`not`,
-  inside a value as well
-- Indented Sass: `@container name` followed by an indented `(width > 400px)` query
-  continues the header instead of erroring. `@container` was absent from the set of
-  directives whose header can take a parenthesised query, which predates this release
+  directive that takes them or, for the boolean operators `and`/`or`/`not`, inside a value
+  as well
 - Indented Sass: `@keyframes` frames written as `from`/`to` now open a body of their own.
   They previously produced a flat tree in which each frame's declarations were siblings of
   the frame selector rather than its children, so a `from` frame's properties appeared to
@@ -153,9 +153,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   since a header can hold an expression — and then errored on the second, so a two-line
   block reported a cascade that pointed at the wrong line. A bare `@else` is a complete
   header, taking an optional `if …` and nothing else, so an indented `$` under it opens
-  the body. `@else` on one line with `if …` on the next still continues the header, and
-  the other expression directives (`@if`, `@for`, `@return` …) are unaffected — they are
-  genuinely incomplete after their bare name
+  the body. The other expression directives (`@if`, `@for`, `@return` …) are unaffected —
+  they are genuinely incomplete after their bare name
 - Indented Sass: a bare `@at-root` now opens a body instead of pulling the next line into
   its header. `@at-root` followed by an indented `@include` reported "expected selector",
   because the header was continued to give the invalid `@at-root @include …`. This is
@@ -163,8 +162,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   real-world indented-Sass corpus: 26 errors across 19 files. Followed by an indented
   *selector* it produced no error but the wrong shape — the selector form `@at-root .bar`
   rather than a block containing `.bar`, which compiles to the same CSS and so went
-  unnoticed; it is now the block form the indented syntax calls for. `@at-root` followed
-  by an indented `(without: …)` query still continues the header, as it should
+  unnoticed; it is now the block form the indented syntax calls for
 - Indented Sass: a selector ending in a universal selector — `> *`, `& ~ *`, `.a *` — no
   longer swallows the block indented under it. `*` at the end of a line was always read as
   a multiplication operator, so the whole nested block was parsed as part of the selector
@@ -262,6 +260,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Indented Sass: where a statement ends and a block opens is now decided by the parser from
   the line layout, rather than guessed by the lexer. Real-world files parse to the same
   trees as before; the fixes above are the deliberate differences
+- Indented Sass: a statement goes on across a line break only where Dart Sass reads it
+  on — after an operator, inside brackets, and where the statement cannot end, as after
+  `@mixin`, `@for $i`, `@for $i from 1`, `@each $a`, `@function f`, `@use "a" as` or
+  `$a`. A line indented beneath a header that may end there is the rule's block, and a
+  comma at the end of a line ends the value or the at-rule's prelude there, as a trailing
+  comma. These were accepted as continued headers and are now the one error Dart Sass
+  reports: `@include foo` / `($x)`, `@use "x"` / `as y`, `@media screen and` /
+  `(min-width: 1px)`, `@media screen,` / `print`, `@container card` / `(width > 400px)`,
+  `@scope (.a) to` / `(.b)`, `@at-root` / `(without: media)`, `@else` / `if $b`, `@if $x`
+  / `and $y`, `@return 1` / `(2)`, `@extend .a,` / `.b`, `@import "a",` / `"b"`,
+  `$a: 1,` / `2`, `--x: a,` / `b` and `b: c,` / `d` indented deeper. Where Dart Sass
+  accepts the form but reads the next line as a statement of its own, so does the parser:
+  `b: c,` / `d` at the same column, `@layer a,` / `b` and `@foo a,` / `b` make `b` a rule.
+  Lines indented beneath a statement that takes no block, such as a variable, `@use` or
+  `@return`, are one "nothing may be indented beneath …" error, and a line that starts no
+  statement, or is left over after one, is one error rather than one per token
 - Dependencies refreshed: 47 transitive Rust crates within semver, `rowan` 0.16 → 0.17,
   TypeScript 6 → 7, `@types/node` 25 → 26, esbuild 0.27 → 0.28
 - `@types/vscode` is now pinned with a tilde (`~1.110.0`) so it tracks the supported

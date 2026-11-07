@@ -23,7 +23,7 @@ pub(crate) fn declaration(p: &mut Parser<'_>) {
     // 2.10: Check for nested property patterns
     if p.at(LBRACE) {
         // IDENT COLON LBRACE → nested property with no value: `font: { weight: bold; }`
-        super::block(p);
+        super::property_block(p);
         let _ = m.complete(p, NESTED_PROPERTY);
         return;
     }
@@ -51,7 +51,7 @@ pub(crate) fn declaration(p: &mut Parser<'_>) {
 
     // 2.10(c): Value-and-block: `margin: 10px { top: 20px; }`
     if p.at(LBRACE) {
-        super::block(p);
+        super::property_block(p);
         let _ = m.complete(p, NESTED_PROPERTY);
         return;
     }
@@ -68,14 +68,13 @@ pub(crate) fn declaration(p: &mut Parser<'_>) {
 /// Depth-aware: tracks `()`, `[]`, `{}` nesting.
 fn custom_property_declaration(p: &mut Parser<'_>) {
     let m = p.start();
+    let errors = p.error_count();
     property(p);
     p.expect(COLON);
     if !p.at(SEMICOLON) && !p.at(RBRACE) && !p.at_end() {
-        custom_property_value(p);
+        custom_property_value(p, false);
     }
-    if !p.at(RBRACE) && !p.at_end() {
-        p.expect(SEMICOLON);
-    }
+    super::lines::end_without_block(p, errors, "a custom property");
     let _ = m.complete(p, CUSTOM_PROPERTY_DECL);
 }
 
@@ -157,12 +156,9 @@ fn value(p: &mut Parser<'_>) {
             operand_before = false;
             continue;
         }
+        // A comma that ends its line is a trailing one: the value ends there.
         if p.at(COMMA) {
             p.bump();
-            // lenient: Dart ends the value at a comma that ends its line, a trailing comma,
-            // and reads the next line as a statement of its own: `b: c,` / `    d` is
-            // rejected — "expected ':'." — and `b: c,` / `  d` makes `d` an empty rule.
-            p.continue_line_across_blank();
             has_content = true;
             operand_before = false;
             continue;
@@ -201,7 +197,7 @@ pub(super) fn css_function_body_declaration(p: &mut Parser<'_>) {
     property(p);
     p.expect(COLON);
     if !p.at(SEMICOLON) && !p.at(RBRACE) && !p.at_end() {
-        custom_property_value(p);
+        custom_property_value(p, true);
     }
     if !p.at(RBRACE) && !p.at_end() {
         p.expect(SEMICOLON);
@@ -212,8 +208,10 @@ pub(super) fn css_function_body_declaration(p: &mut Parser<'_>) {
 /// 2.9: Parse custom property value — fully depth-aware raw token scan.
 ///
 /// Tracks `()`, `[]`, `{}` nesting. Only terminates at `;` or `}` at depth 0.
-/// Interpolation `#{...}` is still processed.
-fn custom_property_value(p: &mut Parser<'_>) {
+/// Interpolation `#{...}` is still processed. In the indented layout, the lines indented
+/// beneath it are taken in as a brace group only if `takes_block`: a custom property
+/// takes none.
+fn custom_property_value(p: &mut Parser<'_>, takes_block: bool) {
     let m = p.start();
     let mut paren_depth: u32 = 0;
     let mut bracket_depth: u32 = 0;
@@ -229,6 +227,7 @@ fn custom_property_value(p: &mut Parser<'_>) {
             EOF => break,
             SEMICOLON if at_depth_zero => break,
             RBRACE if at_depth_zero => break,
+            LBRACE if at_depth_zero && !takes_block && p.at_lines_beneath() => break,
             LPAREN => {
                 paren_depth += 1;
                 p.bump();
@@ -256,7 +255,7 @@ fn custom_property_value(p: &mut Parser<'_>) {
             HASH_LBRACE => {
                 let _ = selectors::interpolation(p);
             }
-            _ => super::lines::bump_in_run(p),
+            _ => p.bump(),
         }
     }
     let _ = m.complete(p, VALUE);

@@ -11,8 +11,9 @@
 //!
 //! The grammar absorbs a line break where the statement goes on: with
 //! [`Parser::continue_line`] right after a token that leaves it unfinished (an operator, a
-//! comma), and with [`Parser::continue_header`], which declares how an at-rule's or a
-//! variable's header may go on below it. Line breaks inside brackets are plain trivia.
+//! comma, a position of a header that requires more), and with
+//! [`Parser::continue_header`], which declares how an at-rule's header goes on after its
+//! name or one of its words. Line breaks inside brackets are plain trivia.
 
 use super::{Fence, Parser};
 use crate::event::Event;
@@ -21,22 +22,16 @@ use crate::syntax_kind::SyntaxKind;
 use crate::text_range::{TextRange, TextSize};
 use crate::token_set::TokenSet;
 
-/// How the header of a statement — an at-rule's prelude, a variable's value — goes on
-/// across line breaks, declared by the grammar function that parses it. It holds until
-/// the statement ends or its block opens.
+/// How the header of a statement — an at-rule's prelude — goes on across line breaks,
+/// declared by the grammar function that parses it. It holds until the statement ends
+/// or its block opens.
 ///
-/// A header goes on over a line break when:
-/// - the line ends with the header's name and `name_continues` (`@mixin` / `  name`), or
-///   with one of `end_words` (`@for $i from` / `  1 through 3`), unless a blank line
-///   follows;
-/// - the next line is indented deeper and starts with one of `starts` or `words`; right
-///   after the name, with one of `bare_starts` or `bare_words` instead.
+/// A header goes on over a line break when the line ends with the header's name and
+/// `name_continues` (`@mixin` / `  name`), or with one of `end_words` (`@for $i from` /
+/// `  1 through 3`), unless a blank line follows. Elsewhere the grammar continues the
+/// line itself where the header cannot end (see [`Parser::continue_line`]).
 #[derive(Debug)]
 pub struct HeaderLines {
-    pub starts: TokenSet,
-    pub words: &'static [&'static str],
-    pub bare_starts: TokenSet,
-    pub bare_words: &'static [&'static str],
     pub end_words: &'static [&'static str],
     pub name_continues: bool,
 }
@@ -453,14 +448,12 @@ impl<'src> Parser<'src> {
                 }
                 let column = self.break_column(line_break, &line, top);
                 if line.saw_content {
-                    if column > top {
-                        if self.header_goes_on_below(&line, top) {
-                            self.indented.line.next = line.end;
-                            continue;
-                        }
-                        return Some((SyntaxKind::LBRACE, line_break.trivia()));
-                    }
-                    return Some((SyntaxKind::SEMICOLON, line_break.trivia()));
+                    let kind = if column > top {
+                        SyntaxKind::LBRACE
+                    } else {
+                        SyntaxKind::SEMICOLON
+                    };
+                    return Some((kind, line_break.trivia()));
                 }
                 if self.indented.columns.len() > 1 && top > column {
                     return Some((SyntaxKind::RBRACE, line_break.trivia()));
@@ -641,27 +634,6 @@ impl<'src> Parser<'src> {
             || (self.input.kind(last) == SyntaxKind::IDENT
                 && !variable
                 && header.end_words.contains(&self.token_text(last)))
-    }
-
-    /// Whether the header goes on at `line`, indented deeper than the block it is in,
-    /// because of how that line starts.
-    fn header_goes_on_below(&self, line: &Line, top: u32) -> bool {
-        let Some((header, name)) = self.indented.header else {
-            return false;
-        };
-        if line.index >= self.input.len()
-            || (line.next..line.end).any(|i| self.input.line_break(i).column() <= top)
-        {
-            return false;
-        }
-        let (starts, words) = if line.index - 1 == name {
-            (header.bare_starts, header.bare_words)
-        } else {
-            (header.starts, header.words)
-        };
-        let kind = self.input.kind(line.index);
-        starts.contains(kind)
-            || (kind == SyntaxKind::IDENT && words.contains(&self.token_text(line.index)))
     }
 
     fn token_text(&self, index: usize) -> &'src str {

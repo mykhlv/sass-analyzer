@@ -912,13 +912,10 @@ pub fn fixes() -> Vec<Fix> {
                             IDENT@7..8 "c"
                         BLOCK@8..21
                           LBRACE@8..8 ""
-                          RULE_SET@8..21
-                            SELECTOR_LIST@8..13
-                              SELECTOR@8..13
-                                SIMPLE_SELECTOR@8..13
-                                  WHITESPACE@8..11 "\n\t\t"
-                                  DOT@11..12 "."
-                                  IDENT@12..13 "d"
+                          ERROR@8..21
+                            WHITESPACE@8..11 "\n\t\t"
+                            DOT@11..12 "."
+                            IDENT@12..13 "d"
                             BLOCK@13..21
                               LBRACE@13..13 ""
                               DECLARATION@13..21
@@ -935,6 +932,7 @@ pub fn fixes() -> Vec<Fix> {
                           RBRACE@21..21 ""
                       RBRACE@21..21 ""
                   WHITESPACE@21..22 "\n"
+                error 11..12: expected declaration
                 error 14..17: tabs and spaces may not be mixed
             "#]],
         },
@@ -974,34 +972,33 @@ pub fn fixes() -> Vec<Fix> {
                      (Dart rejects the braces, as both frontends do)",
             expected: expect![[r#"
                 SOURCE_FILE@0..15
-                  RULE_SET@0..10
+                  RULE_SET@0..12
                     SELECTOR_LIST@0..1
                       SELECTOR@0..1
                         SIMPLE_SELECTOR@0..1
                           IDENT@0..1 "a"
-                    BLOCK@1..10
+                    BLOCK@1..12
                       WHITESPACE@1..2 " "
                       LBRACE@2..3 "{"
-                      ERROR@3..3
-                        LBRACE@3..3 ""
-                      DECLARATION@3..10
-                        PROPERTY@3..7
-                          WHITESPACE@3..6 "\n  "
-                          IDENT@6..7 "b"
-                        COLON@7..8 ":"
-                        VALUE@8..10
-                          VALUE@8..10
-                            WHITESPACE@8..9 " "
-                            IDENT@9..10 "c"
-                        SEMICOLON@10..10 ""
-                      RBRACE@10..10 ""
-                  ERROR@10..12
-                    WHITESPACE@10..11 "\n"
-                    RBRACE@11..12 "}"
+                      ERROR@3..10
+                        BLOCK@3..10
+                          LBRACE@3..3 ""
+                          DECLARATION@3..10
+                            PROPERTY@3..7
+                              WHITESPACE@3..6 "\n  "
+                              IDENT@6..7 "b"
+                            COLON@7..8 ":"
+                            VALUE@8..10
+                              VALUE@8..10
+                                WHITESPACE@8..9 " "
+                                IDENT@9..10 "c"
+                            SEMICOLON@10..10 ""
+                          RBRACE@10..10 ""
+                      WHITESPACE@10..11 "\n"
+                      RBRACE@11..12 "}"
                   SEMICOLON@12..12 ""
                   WHITESPACE@12..15 "\n  "
                 error 3..3: expected declaration or nested rule
-                error 11..12: expected rule
             "#]],
         },
         Fix {
