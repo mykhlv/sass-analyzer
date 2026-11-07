@@ -65,9 +65,6 @@ pub(super) struct IndentedState {
     /// The line breaks after them count as being that much less deep.
     unwound: u16,
     brackets: Vec<Bracket>,
-    /// A bracket has ended with an error inside it, so recovery may have reshaped the
-    /// lines after it.
-    bracket_errors: bool,
     /// How the file indents: decided by its first indented line.
     indent_kind: IndentKind,
     reported_mixed: bool,
@@ -130,7 +127,6 @@ impl IndentedState {
             header: None,
             unwound: 0,
             brackets: Vec::new(),
-            bracket_errors: false,
             indent_kind: IndentKind::None,
             reported_mixed: false,
             reported_kind: false,
@@ -175,7 +171,7 @@ impl<'src> Parser<'src> {
     /// statement on the same line: the rest of the line is no longer that header, and a
     /// deeper line below cannot go on with it. Whether that line goes on was decided ahead
     /// of the cursor, with the old header; decide it again. Tokens that start no statement
-    /// are left to the broken one, as legacy leaves them.
+    /// are left to the broken one.
     #[inline]
     pub fn begin_at_rule(&mut self) {
         if self.layout == super::Layout::Indented && self.indented.header.is_some() {
@@ -402,13 +398,6 @@ impl<'src> Parser<'src> {
             trivia,
         });
         self.last_virtual = (self.pos, trivia);
-    }
-
-    /// Whether an error was reported inside a bracket, which makes the bracket end at
-    /// the next line no deeper than the one it opened on, and the lines after it count
-    /// again if it is left unclosed. Lets differential tests tell that recovery apart.
-    pub fn recovered_from_bracket_errors(&self) -> bool {
-        self.indented.bracket_errors
     }
 
     // ── Fences ───────────────────────────────────────────────────────
@@ -772,7 +761,6 @@ impl<'src> Parser<'src> {
         if self.error_messages.len() == bracket.errors {
             return;
         }
-        self.indented.bracket_errors = true;
         let mut depth = 1u32;
         for index in bracket.pos + 1..self.pos {
             depth = bracket_depth_after(depth, self.input.kind(index));

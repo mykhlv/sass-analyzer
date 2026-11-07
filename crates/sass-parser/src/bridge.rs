@@ -290,33 +290,7 @@ mod tests {
             source,
             "lossless round-trip failed"
         );
-        assert_eq!(
-            leaves(&tree),
-            legacy_leaves(source),
-            "leaves differ from the legacy lexer's tokens"
-        );
         expect.assert_eq(&debug_tree(&tree));
-    }
-
-    /// Every token of the tree in order, zero-width ones included.
-    fn leaves(tree: &SyntaxNode) -> Vec<(SyntaxKind, String)> {
-        tree.descendants_with_tokens()
-            .filter_map(rowan::NodeOrToken::into_token)
-            .map(|t| (t.kind(), t.text().to_owned()))
-            .collect()
-    }
-
-    /// The legacy lexer's tokens, with its `+` and `=` shorthands tagged as the plain
-    /// tokens they are in `Input`.
-    fn legacy_leaves(source: &str) -> Vec<(SyntaxKind, String)> {
-        crate::sass_lexer::sass_tokenize(source)
-            .into_iter()
-            .map(|(kind, text)| match (kind, text) {
-                (SyntaxKind::IDENT, "+") => (SyntaxKind::PLUS, text.to_owned()),
-                (SyntaxKind::IDENT, "=") => (SyntaxKind::EQ, text.to_owned()),
-                _ => (kind, text.to_owned()),
-            })
-            .collect()
     }
 
     #[allow(clippy::cast_possible_truncation)]

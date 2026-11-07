@@ -3,13 +3,11 @@
 //! `Expected "."` (or `'`) at the newline, in both syntaxes.
 
 mod common;
-#[path = "common/layout_classes.rs"]
-mod layout_classes;
-#[path = "common/layout_differential.rs"]
-mod layout_differential;
+#[path = "common/render.rs"]
+mod render;
 
 use expect_test::{Expect, expect};
-use layout_differential::render;
+use render::render;
 use sass_parser::syntax::SyntaxNode;
 use sass_parser::syntax_kind::SyntaxKind;
 use sass_parser::{parse_sass, parse_scss};
@@ -2747,34 +2745,12 @@ fn a_quote_in_a_comment_is_not_a_string() {
     assert!(errors(parse_sass, "// a\n  \"b\n.e\n  f: g\n").is_empty());
 }
 
-// ── Both indented frontends ──────────────────────────────────────────
+// ── Brackets a string left open ──────────────────────────────────────
 
+/// A string that takes a `]` or `)` with it, or ends an interpolation, leaves a bracket
+/// open, as any bracket left unclosed does; `parse_sass` recovers at the next line.
 #[test]
-fn the_legacy_indented_frontend_agrees() {
-    for source in [
-        ".a\n  b: \"x\n  c: d\n",
-        ".a\n  b: 'x\n",
-        ".a\n  b: \"x #{$y} z\n  c: d\n",
-        ".a\n  b: \"x #{$y}\n  c: d\n",
-        "$m: (\n  a: \"x,\n  b: 2,\n)\n.e\n  f: g\n",
-        ".a\n  b: f(\n    \"x\n    2\n  )\n  c: d\n",
-        "@use \"a\n@import 'b\n.e\n  f: g\n",
-        ".a\n  b: f(\"x, 1,\n    2)\n.e\n  f: g\n",
-    ] {
-        if let Some((legacy, layout)) = layout_differential::layout_mismatch(source) {
-            panic!(
-                "parse_sass and parse_sass_legacy disagree on {source:?}:\n{}",
-                layout_differential::first_difference(&legacy, &layout),
-            );
-        }
-    }
-}
-
-/// A string that takes a `]` or `)` with it, or ends an interpolation, leaves legacy's count of
-/// open brackets up for the rest of the file, as after any bracket left unclosed;
-/// `parse_sass` recovers at the next line.
-#[test]
-fn legacy_does_not_recover_from_a_bracket_the_string_left_open() {
+fn a_bracket_the_string_left_open_closes_at_the_next_line() {
     for (source, rules) in [
         ("[a=\"b]\n  c: d\n.e\n  f: g\n", ["[a=\"b]", ".e"]),
         (".a\n  b: url(\"x\n  c: d\n.e\n  f: g\n", [".a", ".e"]),
@@ -2784,10 +2760,5 @@ fn legacy_does_not_recover_from_a_bracket_the_string_left_open() {
         ),
     ] {
         assert_eq!(top_level_rules(parse_sass, source), rules, "{source:?}");
-        assert_eq!(
-            layout_classes::classify(source),
-            [layout_classes::Class::BracketRecovery],
-            "{source:?}",
-        );
     }
 }

@@ -6,24 +6,13 @@
 //! Run with:
 //!   `cargo test --test corpus_test -- --ignored --nocapture`
 
-use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
 use sass_parser::syntax::SyntaxNode;
 
-#[path = "common/layout_allow_list.rs"]
-mod layout_allow_list;
-#[path = "common/layout_classes.rs"]
-mod layout_classes;
-#[path = "common/layout_differential.rs"]
-mod layout_differential;
-#[path = "common/line_facts.rs"]
-mod line_facts;
 #[path = "common/tree_shape.rs"]
 mod tree_shape;
-#[path = "common/virtual_tokens.rs"]
-mod virtual_tokens;
 
 use tree_shape::{Shape, describe_record_diff};
 
@@ -355,180 +344,6 @@ fn sass_corpora_match_baseline() {
 #[ignore = "requires downloading test corpus"]
 fn scss_corpora_match_baseline() {
     run_gate(&SCSS_GATE);
-}
-
-/// Every file of the indented corpora, `.scss` ones included, has layout facts that
-/// reproduce the indentation the legacy indented lexer measures at each newline, and the
-/// same comments.
-#[test]
-#[ignore = "requires downloading test corpus"]
-fn sass_corpora_line_facts_match_legacy() {
-    let mut files = 0;
-    let mut newlines = 0;
-    let mut mismatches = Vec::new();
-    for (name, subdir) in SASS_GATE.corpora {
-        let dir = corpus_root().join(subdir);
-        assert!(
-            dir.exists(),
-            "{name} corpus not found at {}. Run: cd test-corpus && bash download.sh",
-            dir.display()
-        );
-        for path in collect_source_files(&dir) {
-            let source = std::fs::read_to_string(&path)
-                .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
-            files += 1;
-            newlines += sass_parser::sass_lexer::newline_indents(&source).len();
-            let rel = path
-                .strip_prefix(&dir)
-                .unwrap_or(&path)
-                .display()
-                .to_string();
-            mismatches.extend(
-                line_facts::line_fact_mismatches(&source)
-                    .into_iter()
-                    .map(|m| format!("{name}/{rel} {m}")),
-            );
-        }
-    }
-    eprintln!(
-        "\nline facts vs legacy: {files} files, {newlines} newlines checked, {} mismatches",
-        mismatches.len(),
-    );
-    assert!(
-        mismatches.is_empty(),
-        "layout facts disagree with the legacy lexer: {:#?}",
-        &mismatches[..mismatches.len().min(20)],
-    );
-}
-
-/// Every file of the indented corpora, `.scss` ones included, parses to the same tree
-/// when the legacy lexer's zero-width tokens are emitted as `Event::Virtual` instead.
-#[test]
-#[ignore = "requires downloading test corpus"]
-fn sass_corpora_virtual_tokens_match_legacy() {
-    let mut files = 0;
-    let mut mismatches = Vec::new();
-    for (name, subdir) in SASS_GATE.corpora {
-        let dir = corpus_root().join(subdir);
-        assert!(
-            dir.exists(),
-            "{name} corpus not found at {}. Run: cd test-corpus && bash download.sh",
-            dir.display()
-        );
-        for path in collect_source_files(&dir) {
-            let source = std::fs::read_to_string(&path)
-                .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
-            files += 1;
-            if let Some(m) = virtual_tokens::virtual_token_mismatch(&source) {
-                let rel = path.strip_prefix(&dir).unwrap_or(&path).display();
-                mismatches.push(format!("{name}/{rel} {m}"));
-            }
-        }
-    }
-    eprintln!(
-        "\nEvent::Virtual vs legacy: {files} files, {} mismatches",
-        mismatches.len(),
-    );
-    assert!(
-        mismatches.is_empty(),
-        "Event::Virtual disagrees with the legacy lexer: {:#?}",
-        &mismatches[..mismatches.len().min(3)],
-    );
-}
-
-/// Every file of the indented corpora, `.scss` ones included, parses to the same tree
-/// and errors with the layout frontend as with legacy, unless it is on the allow-list.
-#[test]
-#[ignore = "requires downloading test corpus"]
-fn sass_corpora_layout_matches_legacy() {
-    let mut files = 0;
-    let mut allowed = 0;
-    let mut mismatches = Vec::new();
-    for (name, subdir) in SASS_GATE.corpora {
-        let dir = corpus_root().join(subdir);
-        assert!(
-            dir.exists(),
-            "{name} corpus not found at {}. Run: cd test-corpus && bash download.sh",
-            dir.display()
-        );
-        for path in collect_source_files(&dir) {
-            let source = std::fs::read_to_string(&path)
-                .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
-            files += 1;
-            let Some((legacy, layout)) = layout_differential::layout_mismatch(&source) else {
-                continue;
-            };
-            if layout_allow_list::allowed(&source).is_some() {
-                allowed += 1;
-                continue;
-            }
-            let rel = path.strip_prefix(&dir).unwrap_or(&path).display();
-            mismatches.push(format!(
-                "{name}/{rel}\n{}",
-                layout_differential::first_difference(&legacy, &layout)
-            ));
-        }
-    }
-    eprintln!(
-        "\nparse_sass vs parse_sass_legacy: {files} files, {allowed} allow-listed \
-         differences, {} other",
-        mismatches.len(),
-    );
-    assert!(
-        mismatches.is_empty(),
-        "parse_sass disagrees with parse_sass_legacy:\n{}",
-        mismatches[..mismatches.len().min(3)].join("\n"),
-    );
-}
-
-/// The fuzz corpora, which exist only where the fuzz targets have been run, through both
-/// indented frontends. They differ on far more inputs than the allow-list names: almost
-/// none of those inputs are Sass, and an unclosed bracket in them, now recovered from, is
-/// the commonest difference. So no list of inputs is kept, which would go stale with
-/// every fuzzing run; instead every difference must be of a kind the layout frontend
-/// makes on purpose (see `layout_classes`), and none of no kind.
-#[test]
-#[ignore = "requires the fuzz corpora from a local fuzzing run"]
-fn fuzz_corpora_layout_differences_are_of_known_kinds() {
-    let fuzz = Path::new(env!("CARGO_MANIFEST_DIR")).join("fuzz/corpus");
-    let mut inputs = 0;
-    let mut differences = 0;
-    let mut counts: BTreeMap<layout_classes::Class, usize> = BTreeMap::new();
-    let mut unknown = Vec::new();
-    for target in [
-        "fuzz_sass_parser_crash",
-        "fuzz_sass_parser_roundtrip",
-        "fuzz_sass_layout_differential",
-    ] {
-        let Ok(entries) = std::fs::read_dir(fuzz.join(target)) else {
-            eprintln!("no fuzz corpus at {}, skipped", fuzz.join(target).display());
-            continue;
-        };
-        for entry in entries.flatten() {
-            let Ok(source) = String::from_utf8(std::fs::read(entry.path()).unwrap_or_default())
-            else {
-                continue;
-            };
-            inputs += 1;
-            let classes = layout_classes::classify(&source);
-            let Some(&first) = classes.first() else {
-                continue;
-            };
-            differences += 1;
-            *counts.entry(first).or_default() += 1;
-            if classes.last() == Some(&layout_classes::Class::Other) {
-                let name = entry.file_name().to_string_lossy().into_owned();
-                unknown.push(format!("{target}/{name} {source:?}"));
-            }
-        }
-    }
-    eprintln!("\nfuzz corpora: {inputs} inputs, {differences} differences: {counts:?}");
-    assert!(
-        unknown.is_empty(),
-        "{} differences of no known kind, e.g.:\n{}",
-        unknown.len(),
-        unknown[..unknown.len().min(5)].join("\n"),
-    );
 }
 
 #[test]

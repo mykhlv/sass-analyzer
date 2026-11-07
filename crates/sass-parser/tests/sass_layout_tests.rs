@@ -1,18 +1,15 @@
 //! `parse_sass`: indented Sass with statement boundaries decided by the parser.
-//!
-//! Every input in `sass_lexer_tests.rs` is also parsed by both frontends there and must
-//! give the same tree, unless it is on the allow-list.
 
 use expect_test::{Expect, expect};
 
-#[path = "common/layout_allow_list.rs"]
-mod layout_allow_list;
-#[path = "common/layout_classes.rs"]
-mod layout_classes;
-#[path = "common/layout_differential.rs"]
-mod layout_differential;
+#[path = "common/layout_fixes.rs"]
+mod layout_fixes;
+#[path = "common/layout_pins.rs"]
+mod layout_pins;
+#[path = "common/render.rs"]
+mod render;
 
-use layout_differential::render;
+use render::render;
 use sass_parser::parse_sass;
 
 #[allow(clippy::needless_pass_by_value)]
@@ -21,15 +18,13 @@ fn check(source: &str, expect: Expect) {
     expect.assert_eq(&render(parse_sass, source));
 }
 
-/// The layout frontend gives the same tree as legacy here.
+/// The tree of an input pinned in `layout_pins`, where every change to it shows.
 #[track_caller]
-fn check_same(source: &str) -> String {
-    if let Some((legacy, layout)) = layout_differential::layout_mismatch(source) {
-        panic!(
-            "parse_sass and parse_sass_legacy disagree on {source:?}:\n{}",
-            layout_differential::first_difference(&legacy, &layout),
-        );
-    }
+fn check_pinned(source: &str) -> String {
+    assert!(
+        layout_pins::PINNED.contains(&source),
+        "{source:?} is not in layout_pins::PINNED"
+    );
     render(parse_sass, source)
 }
 
@@ -37,26 +32,183 @@ fn error_count(source: &str) -> usize {
     parse_sass(source).1.len()
 }
 
-// ── The allow-list ───────────────────────────────────────────────────
+// ── Pinned trees ─────────────────────────────────────────────────────
+
+/// One line per pinned input: its `layout_pins::fingerprint`, then the input.
+#[test]
+fn pinned_inputs_keep_their_trees() {
+    use std::fmt::Write as _;
+    let mut buf = String::new();
+    for source in layout_pins::PINNED {
+        let (green, errors) = parse_sass(source);
+        let errors: Vec<String> = errors
+            .into_iter()
+            .map(|(msg, range)| format!("{range:?}: {msg}"))
+            .collect();
+        let tree = sass_parser::syntax::SyntaxNode::new_root(green);
+        let _ = writeln!(
+            buf,
+            "{} {source:?}",
+            layout_pins::fingerprint(&tree, &errors)
+        );
+    }
+    expect![[r#"
+        0 2/1/2 eb96a6305a65f8d7 ".a\n  >\n    b: c\n"
+        0 0/1/2 f6c32d0c821ff792 "@foo\n  10%,\n  20%\n    a: b\n"
+        0 1/1/1 a6b3f009e09fa1ce ".a,\n\n.b\n  c: d\n"
+        0 1/1/2 92fd432360cf806f ".x\n  @for $i from 1 through\n    3\n    a: $i\n"
+        0 1/1/2 500acdf27a8386f2 ".x\n  @each $v in\n    1 2\n    a: $v\n"
+        0 1/1/1 5c8554264622b340 ".a\n  b: c and\n    d\n"
+        0 1/1/1 1b6da027c2b90344 ".a\n  b: c and\n  d\n"
+        0 1/1/1 fa043016df87ae91 ".a\n  b: c or\n    d\n"
+        0 1/1/1 83af0dd4febd320e ".a\n  b: 1 and\n    2\n"
+        0 1/1/1 3f4eb5120f37b880 ".a\n  b: c not\n    d\n"
+        0 1/1/1 7ad1415568924408 ".a\n  content: not\n    d\n"
+        0 1/1/1 30e6fae66692689c ".a\n  b: c and\n    d e\n"
+        0 1/1/1 f3d8d23d116150e8 ".a\n  b: c, d and\n  e\n"
+        0 1/2/1 9eee026d190aa05b ".a\n  b: c and\n    d\n  e: f\n"
+        2 0/0/1 5fcb641df1eae1ea "+J@\n\t(\n"
+        2 0/0/1 e1e1ebf85bcc8c64 "=@\n ,\n"
+        3 0/0/1 9ed6d773c1f44d48 "=,\u{c}@\u{c} ,"
+        1 1/2/1 d1216e15a70589f2 ".a\n  b: fn(1, !\n    2)\n  c: d\n"
+        0 1/0/0 1e15775992a93cda ".a:not(.b\n  c: d\n"
+        0 0/0/0 c76465eff96f3a72 "$a: 1 +\n  2\n"
+        0 1/1/2 4d714f6bdea6e3ed "@each $a\n  , $b in (1 2)\n  .x\n    c: $a\n"
+        0 0/0/1 9233f1ec933982a9 "@function f\n  ($a)\n  @return $a\n"
+        0 0/1/1 d43687692a51fa27 "@if\n  $a\n  b: c\n"
+        0 0/0/1 69616a77eed4fa8c "@function f($a)\n  @return $a +\n    1\n"
+        0 0/0/0 632b785bec4c6176 "$m: (\na: 1\n)\n"
+        0 1/1/1 7c528574d3a2ab16 ".a\n  b: fn(1,\n2)\n"
+        0 1/1/2 67aa0abbb34db6fa "@for $i\n  from 1 through 3\n  .a\n    b: $i\n"
+        0 1/1/1 dc09eac74d5aba34 ".a,\n.b\n  c: d\n"
+        0 0/0/0 8ad48e992627dea2 "$a:\n  1px\n"
+        0 1/1/1 8ae2a29994e49ad6 ".a,\n  .b\n  c: d\n"
+        0 1/1/1 6c16506d0b30a6ba ".a,\n\n  .b\n  c: d\n"
+        0 1/0/1 f42cd4e07e8a2c7a ".a\n  @extend .b,\n    .c\n"
+        0 1/0/1 b4c7c869aa24fc35 ".a\n  @extend .b,\n\n    .c\n"
+        0 0/1/1 0a657a989ebd52c3 "@each $a,\n  $b in c\n  d: e\n"
+        0 0/1/1 e152ed8a7c7d9490 "@each $a,\n\n  $b in c\n  d: e\n"
+        0 0/1/1 9cf9e5a390449001 "@each $a in b,\n  c\n  d: e\n"
+        0 0/1/1 aaf196b36243b135 "@each $a in b,\n\n  c\n  d: e\n"
+        0 1/1/1 3748a1a74e6d234d ".a\n  b: c,\n    d\n"
+        0 1/1/1 c5c8fe8c5c77d37c ".a\n  b: c,\n\n    d\n"
+        0 0/0/0 9ad954b81a145d50 "$a: 1,\n  2\n"
+        0 0/0/0 687681653b5ec221 "$a: 1,\n\n  2\n"
+        1 1/0/0 488adcc4140e6768 "@use \"a\" show b,\n  c\n"
+        1 1/0/0 6f5056a474793f42 "@use \"a\" show b,\n\n  c\n"
+        0 0/0/0 8793deb5d7e6291a "@import \"a\",\n  \"b\"\n"
+        0 0/0/0 ce01a5a127e0639d "@import \"a\",\n\n  \"b\"\n"
+        0 0/0/0 dd1e1c8aa6c9d74d "@layer a,\n  b\n"
+        0 0/0/0 20f91582a650b5f4 "@layer a,\n\n  b\n"
+        0 0/1/1 68b7ccf3f1cd483f "@keyframes k\n  10%,\n    20%\n    a: b\n"
+        0 0/1/1 d1ac03e44c455bcb "@keyframes k\n  10%,\n\n    20%\n    a: b\n"
+        0 0/1/2 cea8da6698d3d7d9 "@foo\n  10%,\n\n  20%\n    a: b\n"
+        0 1/1/2 611d6fb626e21805 "@media screen,\n  print\n  .a\n    b: c\n"
+        0 1/1/2 5c711cb9fe7994d7 "@media screen,\n\n  print\n  .a\n    b: c\n"
+        0 0/1/1 f51f34c40c7e960d "@foo a,\n  b\n  c: d\n"
+        0 0/1/1 a0c146735f6b5fa0 "@foo a,\n\n  b\n  c: d\n"
+        0 1/0/1 11f7a861f1ef53ff ".a\n  --x: a,\n    b\n"
+        0 1/0/1 45138d720fbbfa6d ".a\n  --x: a,\n\n    b\n"
+        0 1/1/2 5dac6fa9bac55d2d "@mixin foo($x: 1)\n  a: $x\n.a\n  @include foo\n    ($x)\n"
+        0 0/0/0 085efef4e8e7a0bb "@use \"x\"\n  as y\n"
+        0 1/1/2 805000c73bc4bea0 "@media screen and\n  (min-width: 1px)\n  .a\n    b: c\n"
+        0 1/1/2 567e7e1b3f7369ee "@container card (width > 400px) and\n  (height > 100px)\n  .a\n    b: c\n"
+        0 1/1/2 011421839f2524eb "@container card\n  (width > 400px)\n  .a\n    b: c\n"
+        0 1/1/2 1f941613ed6fdc7c "@scope (.a) to\n  (.b)\n  .c\n    d: e\n"
+        0 2/1/3 b1f26301a305c049 ".a\n  @at-root\n    (without: media)\n    .b\n      c: d\n"
+        0 0/2/2 5741427c9d079e15 "$b: true\n@if false\n  a: b\n@else\n  if $b\n  c: d\n"
+        0 0/1/1 28f0f8c1eef94b11 "$x: true\n$y: true\n@if $x\n  and $y\n  a: b\n"
+        0 1/1/1 0889e07e3f6bdce3 ".a\n  b: c,\n  d\n"
+        0 0/0/1 d15ef0493ebb2ab1 "@function f()\n  @return 1,\n    2\n"
+        0 0/0/0 131218331520a7ac "$a: 1\n  2\n"
+        0 0/0/0 887cacf954adb9ab "$a: 1\n  , 2\n"
+        0 1/1/1 2ea658a57d75dfaa "$m: (\n  a: 1,\n    b: 2\n)\n.x\n  c: map-get($m,\n'a')\n"
+        0 1/1/2 61bca1e6e258d4c0 ".a\n  font:\n    family: fantasy\n"
+        0 1/1/2 e047af0c0b7c55b2 ".a\n  font: bold\n    family: x\n"
+        0 1/1/2 7b808659ee4a3575 "@mixin foo\n  // c\n.a\n  b: c\n"
+        0 1/1/2 4cc0ceaa7dd88070 "@media screen\n  /* c */\n.a\n  b: c\n"
+        0 1/1/1 9e809b2d6496068b ".a\n  color:red\n"
+        3 0/0/0 d0203306c0abcb6a "@namespace svg\n  \"http://www.w3.org/2000/svg\"\n"
+        0 0/1/1 a32eee13df33d86b "@each $a\n  , $b in (1 2)\n  c: $a\n"
+        0 0/0/1 078b472a060189b4 "@function f\n  ($a)\n  @return $a +\n    1\n"
+        0 1/1/1 1e088c2aea759b35 "// c\n  continued\n    deeper\n.a\n  // body\n\n  b: c\n"
+        0 1/1/1 46dee23fa19c1dc5 "// c\r\n  crlf continuation\r\n.a\r\n  b: c\r\n"
+        0 1/1/1 3374e016d8c6a60a "\u{feff}.a\n  b: c\n"
+        0 1/1/1 eff37d3377ae61b0 ".a\n  b: c\n    \n"
+        0 0/1/1 45626e74c20683c4 "@mixin m\n  b: c\n// dedented comment\n  d: e\n"
+        0 1/1/2 592d1374622af270 "=m\n  b: c\n.a\n  +m\n"
+        0 4/4/4 a6c1b6cf1959ff5a ".nav\n  color: red\n  .item\n    margin: 0\n    &:hover\n      color: blue\n.footer\n  padding: 0\n"
+        0 1/1/2 40422c259fff9abb "@media screen and (min-width: 100px),\n  print\n  .a\n    color: red\n@include button($bg,\n  $border)\n"
+        0 2/2/3 5d2a213a61970c5a "// leading comment\n// second line\n.a\n  // only a comment\n  color: red\n@mixin empty\n  // comment-only body\n.b\n  /* loud */\n  margin: 0\n"
+        1 1/1/1 2b6c59de254654ba ".a\n  b: c /* d\n"
+        1 1/1/1 c7981c7191786c7a ".a\n  b: c /* d\n  "
+        0 1/1/2 61a093a4da9159f6 ".x\n  @if $and\n    a: b\n"
+        1 1/0/0 7796ec8391435722 "\u{e}[:\n}+\n0"
+        7 1/1/1 d5824fb1b6e58cfc "$||{z:\u{c},,"
+        0 0/0/0 4395014d94f85cb0 "//\n\n //\n 4"
+        3 0/0/0 6d4bef7e27410221 "$0*\n"
+        5 1/0/0 21cc242e7a11d4c2 "$||:\u{c}"
+        1 1/0/0 837a7e16c16fb00b ":*\n"
+        1 0/0/1 d054bbebb19a622c "=\n\n\t//\n"
+        4 0/0/0 d200374b7fef73eb "$+*//\n"
+        5 0/0/1 ad570d49f37f8462 "$@\n ''"
+        7 1/0/0 3e5083726ed4f76e "$\n\t //\n #\n"
+        2 0/0/0 6d8a214e49d8b051 "=\u{8}\n\t //\n //\u{8}\n"
+        0 0/0/0 141ae63eba4b2fae "@:*\n"
+        1 1/0/0 dc1918d3e0e1fd82 "@:*\n:"
+        3 0/0/0 7fb3f3bfa3f94699 "$/or//or\n"
+        0 3/3/3 b950f789bff76a6b ".nav\n  color: red\n  .item\n    margin: 0\n.footer\n  padding: 0\n"
+        0 0/1/1 c4f9bf72e55de71a "// c\n@mixin m($a,\n  $b)\n  // body comment\n  width: $a\n@include m(1,\n  2)\n"
+        0 0/0/0 cfc2ddf24e38d619 ""
+        1 2/2/2 66ebfc9b036c1548 ".a\n  b: (1 +)\n.c\n  d: e\n"
+        1 1/2/1 88c2087d3d8aa0e6 ".a\n  b: \"x\n  c: d\n"
+        1 1/1/1 22f81f99fbd14b7e ".a\n  b: 'x\n"
+        1 1/2/1 e170556ce6aadb53 ".a\n  b: \"x #{$y} z\n  c: d\n"
+        1 1/2/1 2ccda346b1993a86 ".a\n  b: \"x #{$y}\n  c: d\n"
+        1 1/1/1 3bc3006473ecf3ef "$m: (\n  a: \"x,\n  b: 2,\n)\n.e\n  f: g\n"
+        1 1/2/1 474c573be3d07685 ".a\n  b: f(\n    \"x\n    2\n  )\n  c: d\n"
+        2 1/1/1 0a6ead4ef5c474e3 "@use \"a\n@import 'b\n.e\n  f: g\n"
+        1 2/2/2 a3f5987746395a1e ".a\n  b: f(\"x, 1,\n    2)\n.e\n  f: g\n"
+        0 1/1/1 be8549b3b0e3235c ".a\n  b: c\n"
+        0 1/1/1 3f084470e2b6a84f ".a // c\n  b: c\n"
+        0 1/1/1 c39f356ac37bdce1 ".a\n  b: c // d"
+        0 3/2/3 fede4456c60d4005 ".a\n  .b\n    c: d\n.e\n  f: g"
+        0 1/1/2 2393f568725d0e59 "@mixin m\n  // c\n.a\n  b: c\n"
+        0 0/1/1 5bcb565f56e37c11 "@if $a\n  // c\n\n  b: c\n"
+        2 1/0/1 1d0acd3ef7f2d62d ".a\n  @extend .b\n    .c\n"
+        0 2/2/2 041de18e88d3754f ".a\r\n  b: c\r\n\r\n.d\r\n  e: f\r\n"
+        0 1/1/1 ff5c2e5dc9eed55c "  \n.a\n  b: c\n    \n"
+    "#]].assert_eq(&buf);
+}
 
 #[test]
-fn allow_listed_inputs_reach_their_target() {
-    for entry in layout_allow_list::allow_list() {
+fn pinned_inputs_are_unique() {
+    let pins = layout_pins::PINNED;
+    for (i, source) in pins.iter().enumerate() {
+        assert!(!pins[..i].contains(source), "{source:?} is pinned twice");
+    }
+}
+
+// ── Fixed defects ───────────────────────────────────────────────────
+
+#[test]
+fn fixed_defects_keep_their_trees() {
+    for entry in layout_fixes::fixes() {
         entry.expected.assert_eq(&render(parse_sass, entry.input));
     }
 }
 
 #[test]
-fn allow_list_has_no_duplicates() {
-    let list = layout_allow_list::allow_list();
+fn fixes_have_no_duplicates() {
+    let list = layout_fixes::fixes();
     for (i, entry) in list.iter().enumerate() {
         assert!(
             list[..i].iter().all(|other| other.input != entry.input),
-            "{:?} is on the allow-list twice",
+            "{:?} is on the list twice",
             entry.input,
         );
         assert!(
-            layout_allow_list::allowed(entry.input).is_some_and(|found| !found.change.is_empty()),
+            layout_fixes::fix_for(entry.input).is_some_and(|found| !found.change.is_empty()),
             "{:?} has no description",
             entry.input,
         );
@@ -65,7 +217,7 @@ fn allow_list_has_no_duplicates() {
 
 /// The defects with a stated number of diagnostics.
 #[test]
-fn allow_listed_defects_report_what_they_should() {
+fn fixed_defects_report_what_they_should() {
     // A dedent to no open column, a line of the other indentation, mixed indentation.
     assert_eq!(error_count(".a\n    .b\n      c: d\n  .e\n    f: g\n"), 1);
     assert_eq!(error_count(".a\n\tcolor: red\n        b: c\n"), 1);
@@ -83,70 +235,13 @@ fn allow_listed_defects_report_what_they_should() {
     );
     assert_eq!(error_count(".a /* x\n  y\n.b\n  c: d\n"), 1);
     // The loud comments of sass-spec's `loud.hrx`.
-    let loud = layout_allow_list::allow_list()
+    let loud = layout_fixes::fixes()
         .into_iter()
         .find(|entry| entry.input.starts_with("/* Single-line"))
         .unwrap();
     let tree = render(parse_sass, loud.input);
     assert_eq!(tree.matches("MULTI_LINE_COMMENT@").count(), 8, "{tree}");
     assert_eq!(error_count(loud.input), 0);
-}
-
-// ── Kinds of difference ──────────────────────────────────────────────
-
-/// The kinds the differences on the fuzz corpora must be of, each told on a small input
-/// that makes it; all of these but the comment across a blank line are inputs Dart Sass
-/// rejects. An input can make several, found one after another.
-#[test]
-fn differences_are_told_apart_by_kind() {
-    use layout_classes::Class::{
-        AtRuleAfterABrokenStatement, BracketRecovery, CommentAcrossBlankLine,
-        CommentLineDedentedToNoOpenBlock, DedentToNoOpenBlock, IndentationDiagnostics,
-        OperatorContinuesALine, OperatorOrColonEndsALine, StarEndsALine, StrayColonEndsALine,
-        TrailingIndentation, UnbalancedBrackets, UnterminatedComment, VariableNamedLikeAHeaderWord,
-        WordOperatorBeforeAStatement,
-    };
-    for (source, kinds) in [
-        (".a\n  b: c\n    ", vec![TrailingIndentation]),
-        (".a\n  b: c /* d\n", vec![UnterminatedComment]),
-        (
-            ".a\n  b: c /* d\n  ",
-            vec![TrailingIndentation, UnterminatedComment],
-        ),
-        (
-            ".a\n    .b\n      c: d\n  .e\n    f: g\n",
-            vec![IndentationDiagnostics],
-        ),
-        (
-            ".a\n  b: c and\n    d: e\n",
-            vec![WordOperatorBeforeAStatement],
-        ),
-        (
-            ".x\n  @if $and\n    a: b\n",
-            vec![VariableNamedLikeAHeaderWord],
-        ),
-        (".a\n  b: fn(1\n.c\n  d: e\n", vec![BracketRecovery]),
-        ("\x0e[:\n}+\n0", vec![UnbalancedBrackets]),
-        ("$||{z:\x0c,,", vec![UnbalancedBrackets]),
-        ("//\n\n //\n 4", vec![CommentAcrossBlankLine]),
-        ("$0*\n", vec![OperatorContinuesALine]),
-        ("$||:\x0c", vec![StrayColonEndsALine]),
-        (":*\n", vec![OperatorOrColonEndsALine]),
-        ("=\n\n\t//\n", vec![OperatorOrColonEndsALine]),
-        ("$+*//\n", vec![OperatorOrColonEndsALine]),
-        ("$@\n ''", vec![AtRuleAfterABrokenStatement]),
-        ("$\n\t //\n #\n", vec![DedentToNoOpenBlock]),
-        (
-            "=\x08\n\t //\n //\x08\n",
-            vec![CommentLineDedentedToNoOpenBlock],
-        ),
-        ("@:*\n", vec![OperatorOrColonEndsALine]),
-        ("@:*\n:", vec![StarEndsALine]),
-        ("$/or//or\n", vec![WordOperatorBeforeAStatement]),
-    ] {
-        assert_eq!(layout_classes::classify(source), kinds, "{source:?}");
-    }
-    assert!(layout_classes::classify(".a\n  b: c\n").is_empty());
 }
 
 // ── Forms Dart Sass accepts ──────────────────────────────────────────
@@ -165,7 +260,7 @@ fn dart_valid_continuations_parse_without_errors() {
         ".a,\n.b\n  c: d\n",
         "$a:\n  1px\n",
     ] {
-        let tree = check_same(source);
+        let tree = check_pinned(source);
         assert!(!tree.contains("\nerror "), "{source:?}:\n{tree}");
     }
 }
@@ -193,7 +288,7 @@ fn lenient_forms_still_parse_without_errors() {
         "$a: 1\n  2\n",
         "$a: 1\n  , 2\n",
     ] {
-        let tree = check_same(source);
+        let tree = check_pinned(source);
         assert!(!tree.contains("\nerror "), "{source:?}:\n{tree}");
     }
 }
@@ -227,7 +322,7 @@ fn an_operator_at_the_end_of_a_line_continues_the_expression() {
 
 /// A declaration's value reads `and`, `or` and `not` as words, but Dart Sass reads them
 /// as operators: after `and` or `or` with an operand before it, or after `not`, the value
-/// goes on on the next line, as it did in legacy.
+/// goes on on the next line.
 #[test]
 fn a_word_operator_at_the_end_of_a_value_continues_it() {
     for source in [
@@ -241,7 +336,7 @@ fn a_word_operator_at_the_end_of_a_value_continues_it() {
         ".a\n  b: c, d and\n  e\n",
         ".a\n  b: c and\n    d\n  e: f\n",
     ] {
-        let tree = check_same(source);
+        let tree = check_pinned(source);
         assert!(!tree.contains("\nerror "), "{source:?}:\n{tree}");
     }
     check(
@@ -341,11 +436,11 @@ fn a_blank_line_ends_a_continued_expression() {
 
 #[test]
 fn a_comma_continues_across_a_blank_line() {
-    check_same(".a,\n\n.b\n  c: d\n");
+    check_pinned(".a,\n\n.b\n  c: d\n");
 }
 
 /// Every list the grammar reads outside brackets goes on after a comma at the end of a
-/// line, with or without a blank line after it, as in legacy.
+/// line, with or without a blank line after it.
 #[test]
 fn every_comma_separated_list_goes_on_after_a_comma() {
     for source in [
@@ -364,8 +459,8 @@ fn every_comma_separated_list_goes_on_after_a_comma() {
         "@foo a,\n  b\n  c: d\n",
         ".a\n  --x: a,\n    b\n",
     ] {
-        check_same(source);
-        check_same(&source.replacen(",\n", ",\n\n", 1));
+        check_pinned(source);
+        check_pinned(&source.replacen(",\n", ",\n\n", 1));
     }
 }
 
@@ -373,7 +468,7 @@ fn every_comma_separated_list_goes_on_after_a_comma() {
 /// and the block below belongs to both.
 #[test]
 fn a_comma_continues_a_keyframe_list_in_an_unknown_at_rule() {
-    check_same("@foo\n  10%,\n  20%\n    a: b\n");
+    check_pinned("@foo\n  10%,\n  20%\n    a: b\n");
     check(
         "@foo\n  10%,\n  20%\n    a: b\n",
         expect![[r#"
@@ -514,8 +609,8 @@ fn a_comment_on_a_continued_line_is_an_ordinary_comment() {
 /// one is no such word, and the line below is the rule's body, as in Dart Sass.
 #[test]
 fn a_variable_named_like_a_header_word_ends_the_header() {
-    check_same(".x\n  @for $i from 1 through\n    3\n    a: $i\n");
-    check_same(".x\n  @each $v in\n    1 2\n    a: $v\n");
+    check_pinned(".x\n  @for $i from 1 through\n    3\n    a: $i\n");
+    check_pinned(".x\n  @each $v in\n    1 2\n    a: $v\n");
     for (source, rule) in [
         (".x\n  @for $i from 1 through $to\n    a: $i\n", "FOR_RULE@"),
         (".x\n  @for $i from 1 to $through\n    a: $i\n", "FOR_RULE@"),
@@ -587,13 +682,13 @@ fn a_variable_named_like_a_header_word_ends_the_header() {
 
 /// An error ends a statement before its line does; an at-rule after it on the line is a
 /// statement of its own, and the header of the broken one no longer decides whether the
-/// deeper line below goes on: here it opens the at-rule's block, as in legacy.
+/// deeper line below goes on: here it opens the at-rule's block.
 #[test]
 fn an_at_rule_after_a_broken_statement_ends_its_header() {
-    check_same("+J@\n\t(\n");
-    check_same("=@\n ,\n");
+    check_pinned("+J@\n\t(\n");
+    check_pinned("=@\n ,\n");
     // A comma went on over the line break before the at-rule.
-    check_same("=,\x0c@\x0c ,");
+    check_pinned("=,\x0c@\x0c ,");
     check(
         "+m@\n  (a)\n",
         expect![[r#"
@@ -723,27 +818,27 @@ fn shorthands_read_as_at_rules() {
 
 #[test]
 fn a_combinator_alone_on_its_line_does_not_continue_it() {
-    check_same(".a\n  >\n    b: c\n");
+    check_pinned(".a\n  >\n    b: c\n");
 }
 
 // ── Brackets ─────────────────────────────────────────────────────────
 
 #[test]
 fn line_breaks_inside_brackets_are_whitespace() {
-    check_same("$m: (\n  a: 1,\n    b: 2\n)\n.x\n  c: map-get($m,\n'a')\n");
+    check_pinned("$m: (\n  a: 1,\n    b: 2\n)\n.x\n  c: map-get($m,\n'a')\n");
 }
 
 #[test]
 fn an_unclosed_bracket_without_an_error_runs_to_the_end_of_the_input() {
     // No error inside the bracket, so nothing recovers early.
-    check_same(".a:not(.b\n  c: d\n");
+    check_pinned(".a:not(.b\n  c: d\n");
 }
 
 #[test]
 fn an_error_inside_a_bracket_that_closes_changes_nothing() {
     // The error makes the bracket stop at a line no deeper than the one it opened on, but
     // it closes before any such line.
-    check_same(".a\n  b: fn(1, !\n    2)\n  c: d\n");
+    check_pinned(".a\n  b: fn(1, !\n    2)\n  c: d\n");
 }
 
 #[test]

@@ -3,7 +3,6 @@ use crate::syntax_kind::SyntaxKind;
 mod indented;
 
 pub use indented::IndentedLexer;
-pub(crate) use indented::{contains_newline, indent_after_last_newline};
 
 /// A stream of tokens ending in `EOF`, as [`Lexer`] and [`IndentedLexer`] produce.
 pub trait TokenSource<'src> {

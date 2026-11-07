@@ -37,9 +37,6 @@ pub enum IndentKind {
 
 /// Layout facts about one line break: a WHITESPACE trivia token containing `\n`, `\r` or
 /// `\x0c`. Newlines inside comment tokens are not line breaks.
-///
-/// The column is exactly what the legacy indented lexer measures at each newline it
-/// processes, which the layout decisions built on these facts must agree with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LineBreak {
     column: u32,
