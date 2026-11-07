@@ -13,12 +13,11 @@ scss	directives/forward/error/syntax/with/namespace_variable	8	expected DOLLAR
 scss	directives/use/error/syntax/with/extra_comma	4	expected DOLLAR
 scss	directives/use/error/syntax/with/namespace_variable	8	expected DOLLAR
 scss	libsass-closed-issues/issue_1537	4	expected COLON
-scss	libsass-closed-issues/issue_221255	5	expected rule
+scss	libsass-closed-issues/issue_221255	4	expected rule
 scss	libsass-closed-issues/issue_674	5	expected DOLLAR
 scss	libsass-todo-issues/issue_2016	6	expected expression
 scss	libsass-todo-issues/issue_221260	1275	nesting too deep
 scss	libsass-todo-issues/issue_221264	4301	nesting too deep
-scss	non_conformant/errors/interpolation/error-1	5	expected rule
+scss	non_conformant/errors/interpolation/error-1	4	expected rule
 scss	non_conformant/mixin/content/arguments/error/syntax/arglist/missing_parens	5	expected SEMICOLON
 scss	values/maps/invalid-key	4	expected RPAREN
-scss	values/strings/new-line/scss/ff	4	unterminated string

@@ -61,12 +61,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   modifier, followed by `and` and conditions, with queries separated by commas; a
   `@supports` condition is `not` and a condition, or conditions joined by one of `and`
   and `or`, each in parentheses, an interpolation or a function such as `selector(…)`.
-  A word on a line of its own after a media type starts the next rule. Where no block
-  follows, one "expected `{`" is reported, unless the query reported an error of its
-  own: tokens left on the query's line are skipped up to a block, which is then the
-  rule's, as in `@media screen and (a) "x" {`, and a statement on the next line keeps
-  its own place, as in `@media screen` / `div { e: f }` or `@supports (a)` /
-  `@include m;`. Rules of this kind used to be read into the query without a
+  Names may be interpolated as in Dart, `#{$a}-#{$b}` or `-#{$x}-b(c)`, and a media
+  type's modifier may stand on the line above it, `@media screen` / `div {` being the
+  query `screen div`. Where no block follows, one "expected `{`" is reported, unless the
+  query reported an error of its own: tokens left on the query's line are skipped up to
+  a block, which is then the rule's, as in `@media screen and (a) "x" {`, and a statement
+  on the next line keeps its own place, as in `@supports (a)` / `@include m;` or
+  `@media screen` / `$v: 1;`. A string left unclosed among the skipped tokens is
+  reported only as that. Rules of this kind used to be read into the query without a
   diagnostic, and `@supports (a)` at the end of a file or `.p { @media (a) }` was
   silently accepted. `@container` and `@scope` may go without a block, as in Dart Sass,
   and indented Sass is unchanged

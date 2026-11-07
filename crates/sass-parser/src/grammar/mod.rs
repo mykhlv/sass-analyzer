@@ -379,14 +379,45 @@ fn missing_rule_block(p: &mut Parser<'_>, selector_reported: bool) {
         }
         return;
     }
-    skip_to_rule_block(p);
+    skip_to_rule_block(p, true);
 }
 
-/// Report the tokens at the cursor, where a `{` belongs, and skip them as one error up to
-/// the next `{`, `;` or `}`; a block there is still the rule's.
-pub(crate) fn skip_to_rule_block(p: &mut Parser<'_>) {
+/// Whether the cursor is at an identifier as Dart Sass's `interpolatedIdentifier` reads
+/// one: a word or an interpolation, or a `-` joined to one.
+pub(crate) fn at_interpolated_identifier(p: &Parser<'_>) -> bool {
+    match p.current() {
+        IDENT | HASH_LBRACE => true,
+        MINUS => !p.nth_has_whitespace_before(1) && matches!(p.nth(1), IDENT | HASH_LBRACE | MINUS),
+        _ => false,
+    }
+}
+
+/// An identifier as Dart Sass's `interpolatedIdentifier` reads one: words,
+/// interpolations, `-` and numbers with no whitespace between them, as in `-#{$a}-b`,
+/// `#{$a}-` or `x#{$b}-2`.
+pub(crate) fn interpolated_identifier(p: &mut Parser<'_>) {
+    debug_assert!(at_interpolated_identifier(p));
+    loop {
+        if p.at(HASH_LBRACE) {
+            let _ = expressions::interpolation(p);
+        } else {
+            p.bump();
+        }
+        if p.has_whitespace_before() || !matches!(p.current(), IDENT | HASH_LBRACE | MINUS | NUMBER)
+        {
+            break;
+        }
+    }
+}
+
+/// Report the tokens at the cursor, where a `{` belongs, if `report`, and skip them as one
+/// error up to the next `{`, `;` or `}`; a block there is still the rule's.
+pub(crate) fn skip_to_rule_block(p: &mut Parser<'_>, report: bool) {
     let m = p.start();
-    p.error("expected `{`");
+    // A string left unclosed among them is reported as that, which is the one error.
+    if report && !p.unclosed_string_before_block() {
+        p.error("expected `{`");
+    }
     let mut interpolation: u32 = 0;
     while !p.at_end() {
         match p.current() {

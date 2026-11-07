@@ -41,7 +41,7 @@ fn rule_body(p: &mut Parser<'_>, errors: usize) {
         super::block(p);
     } else if !p.braced() {
     } else if !p.at_end() && !p.at(SEMICOLON) && !p.at(RBRACE) && !p.at_line_break() {
-        super::super::skip_to_rule_block(p);
+        super::super::skip_to_rule_block(p, p.error_count() == errors);
     } else if p.error_count() == errors {
         p.error_after_prev("expected `{`");
     }
@@ -58,23 +58,9 @@ fn at_word(p: &Parser<'_>, word: &str) -> bool {
     p.at(IDENT) && p.current_text().eq_ignore_ascii_case(word)
 }
 
-fn at_identifier(p: &Parser<'_>) -> bool {
-    p.at(IDENT) || p.at(HASH_LBRACE)
-}
-
-/// An identifier, interpolated or not: its words and interpolations up to whitespace.
-fn identifier(p: &mut Parser<'_>) {
-    loop {
-        if p.at(HASH_LBRACE) {
-            let _ = super::interpolation(p);
-        } else {
-            p.bump();
-        }
-        if !at_identifier(p) || p.has_whitespace_before() {
-            break;
-        }
-    }
-}
+use super::super::{
+    at_interpolated_identifier as at_identifier, interpolated_identifier as identifier,
+};
 
 /// `( … )` or an interpolation, where Dart Sass reads a media condition in parentheses.
 fn media_in_parens(p: &mut Parser<'_>) -> bool {
@@ -97,9 +83,8 @@ fn media_sequence(p: &mut Parser<'_>, op: &str) {
 
 /// One braced media query, read as Dart Sass reads it, so that it ends where Dart's
 /// does: `(…)` joined by `and` or `or`; `not (…)`; or a media type, after an optional
-/// modifier, then `and` and conditions. Dart takes any word before the type as a
-/// modifier; one on a line of its own after the type, as in `@media screen` / `div {`,
-/// is taken for the selector of the rule below instead.
+/// modifier, which may be any word, then `and` and conditions. As in Dart, the second
+/// word may stand on the next line: `@media screen` / `div {` is the query `screen div`.
 fn media_query(p: &mut Parser<'_>) {
     if p.at(LPAREN) {
         media_in_parens(p);
@@ -115,7 +100,6 @@ fn media_query(p: &mut Parser<'_>) {
     if !at_identifier(p) {
         return;
     }
-    let modifier = at_word(p, "not") || at_word(p, "only");
     let not = at_word(p, "not");
     identifier(p);
     if not && !at_identifier(p) {
@@ -128,9 +112,6 @@ fn media_query(p: &mut Parser<'_>) {
     if at_word(p, "and") {
         p.bump();
     } else {
-        if !modifier && p.at_line_break() {
-            return;
-        }
         identifier(p);
         if !at_word(p, "and") {
             return;
@@ -180,12 +161,12 @@ fn supports_logic(p: &mut Parser<'_>) {
     if !supports_in_parens(p) {
         return;
     }
-    let mut op: Option<String> = None;
+    let mut op: Option<&str> = None;
     while p.at(IDENT) {
-        let word = p.current_text().to_ascii_lowercase();
-        match &op {
-            Some(op) if *op == word => {}
-            None if word == "and" || word == "or" => op = Some(word),
+        match op {
+            Some(op) if at_word(p, op) => {}
+            None if at_word(p, "and") => op = Some("and"),
+            None if at_word(p, "or") => op = Some("or"),
             _ => return,
         }
         p.bump();

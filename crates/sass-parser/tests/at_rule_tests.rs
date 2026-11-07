@@ -2377,41 +2377,37 @@ fn supports_condition_lacks_a_block_before_a_rule() {
     );
 }
 
+/// Dart Sass reads `screen div` as the query and `{ e: f }` as its block, then rejects the
+/// declaration outside a style rule; the query itself is valid, and reads so here.
 #[test]
-fn media_type_lacks_a_block_before_a_rule_on_the_next_line() {
+fn media_type_takes_the_selector_below_as_its_second_word() {
     check(
         "@media screen\ndiv { e: f }",
         expect![[r#"
-        SOURCE_FILE@0..26
-          MEDIA_RULE@0..13
-            AT@0..1 "@"
-            IDENT@1..6 "media"
-            MEDIA_QUERY@6..13
-              WHITESPACE@6..7 " "
-              IDENT@7..13 "screen"
-          RULE_SET@13..26
-            SELECTOR_LIST@13..17
-              SELECTOR@13..17
-                SIMPLE_SELECTOR@13..17
+            SOURCE_FILE@0..26
+              MEDIA_RULE@0..26
+                AT@0..1 "@"
+                IDENT@1..6 "media"
+                MEDIA_QUERY@6..17
+                  WHITESPACE@6..7 " "
+                  IDENT@7..13 "screen"
                   WHITESPACE@13..14 "\n"
                   IDENT@14..17 "div"
-            BLOCK@17..26
-              WHITESPACE@17..18 " "
-              LBRACE@18..19 "{"
-              DECLARATION@19..24
-                PROPERTY@19..21
-                  WHITESPACE@19..20 " "
-                  IDENT@20..21 "e"
-                COLON@21..22 ":"
-                VALUE@22..24
-                  VALUE@22..24
-                    WHITESPACE@22..23 " "
-                    IDENT@23..24 "f"
-              WHITESPACE@24..25 " "
-              RBRACE@25..26 "}"
-        errors:
-          13..13: expected `{`
-    "#]],
+                BLOCK@17..26
+                  WHITESPACE@17..18 " "
+                  LBRACE@18..19 "{"
+                  DECLARATION@19..24
+                    PROPERTY@19..21
+                      WHITESPACE@19..20 " "
+                      IDENT@20..21 "e"
+                    COLON@21..22 ":"
+                    VALUE@22..24
+                      VALUE@22..24
+                        WHITESPACE@22..23 " "
+                        IDENT@23..24 "f"
+                  WHITESPACE@24..25 " "
+                  RBRACE@25..26 "}"
+        "#]],
     );
 }
 
@@ -3628,6 +3624,600 @@ fn supports_conditions_dart_accepts() {
                   WHITESPACE@45..46 " "
                   RBRACE@46..47 "}"
         "##]],
+    );
+}
+
+#[test]
+fn media_interpolated_identifiers_dart_accepts() {
+    check(
+        "@media #{$a}-#{$b} { .x { c: d } }",
+        expect![[r##"
+        SOURCE_FILE@0..34
+          MEDIA_RULE@0..34
+            AT@0..1 "@"
+            IDENT@1..6 "media"
+            MEDIA_QUERY@6..18
+              INTERPOLATION@6..12
+                WHITESPACE@6..7 " "
+                HASH_LBRACE@7..9 "#{"
+                VARIABLE_REF@9..11
+                  DOLLAR@9..10 "$"
+                  IDENT@10..11 "a"
+                RBRACE@11..12 "}"
+              MINUS@12..13 "-"
+              INTERPOLATION@13..18
+                HASH_LBRACE@13..15 "#{"
+                VARIABLE_REF@15..17
+                  DOLLAR@15..16 "$"
+                  IDENT@16..17 "b"
+                RBRACE@17..18 "}"
+            BLOCK@18..34
+              WHITESPACE@18..19 " "
+              LBRACE@19..20 "{"
+              RULE_SET@20..32
+                SELECTOR_LIST@20..23
+                  SELECTOR@20..23
+                    SIMPLE_SELECTOR@20..23
+                      WHITESPACE@20..21 " "
+                      DOT@21..22 "."
+                      IDENT@22..23 "x"
+                BLOCK@23..32
+                  WHITESPACE@23..24 " "
+                  LBRACE@24..25 "{"
+                  DECLARATION@25..30
+                    PROPERTY@25..27
+                      WHITESPACE@25..26 " "
+                      IDENT@26..27 "c"
+                    COLON@27..28 ":"
+                    VALUE@28..30
+                      VALUE@28..30
+                        WHITESPACE@28..29 " "
+                        IDENT@29..30 "d"
+                  WHITESPACE@30..31 " "
+                  RBRACE@31..32 "}"
+              WHITESPACE@32..33 " "
+              RBRACE@33..34 "}"
+    "##]],
+    );
+    check(
+        "@media #{$b}- { .x { c: d } }",
+        expect![[r##"
+        SOURCE_FILE@0..29
+          MEDIA_RULE@0..29
+            AT@0..1 "@"
+            IDENT@1..6 "media"
+            MEDIA_QUERY@6..13
+              INTERPOLATION@6..12
+                WHITESPACE@6..7 " "
+                HASH_LBRACE@7..9 "#{"
+                VARIABLE_REF@9..11
+                  DOLLAR@9..10 "$"
+                  IDENT@10..11 "b"
+                RBRACE@11..12 "}"
+              MINUS@12..13 "-"
+            BLOCK@13..29
+              WHITESPACE@13..14 " "
+              LBRACE@14..15 "{"
+              RULE_SET@15..27
+                SELECTOR_LIST@15..18
+                  SELECTOR@15..18
+                    SIMPLE_SELECTOR@15..18
+                      WHITESPACE@15..16 " "
+                      DOT@16..17 "."
+                      IDENT@17..18 "x"
+                BLOCK@18..27
+                  WHITESPACE@18..19 " "
+                  LBRACE@19..20 "{"
+                  DECLARATION@20..25
+                    PROPERTY@20..22
+                      WHITESPACE@20..21 " "
+                      IDENT@21..22 "c"
+                    COLON@22..23 ":"
+                    VALUE@23..25
+                      VALUE@23..25
+                        WHITESPACE@23..24 " "
+                        IDENT@24..25 "d"
+                  WHITESPACE@25..26 " "
+                  RBRACE@26..27 "}"
+              WHITESPACE@27..28 " "
+              RBRACE@28..29 "}"
+    "##]],
+    );
+    check(
+        "@media -#{$x} { .x { c: d } }",
+        expect![[r##"
+        SOURCE_FILE@0..29
+          MEDIA_RULE@0..29
+            AT@0..1 "@"
+            IDENT@1..6 "media"
+            MEDIA_QUERY@6..13
+              WHITESPACE@6..7 " "
+              MINUS@7..8 "-"
+              INTERPOLATION@8..13
+                HASH_LBRACE@8..10 "#{"
+                VARIABLE_REF@10..12
+                  DOLLAR@10..11 "$"
+                  IDENT@11..12 "x"
+                RBRACE@12..13 "}"
+            BLOCK@13..29
+              WHITESPACE@13..14 " "
+              LBRACE@14..15 "{"
+              RULE_SET@15..27
+                SELECTOR_LIST@15..18
+                  SELECTOR@15..18
+                    SIMPLE_SELECTOR@15..18
+                      WHITESPACE@15..16 " "
+                      DOT@16..17 "."
+                      IDENT@17..18 "x"
+                BLOCK@18..27
+                  WHITESPACE@18..19 " "
+                  LBRACE@19..20 "{"
+                  DECLARATION@20..25
+                    PROPERTY@20..22
+                      WHITESPACE@20..21 " "
+                      IDENT@21..22 "c"
+                    COLON@22..23 ":"
+                    VALUE@23..25
+                      VALUE@23..25
+                        WHITESPACE@23..24 " "
+                        IDENT@24..25 "d"
+                  WHITESPACE@25..26 " "
+                  RBRACE@26..27 "}"
+              WHITESPACE@27..28 " "
+              RBRACE@28..29 "}"
+    "##]],
+    );
+    check(
+        "@media x#{$x}-2 { .x { c: d } }",
+        expect![[r##"
+        SOURCE_FILE@0..31
+          MEDIA_RULE@0..31
+            AT@0..1 "@"
+            IDENT@1..6 "media"
+            MEDIA_QUERY@6..15
+              WHITESPACE@6..7 " "
+              IDENT@7..8 "x"
+              INTERPOLATION@8..13
+                HASH_LBRACE@8..10 "#{"
+                VARIABLE_REF@10..12
+                  DOLLAR@10..11 "$"
+                  IDENT@11..12 "x"
+                RBRACE@12..13 "}"
+              MINUS@13..14 "-"
+              NUMBER@14..15 "2"
+            BLOCK@15..31
+              WHITESPACE@15..16 " "
+              LBRACE@16..17 "{"
+              RULE_SET@17..29
+                SELECTOR_LIST@17..20
+                  SELECTOR@17..20
+                    SIMPLE_SELECTOR@17..20
+                      WHITESPACE@17..18 " "
+                      DOT@18..19 "."
+                      IDENT@19..20 "x"
+                BLOCK@20..29
+                  WHITESPACE@20..21 " "
+                  LBRACE@21..22 "{"
+                  DECLARATION@22..27
+                    PROPERTY@22..24
+                      WHITESPACE@22..23 " "
+                      IDENT@23..24 "c"
+                    COLON@24..25 ":"
+                    VALUE@25..27
+                      VALUE@25..27
+                        WHITESPACE@25..26 " "
+                        IDENT@26..27 "d"
+                  WHITESPACE@27..28 " "
+                  RBRACE@28..29 "}"
+              WHITESPACE@29..30 " "
+              RBRACE@30..31 "}"
+    "##]],
+    );
+    check(
+        "@media #{$x}-#{$x} and (c) { .x { c: d } }",
+        expect![[r##"
+            SOURCE_FILE@0..42
+              MEDIA_RULE@0..42
+                AT@0..1 "@"
+                IDENT@1..6 "media"
+                MEDIA_QUERY@6..26
+                  INTERPOLATION@6..12
+                    WHITESPACE@6..7 " "
+                    HASH_LBRACE@7..9 "#{"
+                    VARIABLE_REF@9..11
+                      DOLLAR@9..10 "$"
+                      IDENT@10..11 "x"
+                    RBRACE@11..12 "}"
+                  MINUS@12..13 "-"
+                  INTERPOLATION@13..18
+                    HASH_LBRACE@13..15 "#{"
+                    VARIABLE_REF@15..17
+                      DOLLAR@15..16 "$"
+                      IDENT@16..17 "x"
+                    RBRACE@17..18 "}"
+                  WHITESPACE@18..19 " "
+                  IDENT@19..22 "and"
+                  WHITESPACE@22..23 " "
+                  LPAREN@23..24 "("
+                  IDENT@24..25 "c"
+                  RPAREN@25..26 ")"
+                BLOCK@26..42
+                  WHITESPACE@26..27 " "
+                  LBRACE@27..28 "{"
+                  RULE_SET@28..40
+                    SELECTOR_LIST@28..31
+                      SELECTOR@28..31
+                        SIMPLE_SELECTOR@28..31
+                          WHITESPACE@28..29 " "
+                          DOT@29..30 "."
+                          IDENT@30..31 "x"
+                    BLOCK@31..40
+                      WHITESPACE@31..32 " "
+                      LBRACE@32..33 "{"
+                      DECLARATION@33..38
+                        PROPERTY@33..35
+                          WHITESPACE@33..34 " "
+                          IDENT@34..35 "c"
+                        COLON@35..36 ":"
+                        VALUE@36..38
+                          VALUE@36..38
+                            WHITESPACE@36..37 " "
+                            IDENT@37..38 "d"
+                      WHITESPACE@38..39 " "
+                      RBRACE@39..40 "}"
+                  WHITESPACE@40..41 " "
+                  RBRACE@41..42 "}"
+        "##]],
+    );
+}
+
+#[test]
+fn supports_interpolated_function_name_with_hyphens() {
+    check(
+        "@supports -#{$x}-b(c) { .x { c: d } }",
+        expect![[r##"
+        SOURCE_FILE@0..37
+          SUPPORTS_RULE@0..37
+            AT@0..1 "@"
+            IDENT@1..9 "supports"
+            SUPPORTS_CONDITION@9..21
+              WHITESPACE@9..10 " "
+              MINUS@10..11 "-"
+              INTERPOLATION@11..16
+                HASH_LBRACE@11..13 "#{"
+                VARIABLE_REF@13..15
+                  DOLLAR@13..14 "$"
+                  IDENT@14..15 "x"
+                RBRACE@15..16 "}"
+              IDENT@16..18 "-b"
+              LPAREN@18..19 "("
+              IDENT@19..20 "c"
+              RPAREN@20..21 ")"
+            BLOCK@21..37
+              WHITESPACE@21..22 " "
+              LBRACE@22..23 "{"
+              RULE_SET@23..35
+                SELECTOR_LIST@23..26
+                  SELECTOR@23..26
+                    SIMPLE_SELECTOR@23..26
+                      WHITESPACE@23..24 " "
+                      DOT@24..25 "."
+                      IDENT@25..26 "x"
+                BLOCK@26..35
+                  WHITESPACE@26..27 " "
+                  LBRACE@27..28 "{"
+                  DECLARATION@28..33
+                    PROPERTY@28..30
+                      WHITESPACE@28..29 " "
+                      IDENT@29..30 "c"
+                    COLON@30..31 ":"
+                    VALUE@31..33
+                      VALUE@31..33
+                        WHITESPACE@31..32 " "
+                        IDENT@32..33 "d"
+                  WHITESPACE@33..34 " "
+                  RBRACE@34..35 "}"
+              WHITESPACE@35..36 " "
+              RBRACE@36..37 "}"
+    "##]],
+    );
+}
+
+#[test]
+fn media_type_takes_a_second_word_from_the_next_line() {
+    check(
+        "@media print\nscreen { .x { c: d } }",
+        expect![[r#"
+        SOURCE_FILE@0..35
+          MEDIA_RULE@0..35
+            AT@0..1 "@"
+            IDENT@1..6 "media"
+            MEDIA_QUERY@6..19
+              WHITESPACE@6..7 " "
+              IDENT@7..12 "print"
+              WHITESPACE@12..13 "\n"
+              IDENT@13..19 "screen"
+            BLOCK@19..35
+              WHITESPACE@19..20 " "
+              LBRACE@20..21 "{"
+              RULE_SET@21..33
+                SELECTOR_LIST@21..24
+                  SELECTOR@21..24
+                    SIMPLE_SELECTOR@21..24
+                      WHITESPACE@21..22 " "
+                      DOT@22..23 "."
+                      IDENT@23..24 "x"
+                BLOCK@24..33
+                  WHITESPACE@24..25 " "
+                  LBRACE@25..26 "{"
+                  DECLARATION@26..31
+                    PROPERTY@26..28
+                      WHITESPACE@26..27 " "
+                      IDENT@27..28 "c"
+                    COLON@28..29 ":"
+                    VALUE@29..31
+                      VALUE@29..31
+                        WHITESPACE@29..30 " "
+                        IDENT@30..31 "d"
+                  WHITESPACE@31..32 " "
+                  RBRACE@32..33 "}"
+              WHITESPACE@33..34 " "
+              RBRACE@34..35 "}"
+    "#]],
+    );
+    check(
+        ".p {\n  @media screen\n  div { e: f }\n}\n",
+        expect![[r#"
+            SOURCE_FILE@0..38
+              RULE_SET@0..37
+                SELECTOR_LIST@0..2
+                  SELECTOR@0..2
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "p"
+                BLOCK@2..37
+                  WHITESPACE@2..3 " "
+                  LBRACE@3..4 "{"
+                  MEDIA_RULE@4..35
+                    WHITESPACE@4..7 "\n  "
+                    AT@7..8 "@"
+                    IDENT@8..13 "media"
+                    MEDIA_QUERY@13..26
+                      WHITESPACE@13..14 " "
+                      IDENT@14..20 "screen"
+                      WHITESPACE@20..23 "\n  "
+                      IDENT@23..26 "div"
+                    BLOCK@26..35
+                      WHITESPACE@26..27 " "
+                      LBRACE@27..28 "{"
+                      DECLARATION@28..33
+                        PROPERTY@28..30
+                          WHITESPACE@28..29 " "
+                          IDENT@29..30 "e"
+                        COLON@30..31 ":"
+                        VALUE@31..33
+                          VALUE@31..33
+                            WHITESPACE@31..32 " "
+                            IDENT@32..33 "f"
+                      WHITESPACE@33..34 " "
+                      RBRACE@34..35 "}"
+                  WHITESPACE@35..36 "\n"
+                  RBRACE@36..37 "}"
+              WHITESPACE@37..38 "\n"
+        "#]],
+    );
+}
+
+#[test]
+fn media_brace_group_then_stray_tokens_is_one_error() {
+    check(
+        "@media screen and (a {b}) c { .x { c: d } }",
+        expect![[r#"
+            SOURCE_FILE@0..43
+              MEDIA_RULE@0..43
+                AT@0..1 "@"
+                IDENT@1..6 "media"
+                MEDIA_QUERY@6..25
+                  WHITESPACE@6..7 " "
+                  IDENT@7..13 "screen"
+                  WHITESPACE@13..14 " "
+                  IDENT@14..17 "and"
+                  WHITESPACE@17..18 " "
+                  LPAREN@18..19 "("
+                  IDENT@19..20 "a"
+                  WHITESPACE@20..21 " "
+                  LBRACE@21..22 "{"
+                  IDENT@22..23 "b"
+                  RBRACE@23..24 "}"
+                  RPAREN@24..25 ")"
+                ERROR@25..27
+                  WHITESPACE@25..26 " "
+                  IDENT@26..27 "c"
+                BLOCK@27..43
+                  WHITESPACE@27..28 " "
+                  LBRACE@28..29 "{"
+                  RULE_SET@29..41
+                    SELECTOR_LIST@29..32
+                      SELECTOR@29..32
+                        SIMPLE_SELECTOR@29..32
+                          WHITESPACE@29..30 " "
+                          DOT@30..31 "."
+                          IDENT@31..32 "x"
+                    BLOCK@32..41
+                      WHITESPACE@32..33 " "
+                      LBRACE@33..34 "{"
+                      DECLARATION@34..39
+                        PROPERTY@34..36
+                          WHITESPACE@34..35 " "
+                          IDENT@35..36 "c"
+                        COLON@36..37 ":"
+                        VALUE@37..39
+                          VALUE@37..39
+                            WHITESPACE@37..38 " "
+                            IDENT@38..39 "d"
+                      WHITESPACE@39..40 " "
+                      RBRACE@40..41 "}"
+                  WHITESPACE@41..42 " "
+                  RBRACE@42..43 "}"
+            errors:
+              21..22: expected RPAREN
+        "#]],
+    );
+}
+
+#[test]
+fn media_stray_unclosed_string_before_the_block_is_one_error() {
+    check(
+        "@media screen and (a) \"x {\n .y { e: f }\n}\n",
+        expect![[r#"
+            SOURCE_FILE@0..42
+              MEDIA_RULE@0..41
+                AT@0..1 "@"
+                IDENT@1..6 "media"
+                MEDIA_QUERY@6..21
+                  WHITESPACE@6..7 " "
+                  IDENT@7..13 "screen"
+                  WHITESPACE@13..14 " "
+                  IDENT@14..17 "and"
+                  WHITESPACE@17..18 " "
+                  LPAREN@18..19 "("
+                  IDENT@19..20 "a"
+                  RPAREN@20..21 ")"
+                ERROR@21..26
+                  WHITESPACE@21..22 " "
+                  QUOTED_STRING@22..26 "\"x {"
+                BLOCK@26..41
+                  LBRACE@26..26 ""
+                  RULE_SET@26..39
+                    SELECTOR_LIST@26..30
+                      SELECTOR@26..30
+                        SIMPLE_SELECTOR@26..30
+                          WHITESPACE@26..28 "\n "
+                          DOT@28..29 "."
+                          IDENT@29..30 "y"
+                    BLOCK@30..39
+                      WHITESPACE@30..31 " "
+                      LBRACE@31..32 "{"
+                      DECLARATION@32..37
+                        PROPERTY@32..34
+                          WHITESPACE@32..33 " "
+                          IDENT@33..34 "e"
+                        COLON@34..35 ":"
+                        VALUE@35..37
+                          VALUE@35..37
+                            WHITESPACE@35..36 " "
+                            IDENT@36..37 "f"
+                      WHITESPACE@37..38 " "
+                      RBRACE@38..39 "}"
+                  WHITESPACE@39..40 "\n"
+                  RBRACE@40..41 "}"
+              WHITESPACE@41..42 "\n"
+            errors:
+              22..26: unterminated string
+        "#]],
+    );
+}
+
+#[test]
+fn supports_scan_tracks_braces_past_a_mismatched_closer() {
+    check(
+        ".z {\n  .q {\n    @supports (a: b) { c: d }\n    e: f(g }\n  @supports (h: \"i }\n  ) { j: k }\n}",
+        expect![[r#"
+            SOURCE_FILE@0..90
+              RULE_SET@0..90
+                SELECTOR_LIST@0..2
+                  SELECTOR@0..2
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "z"
+                BLOCK@2..90
+                  WHITESPACE@2..3 " "
+                  LBRACE@3..4 "{"
+                  RULE_SET@4..54
+                    SELECTOR_LIST@4..9
+                      SELECTOR@4..9
+                        SIMPLE_SELECTOR@4..9
+                          WHITESPACE@4..7 "\n  "
+                          DOT@7..8 "."
+                          IDENT@8..9 "q"
+                    BLOCK@9..54
+                      WHITESPACE@9..10 " "
+                      LBRACE@10..11 "{"
+                      SUPPORTS_RULE@11..41
+                        WHITESPACE@11..16 "\n    "
+                        AT@16..17 "@"
+                        IDENT@17..25 "supports"
+                        SUPPORTS_CONDITION@25..32
+                          WHITESPACE@25..26 " "
+                          LPAREN@26..27 "("
+                          IDENT@27..28 "a"
+                          COLON@28..29 ":"
+                          WHITESPACE@29..30 " "
+                          IDENT@30..31 "b"
+                          RPAREN@31..32 ")"
+                        BLOCK@32..41
+                          WHITESPACE@32..33 " "
+                          LBRACE@33..34 "{"
+                          DECLARATION@34..39
+                            PROPERTY@34..36
+                              WHITESPACE@34..35 " "
+                              IDENT@35..36 "c"
+                            COLON@36..37 ":"
+                            VALUE@37..39
+                              VALUE@37..39
+                                WHITESPACE@37..38 " "
+                                IDENT@38..39 "d"
+                          WHITESPACE@39..40 " "
+                          RBRACE@40..41 "}"
+                      DECLARATION@41..52
+                        PROPERTY@41..47
+                          WHITESPACE@41..46 "\n    "
+                          IDENT@46..47 "e"
+                        COLON@47..48 ":"
+                        VALUE@48..52
+                          FUNCTION_CALL@48..52
+                            WHITESPACE@48..49 " "
+                            IDENT@49..50 "f"
+                            ARG_LIST@50..52
+                              LPAREN@50..51 "("
+                              ARG@51..52
+                                VALUE@51..52
+                                  IDENT@51..52 "g"
+                      WHITESPACE@52..53 " "
+                      RBRACE@53..54 "}"
+                  SUPPORTS_RULE@54..88
+                    WHITESPACE@54..57 "\n  "
+                    AT@57..58 "@"
+                    IDENT@58..66 "supports"
+                    SUPPORTS_CONDITION@66..79
+                      WHITESPACE@66..67 " "
+                      LPAREN@67..68 "("
+                      IDENT@68..69 "h"
+                      COLON@69..70 ":"
+                      WHITESPACE@70..71 " "
+                      QUOTED_STRING@71..75 "\"i }"
+                      WHITESPACE@75..78 "\n  "
+                      RPAREN@78..79 ")"
+                    BLOCK@79..88
+                      WHITESPACE@79..80 " "
+                      LBRACE@80..81 "{"
+                      DECLARATION@81..86
+                        PROPERTY@81..83
+                          WHITESPACE@81..82 " "
+                          IDENT@82..83 "j"
+                        COLON@83..84 ":"
+                        VALUE@84..86
+                          VALUE@84..86
+                            WHITESPACE@84..85 " "
+                            IDENT@85..86 "k"
+                      WHITESPACE@86..87 " "
+                      RBRACE@87..88 "}"
+                  WHITESPACE@88..89 "\n"
+                  RBRACE@89..90 "}"
+            errors:
+              53..54: expected RPAREN
+              71..75: unterminated string
+        "#]],
     );
 }
 
