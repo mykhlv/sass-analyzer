@@ -76,6 +76,9 @@ pub struct Parser<'src> {
     open_strings: Vec<TextSize>,
     /// In the braced layout, where each `{` and `#{` not yet closed starts, innermost last.
     open_braces: Vec<TextSize>,
+    /// For [`Parser::bracket_closes_in_kind`]: the token it first read from, and the
+    /// openers from there on that do not close in kind, in order.
+    unclosed_in_kind: Option<(usize, Vec<u32>)>,
 }
 
 impl<'src> Parser<'src> {
@@ -107,6 +110,7 @@ impl<'src> Parser<'src> {
             unclosed_string_tail: StringTail::Plain,
             open_strings: Vec::new(),
             open_braces: Vec::new(),
+            unclosed_in_kind: None,
         };
         if layout == Layout::Indented {
             parser.find_line_start(0);
@@ -164,6 +168,77 @@ impl<'src> Parser<'src> {
     #[inline]
     pub fn at_virtual(&self) -> bool {
         self.pos >= self.fence.index && self.fence.kind != SyntaxKind::EOF
+    }
+
+    /// Whether the bracket at the cursor closes in kind: read on from it, its own closer
+    /// comes before any closer of another kind, every bracket opened in between closing in
+    /// kind too, and before the end of input. Braced layout only: the indented one lexes
+    /// some lines again as it goes.
+    ///
+    /// Read once from the first bracket asked about: every bracket still open when a
+    /// closer of another kind comes, or when the input ends, is one that does not close,
+    /// whichever bracket the reading started at, so later ones are looked up.
+    pub fn bracket_closes_in_kind(&mut self) -> bool {
+        debug_assert_eq!(
+            self.layout,
+            Layout::Braced,
+            "tokens may change when indented"
+        );
+        debug_assert!(
+            matches!(
+                self.current(),
+                SyntaxKind::LPAREN
+                    | SyntaxKind::LBRACKET
+                    | SyntaxKind::LBRACE
+                    | SyntaxKind::HASH_LBRACE
+            ),
+            "not at a bracket",
+        );
+        let pos = self.pos;
+        let fresh = matches!(self.unclosed_in_kind, Some((start, _)) if start <= pos);
+        if !fresh {
+            self.unclosed_in_kind = Some((pos, self.openers_not_closing_in_kind(pos)));
+        }
+        let Some((_, unclosed)) = &self.unclosed_in_kind else {
+            return false;
+        };
+        u32::try_from(pos).is_ok_and(|pos| unclosed.binary_search(&pos).is_err())
+    }
+
+    fn openers_not_closing_in_kind(&self, from: usize) -> Vec<u32> {
+        let mut open: Vec<(u32, SyntaxKind)> = Vec::new();
+        let mut unclosed = Vec::new();
+        for index in from..self.input.len() {
+            #[allow(clippy::cast_possible_truncation)]
+            let token = index as u32;
+            let closer = match self.input.kind(index) {
+                SyntaxKind::LPAREN => Some(SyntaxKind::RPAREN),
+                SyntaxKind::LBRACKET => Some(SyntaxKind::RBRACKET),
+                SyntaxKind::LBRACE | SyntaxKind::HASH_LBRACE => Some(SyntaxKind::RBRACE),
+                _ => None,
+            };
+            if let Some(closer) = closer {
+                open.push((token, closer));
+                continue;
+            }
+            let kind = self.input.kind(index);
+            if !matches!(
+                kind,
+                SyntaxKind::RPAREN | SyntaxKind::RBRACKET | SyntaxKind::RBRACE
+            ) {
+                continue;
+            }
+            match open.last() {
+                Some(&(_, closer)) if closer == kind => {
+                    open.pop();
+                }
+                Some(_) => unclosed.extend(open.drain(..).map(|(token, _)| token)),
+                // A closer of nothing: no bracket is open to see it.
+                None => {}
+            }
+        }
+        unclosed.extend(open.into_iter().map(|(token, _)| token));
+        unclosed
     }
 
     /// Whether blocks and statements are delimited by real tokens only. In the indented

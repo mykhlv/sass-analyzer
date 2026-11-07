@@ -46,12 +46,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `@container` or `@scope`, as in `@media (a`, is reported as "expected RPAREN" and ends
   at the next `{` or `}`, as in Dart Sass, or in indented Sass as an unclosed selector
   bracket does. It used to swallow every rule after it into the prelude without a
-  diagnostic, even when a `)` further down the file seemed to close it. Balanced braces
-  inside a condition's parentheses stay part of it when the `)` follows them, as in
-  `@supports (a {b})`. In `@-moz-document` and `@document`, an unquoted
-  `url-prefix(…)` argument, and `domain(…)` in `@-moz-document`, is read as a URL like
-  `url(…)`, so the `//` in `url-prefix(http://…)` no longer starts a comment that hid the
-  `)` and the rest of its line
+  diagnostic, even when a `)` further down the file seemed to close it. Braces inside a
+  condition's parentheses stay part of it when the parentheses close and every bracket
+  inside them closes in kind, as in `@supports (a {b})` or `@supports (a {b} or (c))`.
+  In `@-moz-document` and `@document`, an unquoted `url-prefix(…)` argument, and
+  `domain(…)` in `@-moz-document`, is read as a URL like `url(…)`, so the `//` in
+  `url-prefix(http://…)` no longer starts a comment that hid the `)` and the rest of its
+  line
 - Parser: a nested `name:value` statement holding something only a selector can, as in
   `div:hover .x` or `a:not(.b)`, is read as a rule missing its `{`, as Dart Sass reads it.
   The first was silently accepted as a declaration, and the second reported two

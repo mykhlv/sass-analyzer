@@ -1139,6 +1139,177 @@ fn a_closer_of_another_kind_ends_a_media_query_at_its_line() {
     );
 }
 
+/// The look ahead at a `{` in a condition stops at the zero-width tokens the layout puts
+/// after the `]` that the lexer took for the `(`'s closer: reading on past them, it would
+/// see the same token forever.
+#[test]
+fn a_brace_in_a_condition_with_a_layout_token_after_it_ends() {
+    check(
+        "@supports (a] {b\n  .x\n    y: z\n",
+        expect![[r#"
+        SOURCE_FILE@0..31
+          SUPPORTS_RULE@0..30
+            AT@0..1 "@"
+            IDENT@1..9 "supports"
+            SUPPORTS_CONDITION@9..16
+              WHITESPACE@9..10 " "
+              LPAREN@10..11 "("
+              IDENT@11..12 "a"
+              RBRACKET@12..13 "]"
+              WHITESPACE@13..14 " "
+              LBRACE@14..15 "{"
+              IDENT@15..16 "b"
+            BLOCK@16..30
+              LBRACE@16..16 ""
+              RULE_SET@16..30
+                SELECTOR_LIST@16..21
+                  SELECTOR@16..21
+                    SIMPLE_SELECTOR@16..21
+                      WHITESPACE@16..19 "\n  "
+                      DOT@19..20 "."
+                      IDENT@20..21 "x"
+                BLOCK@21..30
+                  LBRACE@21..21 ""
+                  DECLARATION@21..30
+                    PROPERTY@21..27
+                      WHITESPACE@21..26 "\n    "
+                      IDENT@26..27 "y"
+                    COLON@27..28 ":"
+                    VALUE@28..30
+                      VALUE@28..30
+                        WHITESPACE@28..29 " "
+                        IDENT@29..30 "z"
+                    SEMICOLON@30..30 ""
+                  RBRACE@30..30 ""
+              RBRACE@30..30 ""
+          WHITESPACE@30..31 "\n"
+        error 16..16: expected RPAREN
+    "#]],
+    );
+}
+
+/// Known limitation: Dart Sass reads this selector across its lines, but `.c:not(.d)` is
+/// indented no deeper than the `(` it continues and has a deeper line below it, so it
+/// reads as the selector of a rule of its own, and the `(` as unclosed. Which lines
+/// continue a bracket is decided from the layout alone, erring on the side of valid
+/// code elsewhere.
+#[test]
+fn a_bracket_continued_by_a_line_with_a_deeper_one_below_is_cut() {
+    check(
+        ".a:not(.b\n.c:not(.d)\n  .e)\n  color: red\n",
+        expect![[r#"
+        SOURCE_FILE@0..40
+          RULE_SET@0..9
+            SELECTOR_LIST@0..9
+              SELECTOR@0..9
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+                PSEUDO_SELECTOR@2..9
+                  COLON@2..3 ":"
+                  IDENT@3..6 "not"
+                  LPAREN@6..7 "("
+                  DOT@7..8 "."
+                  IDENT@8..9 "b"
+          SEMICOLON@9..9 ""
+          RULE_SET@9..39
+            SELECTOR_LIST@9..20
+              SELECTOR@9..20
+                SIMPLE_SELECTOR@9..12
+                  WHITESPACE@9..10 "\n"
+                  DOT@10..11 "."
+                  IDENT@11..12 "c"
+                PSEUDO_SELECTOR@12..20
+                  COLON@12..13 ":"
+                  IDENT@13..16 "not"
+                  LPAREN@16..17 "("
+                  DOT@17..18 "."
+                  IDENT@18..19 "d"
+                  RPAREN@19..20 ")"
+            BLOCK@20..39
+              LBRACE@20..20 ""
+              RULE_SET@20..25
+                SELECTOR_LIST@20..25
+                  SELECTOR@20..25
+                    SIMPLE_SELECTOR@20..25
+                      WHITESPACE@20..23 "\n  "
+                      DOT@23..24 "."
+                      IDENT@24..25 "e"
+              ERROR@25..26
+                RPAREN@25..26 ")"
+              SEMICOLON@26..26 ""
+              DECLARATION@26..39
+                PROPERTY@26..34
+                  WHITESPACE@26..29 "\n  "
+                  IDENT@29..34 "color"
+                COLON@34..35 ":"
+                VALUE@35..39
+                  VALUE@35..39
+                    WHITESPACE@35..36 " "
+                    IDENT@36..39 "red"
+                SEMICOLON@39..39 ""
+              RBRACE@39..39 ""
+          WHITESPACE@39..40 "\n"
+        error 9..9: expected RPAREN
+        error 25..26: expected declaration or nested rule
+    "#]],
+    );
+}
+
+/// Known limitation: the `)` in the block below closes the `(`, so nothing is reported,
+/// where Dart Sass rejects `.b` as a media feature. Only the contents tell this from a
+/// selector laid out over lines, and they are not read.
+#[test]
+fn a_closer_in_the_block_below_closes_an_unclosed_bracket() {
+    check(
+        "@media (a\n  .b\n    f: g(h))\n.x\n  y: z\n",
+        expect![[r#"
+        SOURCE_FILE@0..38
+          MEDIA_RULE@0..27
+            AT@0..1 "@"
+            IDENT@1..6 "media"
+            MEDIA_QUERY@6..27
+              WHITESPACE@6..7 " "
+              LPAREN@7..8 "("
+              IDENT@8..9 "a"
+              WHITESPACE@9..12 "\n  "
+              DOT@12..13 "."
+              IDENT@13..14 "b"
+              WHITESPACE@14..19 "\n    "
+              IDENT@19..20 "f"
+              COLON@20..21 ":"
+              WHITESPACE@21..22 " "
+              IDENT@22..23 "g"
+              LPAREN@23..24 "("
+              IDENT@24..25 "h"
+              RPAREN@25..26 ")"
+              RPAREN@26..27 ")"
+          SEMICOLON@27..27 ""
+          RULE_SET@27..37
+            SELECTOR_LIST@27..30
+              SELECTOR@27..30
+                SIMPLE_SELECTOR@27..30
+                  WHITESPACE@27..28 "\n"
+                  DOT@28..29 "."
+                  IDENT@29..30 "x"
+            BLOCK@30..37
+              LBRACE@30..30 ""
+              DECLARATION@30..37
+                PROPERTY@30..34
+                  WHITESPACE@30..33 "\n  "
+                  IDENT@33..34 "y"
+                COLON@34..35 ":"
+                VALUE@35..37
+                  VALUE@35..37
+                    WHITESPACE@35..36 " "
+                    IDENT@36..37 "z"
+                SEMICOLON@37..37 ""
+              RBRACE@37..37 ""
+          WHITESPACE@37..38 "\n"
+    "#]],
+    );
+}
+
 #[test]
 fn a_stray_closer_of_another_kind_below_does_not_keep_a_bracket_open() {
     check(

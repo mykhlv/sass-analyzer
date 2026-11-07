@@ -1321,6 +1321,292 @@ fn nested_condition_unclosed_paren_spares_the_rule_below() {
 }
 
 #[test]
+fn supports_brace_group_before_a_nested_condition() {
+    check(
+        "@supports (a {b} or (c {d})) { .x { y: z } }",
+        expect![[r#"
+        SOURCE_FILE@0..44
+          SUPPORTS_RULE@0..44
+            AT@0..1 "@"
+            IDENT@1..9 "supports"
+            SUPPORTS_CONDITION@9..28
+              WHITESPACE@9..10 " "
+              LPAREN@10..11 "("
+              IDENT@11..12 "a"
+              WHITESPACE@12..13 " "
+              LBRACE@13..14 "{"
+              IDENT@14..15 "b"
+              RBRACE@15..16 "}"
+              WHITESPACE@16..17 " "
+              IDENT@17..19 "or"
+              WHITESPACE@19..20 " "
+              LPAREN@20..21 "("
+              IDENT@21..22 "c"
+              WHITESPACE@22..23 " "
+              LBRACE@23..24 "{"
+              IDENT@24..25 "d"
+              RBRACE@25..26 "}"
+              RPAREN@26..27 ")"
+              RPAREN@27..28 ")"
+            BLOCK@28..44
+              WHITESPACE@28..29 " "
+              LBRACE@29..30 "{"
+              RULE_SET@30..42
+                SELECTOR_LIST@30..33
+                  SELECTOR@30..33
+                    SIMPLE_SELECTOR@30..33
+                      WHITESPACE@30..31 " "
+                      DOT@31..32 "."
+                      IDENT@32..33 "x"
+                BLOCK@33..42
+                  WHITESPACE@33..34 " "
+                  LBRACE@34..35 "{"
+                  DECLARATION@35..40
+                    PROPERTY@35..37
+                      WHITESPACE@35..36 " "
+                      IDENT@36..37 "y"
+                    COLON@37..38 ":"
+                    VALUE@38..40
+                      VALUE@38..40
+                        WHITESPACE@38..39 " "
+                        IDENT@39..40 "z"
+                  WHITESPACE@40..41 " "
+                  RBRACE@41..42 "}"
+              WHITESPACE@42..43 " "
+              RBRACE@43..44 "}"
+    "#]],
+    );
+}
+
+#[test]
+fn supports_brace_group_before_a_semicolon() {
+    check(
+        "@supports (a {b} ; c) { .x { y: z } }",
+        expect![[r#"
+        SOURCE_FILE@0..37
+          SUPPORTS_RULE@0..37
+            AT@0..1 "@"
+            IDENT@1..9 "supports"
+            SUPPORTS_CONDITION@9..21
+              WHITESPACE@9..10 " "
+              LPAREN@10..11 "("
+              IDENT@11..12 "a"
+              WHITESPACE@12..13 " "
+              LBRACE@13..14 "{"
+              IDENT@14..15 "b"
+              RBRACE@15..16 "}"
+              WHITESPACE@16..17 " "
+              SEMICOLON@17..18 ";"
+              WHITESPACE@18..19 " "
+              IDENT@19..20 "c"
+              RPAREN@20..21 ")"
+            BLOCK@21..37
+              WHITESPACE@21..22 " "
+              LBRACE@22..23 "{"
+              RULE_SET@23..35
+                SELECTOR_LIST@23..26
+                  SELECTOR@23..26
+                    SIMPLE_SELECTOR@23..26
+                      WHITESPACE@23..24 " "
+                      DOT@24..25 "."
+                      IDENT@25..26 "x"
+                BLOCK@26..35
+                  WHITESPACE@26..27 " "
+                  LBRACE@27..28 "{"
+                  DECLARATION@28..33
+                    PROPERTY@28..30
+                      WHITESPACE@28..29 " "
+                      IDENT@29..30 "y"
+                    COLON@30..31 ":"
+                    VALUE@31..33
+                      VALUE@31..33
+                        WHITESPACE@31..32 " "
+                        IDENT@32..33 "z"
+                  WHITESPACE@33..34 " "
+                  RBRACE@34..35 "}"
+              WHITESPACE@35..36 " "
+              RBRACE@36..37 "}"
+    "#]],
+    );
+}
+
+#[test]
+fn supports_brace_groups_one_after_another() {
+    check(
+        "@supports (a {b} {c}) { .x { y: z } }",
+        expect![[r#"
+        SOURCE_FILE@0..37
+          SUPPORTS_RULE@0..37
+            AT@0..1 "@"
+            IDENT@1..9 "supports"
+            SUPPORTS_CONDITION@9..21
+              WHITESPACE@9..10 " "
+              LPAREN@10..11 "("
+              IDENT@11..12 "a"
+              WHITESPACE@12..13 " "
+              LBRACE@13..14 "{"
+              IDENT@14..15 "b"
+              RBRACE@15..16 "}"
+              WHITESPACE@16..17 " "
+              LBRACE@17..18 "{"
+              IDENT@18..19 "c"
+              RBRACE@19..20 "}"
+              RPAREN@20..21 ")"
+            BLOCK@21..37
+              WHITESPACE@21..22 " "
+              LBRACE@22..23 "{"
+              RULE_SET@23..35
+                SELECTOR_LIST@23..26
+                  SELECTOR@23..26
+                    SIMPLE_SELECTOR@23..26
+                      WHITESPACE@23..24 " "
+                      DOT@24..25 "."
+                      IDENT@25..26 "x"
+                BLOCK@26..35
+                  WHITESPACE@26..27 " "
+                  LBRACE@27..28 "{"
+                  DECLARATION@28..33
+                    PROPERTY@28..30
+                      WHITESPACE@28..29 " "
+                      IDENT@29..30 "y"
+                    COLON@30..31 ":"
+                    VALUE@31..33
+                      VALUE@31..33
+                        WHITESPACE@31..32 " "
+                        IDENT@32..33 "z"
+                  WHITESPACE@33..34 " "
+                  RBRACE@34..35 "}"
+              WHITESPACE@35..36 " "
+              RBRACE@36..37 "}"
+    "#]],
+    );
+    check(
+        "@supports (a {b}{c}) { .x { y: z } }",
+        expect![[r#"
+        SOURCE_FILE@0..36
+          SUPPORTS_RULE@0..36
+            AT@0..1 "@"
+            IDENT@1..9 "supports"
+            SUPPORTS_CONDITION@9..20
+              WHITESPACE@9..10 " "
+              LPAREN@10..11 "("
+              IDENT@11..12 "a"
+              WHITESPACE@12..13 " "
+              LBRACE@13..14 "{"
+              IDENT@14..15 "b"
+              RBRACE@15..16 "}"
+              LBRACE@16..17 "{"
+              IDENT@17..18 "c"
+              RBRACE@18..19 "}"
+              RPAREN@19..20 ")"
+            BLOCK@20..36
+              WHITESPACE@20..21 " "
+              LBRACE@21..22 "{"
+              RULE_SET@22..34
+                SELECTOR_LIST@22..25
+                  SELECTOR@22..25
+                    SIMPLE_SELECTOR@22..25
+                      WHITESPACE@22..23 " "
+                      DOT@23..24 "."
+                      IDENT@24..25 "x"
+                BLOCK@25..34
+                  WHITESPACE@25..26 " "
+                  LBRACE@26..27 "{"
+                  DECLARATION@27..32
+                    PROPERTY@27..29
+                      WHITESPACE@27..28 " "
+                      IDENT@28..29 "y"
+                    COLON@29..30 ":"
+                    VALUE@30..32
+                      VALUE@30..32
+                        WHITESPACE@30..31 " "
+                        IDENT@31..32 "z"
+                  WHITESPACE@32..33 " "
+                  RBRACE@33..34 "}"
+              WHITESPACE@34..35 " "
+              RBRACE@35..36 "}"
+    "#]],
+    );
+}
+
+#[test]
+fn supports_brace_group_in_a_nested_condition() {
+    check(
+        "@supports (x) and ((a {b}) or (c; d)) { .x { y: z } }",
+        expect![[r#"
+        SOURCE_FILE@0..53
+          SUPPORTS_RULE@0..53
+            AT@0..1 "@"
+            IDENT@1..9 "supports"
+            SUPPORTS_CONDITION@9..37
+              WHITESPACE@9..10 " "
+              LPAREN@10..11 "("
+              IDENT@11..12 "x"
+              RPAREN@12..13 ")"
+              WHITESPACE@13..14 " "
+              IDENT@14..17 "and"
+              WHITESPACE@17..18 " "
+              LPAREN@18..19 "("
+              LPAREN@19..20 "("
+              IDENT@20..21 "a"
+              WHITESPACE@21..22 " "
+              LBRACE@22..23 "{"
+              IDENT@23..24 "b"
+              RBRACE@24..25 "}"
+              RPAREN@25..26 ")"
+              WHITESPACE@26..27 " "
+              IDENT@27..29 "or"
+              WHITESPACE@29..30 " "
+              LPAREN@30..31 "("
+              IDENT@31..32 "c"
+              SEMICOLON@32..33 ";"
+              WHITESPACE@33..34 " "
+              IDENT@34..35 "d"
+              RPAREN@35..36 ")"
+              RPAREN@36..37 ")"
+            BLOCK@37..53
+              WHITESPACE@37..38 " "
+              LBRACE@38..39 "{"
+              RULE_SET@39..51
+                SELECTOR_LIST@39..42
+                  SELECTOR@39..42
+                    SIMPLE_SELECTOR@39..42
+                      WHITESPACE@39..40 " "
+                      DOT@40..41 "."
+                      IDENT@41..42 "x"
+                BLOCK@42..51
+                  WHITESPACE@42..43 " "
+                  LBRACE@43..44 "{"
+                  DECLARATION@44..49
+                    PROPERTY@44..46
+                      WHITESPACE@44..45 " "
+                      IDENT@45..46 "y"
+                    COLON@46..47 ":"
+                    VALUE@47..49
+                      VALUE@47..49
+                        WHITESPACE@47..48 " "
+                        IDENT@48..49 "z"
+                  WHITESPACE@49..50 " "
+                  RBRACE@50..51 "}"
+              WHITESPACE@51..52 " "
+              RBRACE@52..53 "}"
+    "#]],
+    );
+}
+
+#[test]
+fn many_unclosed_condition_parens_stay_proportional() {
+    let source = "@media (a\n.x { b: c }\n".repeat(2_000);
+    let (green, errors) = sass_parser::parse_scss(&source);
+    assert_eq!(SyntaxNode::new_root(green).text().to_string(), source);
+    assert_eq!(errors.len(), 2_000);
+    assert!(
+        errors.iter().all(|(m, _)| m == "expected RPAREN"),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn supports_balanced_braces_in_parens_stay_part_of_them() {
     check(
         "@supports (a {b} c) { d: e }",

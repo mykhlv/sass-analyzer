@@ -42,7 +42,8 @@ pub struct HeaderLines {
 }
 
 /// How many lines [`Parser::bracket_left_unclosed`] reads at most: far beyond any
-/// selector argument or at-rule prelude laid out over lines.
+/// selector argument or at-rule prelude laid out over lines. Every line counts, those of
+/// the block below the bracket's line included.
 const UNCLOSED_LOOKAHEAD_LINES: u32 = 256;
 
 /// How far [`Parser::joined`] reads past the cursor at most, in tokens: beyond any
@@ -837,7 +838,7 @@ impl<'src> Parser<'src> {
         };
         debug_assert_eq!(pos, self.pos, "the bracket is entered at its opening token");
         debug_assert_eq!(self.input.kind(pos), open, "the bracket opens with `open`");
-        if sync.is_some() || !self.bracket_left_unclosed(pos, column, close) {
+        if sync.is_some() || !self.bracket_left_unclosed(pos, column, open, close) {
             return;
         }
         let sync = self.line_at_or_before_column(pos + 1, column);
@@ -856,8 +857,13 @@ impl<'src> Parser<'src> {
     /// such a header is its block, which no selector or prelude takes in. Brackets are
     /// matched by kind: `open` nests, any other closer is content. The search gives up
     /// after `UNCLOSED_LOOKAHEAD_LINES` lines with the bracket still open, as unclosed.
-    fn bracket_left_unclosed(&self, pos: usize, column: u32, close: SyntaxKind) -> bool {
-        let open = self.input.kind(pos);
+    fn bracket_left_unclosed(
+        &self,
+        pos: usize,
+        column: u32,
+        open: SyntaxKind,
+        close: SyntaxKind,
+    ) -> bool {
         let mut depth = 1u32;
         let mut lines = 0;
         // The indentation of the line being read, if it may head a block.
