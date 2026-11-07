@@ -21,10 +21,6 @@ pub enum Layout {
     /// does not absorb ends the statement before it, and its indentation opens or
     /// closes blocks: the parser reads those as zero-width `;`, `{` and `}`.
     Indented,
-    /// Indented Sass that the legacy lexer has already laid out: its line breaks and
-    /// indentation are zero-width `;`, `{` and `}` in the input. Delimited by tokens as
-    /// when braced, but a rule may still end without a block.
-    LegacyIndented,
 }
 
 /// The first position at or after the cursor where the token stream stops being the
@@ -464,7 +460,7 @@ impl<'src> Parser<'src> {
     /// The fence ahead of the cursor, from the layout's state.
     fn locate_fence(&mut self) -> Fence {
         match self.layout {
-            Layout::Braced | Layout::LegacyIndented => eof_fence(&self.input),
+            Layout::Braced => eof_fence(&self.input),
             Layout::Indented => self.locate_indented(),
         }
     }
@@ -801,12 +797,10 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
-
     use super::Parser;
     use crate::event::Event;
     use crate::input::Input;
-    use crate::syntax_kind::SyntaxKind::{self, DOT, EOF, IDENT, LBRACE, SOURCE_FILE};
+    use crate::syntax_kind::SyntaxKind::{DOT, EOF, IDENT, LBRACE};
 
     #[test]
     fn lookahead_reads_the_fence_kind_from_the_fence_on() {
@@ -967,133 +961,5 @@ mod tests {
         }
         assert_eq!(p.transparent, 0);
         assert!(p.at(IDENT));
-    }
-
-    /// Replays the legacy indented token stream through two parsers in lockstep: one
-    /// over legacy's input, zero-width tokens and all, and one over the same input without
-    /// them, where each becomes a fence. Everything the grammar can observe must agree:
-    /// kinds, text and whitespace adjacency at and before each token, error ranges, and
-    /// the final tree.
-    #[track_caller]
-    fn replay(source: &str) {
-        let tokens = crate::sass_lexer::sass_tokenize(source);
-        let legacy_input = Input::from_tokens(&tokens);
-        let real: Vec<_> = tokens
-            .iter()
-            .copied()
-            .filter(|(_, t)| !t.is_empty())
-            .collect();
-        let input = Input::from_tokens(&real);
-
-        let is_virtual: Vec<bool> = (0..legacy_input.len())
-            .map(|i| legacy_input.range(i).is_empty())
-            .collect();
-        let mut fences = VecDeque::new();
-        let mut real_pos = 0;
-        for (i, &virt) in is_virtual.iter().enumerate() {
-            if virt {
-                #[allow(clippy::cast_possible_truncation)]
-                let trivia = legacy_input.trivia_start_index(i + 1) as u32;
-                fences.push_back((real_pos, legacy_input.kind(i), trivia));
-            } else {
-                real_pos += 1;
-            }
-        }
-        assert!(!fences.is_empty(), "{source:?} has no zero-width tokens");
-
-        let mut legacy = Parser::new(legacy_input, source);
-        let mut p = Parser::new(input, source);
-        let legacy_file = legacy.start();
-        let file = p.start();
-        let set_next_fence = |p: &mut Parser<'_>, fences: &VecDeque<(usize, SyntaxKind, u32)>| {
-            if let Some(&(index, kind, trivia)) = fences.front() {
-                p.set_fence(index, kind, trivia);
-            }
-        };
-        set_next_fence(&mut p, &fences);
-
-        let mut at = 0;
-        while !legacy.at_end() {
-            let here = format!("{source:?} at legacy token {at}");
-            assert_eq!(p.current(), legacy.current(), "{here}");
-            assert_eq!(p.current_text(), legacy.current_text(), "{here}");
-            assert!(!p.at_end(), "{here}");
-            assert_eq!(
-                p.has_whitespace_before(),
-                legacy.has_whitespace_before(),
-                "{here}: has_whitespace_before"
-            );
-            // Lookahead agrees up to and including the first virtual token ahead.
-            for k in 1..4 {
-                if is_virtual[at..(at + k).min(is_virtual.len())].contains(&true) {
-                    break;
-                }
-                assert_eq!(p.nth(k), legacy.nth(k), "{here}: nth({k})");
-                assert_eq!(p.nth_text(k), legacy.nth_text(k), "{here}: nth_text({k})");
-                assert_eq!(
-                    p.nth_has_whitespace_before(k),
-                    legacy.nth_has_whitespace_before(k),
-                    "{here}: nth_has_whitespace_before({k})"
-                );
-            }
-            legacy.error("here");
-            p.error("here");
-
-            legacy.bump();
-            p.bump();
-            if is_virtual[at] {
-                fences.pop_front();
-                set_next_fence(&mut p, &fences);
-            }
-            at += 1;
-        }
-        assert!(p.at_end());
-        assert!(!p.has_whitespace_before());
-        legacy.error("end");
-        p.error("end");
-        let _ = legacy_file.complete(&mut legacy, SOURCE_FILE);
-        let _ = file.complete(&mut p, SOURCE_FILE);
-
-        // The same events, error ranges included, with legacy's zero-width tokens in
-        // the form the bridge is shown to place identically.
-        let (events, _, _, _) = p.finish();
-        let (legacy_events, _, legacy_input, _) = legacy.finish();
-        let mut legacy_pos = 0;
-        let expected: Vec<Event> = legacy_events
-            .into_iter()
-            .map(|event| match event {
-                Event::Token { kind, range } => {
-                    legacy_pos += 1;
-                    if range.is_empty() {
-                        #[allow(clippy::cast_possible_truncation)]
-                        let trivia = legacy_input.trivia_start_index(legacy_pos) as u32;
-                        Event::Virtual { kind, trivia }
-                    } else {
-                        event
-                    }
-                }
-                other => other,
-            })
-            .collect();
-        assert_eq!(events, expected, "{source:?}");
-    }
-
-    #[test]
-    fn virtual_tokens_replay_legacy() {
-        for source in [
-            ".a\n  b: c\n",
-            ".a // c\n  b: c\n",
-            ".a\n  b: c // d",
-            ".a\n  .b\n    c: d\n.e\n  f: g",
-            "@mixin m\n  // c\n.a\n  b: c\n",
-            "@if $a\n  // c\n\n  b: c\n",
-            "@media screen\n  /* c */\n.a\n  b: c\n",
-            ".a\n  @extend .b\n    .c\n",
-            "=m\n  b: c\n.a\n  +m\n",
-            ".a\r\n  b: c\r\n\r\n.d\r\n  e: f\r\n",
-            "  \n.a\n  b: c\n    \n",
-        ] {
-            replay(source);
-        }
     }
 }

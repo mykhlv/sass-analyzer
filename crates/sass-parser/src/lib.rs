@@ -67,9 +67,6 @@ pub mod token_set;
 mod bridge;
 pub use bridge::build_tree;
 
-#[doc(hidden)]
-pub mod sass_lexer;
-
 use text_range::TextRange;
 
 /// Parse SCSS source into a rowan green tree + diagnostics.
@@ -90,19 +87,6 @@ pub fn parse_scss(source: &str) -> (rowan::GreenNode, Vec<(String, TextRange)>) 
 pub fn parse_sass(source: &str) -> (rowan::GreenNode, Vec<(String, TextRange)>) {
     let input = input::Input::from_source_indented(source);
     let mut parser = parser::Parser::with_layout(input, source, parser::Layout::Indented);
-    grammar::source_file(&mut parser);
-    let (events, errors, input, src) = parser.finish();
-    build_tree(events, &errors, &input, src)
-}
-
-/// The previous indented-Sass pipeline, built on [`sass_lexer::sass_tokenize()`]'s
-/// virtual tokens. Kept as the reference that a differential test compares
-/// [`parse_sass()`] against until it is deleted. Not part of the supported API.
-#[doc(hidden)]
-pub fn parse_sass_legacy(source: &str) -> (rowan::GreenNode, Vec<(String, TextRange)>) {
-    let tokens = sass_lexer::sass_tokenize(source);
-    let input = input::Input::from_tokens(&tokens);
-    let mut parser = parser::Parser::with_layout(input, source, parser::Layout::LegacyIndented);
     grammar::source_file(&mut parser);
     let (events, errors, input, src) = parser.finish();
     build_tree(events, &errors, &input, src)

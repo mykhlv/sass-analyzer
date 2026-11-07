@@ -1,10 +1,9 @@
-//! The inputs on which `parse_sass` may differ from `parse_sass_legacy`, each a
-//! known defect of the legacy indented frontend, with the tree the layout frontend gives
-//! instead. Any other difference is a regression of the layout frontend.
+//! Defects of the indented-Sass frontend that the parser-driven layout fixed, each pinned
+//! to the tree it gives now. The former frontend decided statement boundaries in the
+//! lexer; every entry is an input on which it went wrong.
 //!
-//! An entry lists one defect, by what goes wrong in legacy, and the result checked
-//! against Dart Sass 1.105.1. Entries whose defect legacy has since been fixed stay as
-//! pins: there both frontends agree, and on the target.
+//! An entry lists one defect, by what went wrong, and the result checked against Dart
+//! Sass 1.105.1.
 //!
 //! Included with `#[path]` by the test binaries that run it, rather than through
 //! `common/mod.rs`, so that binaries which do not are not left with dead code.
@@ -13,23 +12,23 @@ use expect_test::{Expect, expect};
 
 // Each test binary reads only the fields it reports on.
 #[allow(dead_code)]
-pub struct Allowed {
+pub struct Fix {
     pub input: &'static str,
-    /// What legacy does wrong here, and what the layout frontend does instead.
+    /// What went wrong here, and what the parser does instead.
     pub change: &'static str,
     /// `parse_sass`'s tree and errors.
     pub expected: Expect,
 }
 
 /// The entry for `source`, if it is on the list.
-pub fn allowed(source: &str) -> Option<Allowed> {
-    allow_list().into_iter().find(|entry| entry.input == source)
+pub fn fix_for(source: &str) -> Option<Fix> {
+    fixes().into_iter().find(|entry| entry.input == source)
 }
 
 #[allow(clippy::too_many_lines)]
-pub fn allow_list() -> Vec<Allowed> {
+pub fn fixes() -> Vec<Fix> {
     vec![
-        Allowed {
+        Fix {
             input: ".a:hover > *\n  color: red\n",
             change: "a trailing universal selector after a pseudo-class used to read as \
                      multiplication and take the declaration below into the selector; both \
@@ -67,7 +66,7 @@ pub fn allow_list() -> Vec<Allowed> {
                   WHITESPACE@25..26 "\n"
             "#]],
         },
-        Allowed {
+        Fix {
             input: ".a:focus,\n.b *\n  c: d\n",
             change: "a pseudo-class on an earlier line of the selector list used to turn \
                      a trailing `*` into an operator; both frontends now give the rule its \
@@ -108,7 +107,7 @@ pub fn allow_list() -> Vec<Allowed> {
                   WHITESPACE@21..22 "\n"
             "#]],
         },
-        Allowed {
+        Fix {
             input: ".a:hover .not\n  b: c\n",
             change: "`not` ending a selector after a pseudo-class used to continue the line \
                      as a boolean operator; both frontends now give the rule its \
@@ -144,7 +143,7 @@ pub fn allow_list() -> Vec<Allowed> {
                   WHITESPACE@20..21 "\n"
             "#]],
         },
-        Allowed {
+        Fix {
             input: ".a\n  content: not\n  b: c\n",
             change: "legacy continues the line after a value ending in `not` and silently \
                      takes `b: c` into it; the layout frontend goes on after `not` only \
@@ -185,7 +184,7 @@ pub fn allow_list() -> Vec<Allowed> {
                   WHITESPACE@24..25 "\n"
             "#]],
         },
-        Allowed {
+        Fix {
             input: ".a\n  b: c and\n    d: e\n",
             change: "legacy continues the line after a value ending in `and` and silently \
                      takes `d: e` into it; the layout frontend goes on after `and` or `or` \
@@ -231,7 +230,7 @@ pub fn allow_list() -> Vec<Allowed> {
                   WHITESPACE@22..23 "\n"
             "#]],
         },
-        Allowed {
+        Fix {
             input: ".a\n  b: c or\n  d: e\n",
             change: "legacy continues the line after a value ending in `or` and silently \
                      takes `d: e` into it; the layout frontend ends the declaration there, \
@@ -274,7 +273,7 @@ pub fn allow_list() -> Vec<Allowed> {
                   WHITESPACE@19..20 "\n"
             "#]],
         },
-        Allowed {
+        Fix {
             input: ".a\n  content: and\n  b: c\n",
             change: "legacy continues the line after any value ending in `and` and silently \
                      takes `b: c` into it; with no operand before it `and` is a plain word, \
@@ -313,7 +312,7 @@ pub fn allow_list() -> Vec<Allowed> {
                   WHITESPACE@24..25 "\n"
             "#]],
         },
-        Allowed {
+        Fix {
             input: "$to: 3\n.x\n  @for $i from 1 through $to\n    a: $i\n",
             change: "legacy reads the name in `$to` as the word `to`, which leaves an `@for` \
                      header unfinished, and silently takes the line below into the header, \
@@ -374,7 +373,7 @@ pub fn allow_list() -> Vec<Allowed> {
                   WHITESPACE@48..49 "\n"
             "#]],
         },
-        Allowed {
+        Fix {
             input: "$in: 1 2\n.x\n  @each $v in $in\n    a: $v\n",
             change: "legacy reads the name in `$in` as the word `in` and takes the line \
                      below into the `@each` header, with four errors; the layout frontend \
@@ -432,7 +431,7 @@ pub fn allow_list() -> Vec<Allowed> {
                   WHITESPACE@39..40 "\n"
             "#]],
         },
-        Allowed {
+        Fix {
             input: "$and: true\n.x\n  @if $and\n    a: b\n",
             change: "legacy reads the name in `$and` as the word `and` and silently takes \
                      the line below into the `@if` condition; the layout frontend gives the \
@@ -481,7 +480,7 @@ pub fn allow_list() -> Vec<Allowed> {
                   WHITESPACE@33..34 "\n"
             "#]],
         },
-        Allowed {
+        Fix {
             input: "@function f($if)\n  @return $if\n.a\n  b: f(1)\n",
             change: "legacy reads the name in `$if` as the word `if` and takes the next \
                      rule into the `@return` value, with an error; the layout frontend ends \
@@ -540,7 +539,7 @@ pub fn allow_list() -> Vec<Allowed> {
                   WHITESPACE@43..44 "\n"
             "#]],
         },
-        Allowed {
+        Fix {
             input: ".a\n  b: c\n@x:*\n.d\n  e: f\n",
             change: "legacy goes on after a `*` that ends a line in any statement with a \
                      colon before it, as if it were multiplication, and silently takes the \
@@ -597,7 +596,7 @@ pub fn allow_list() -> Vec<Allowed> {
                   WHITESPACE@24..25 "\n"
             "#]],
         },
-        Allowed {
+        Fix {
             input: "/* loud\n  still comment\n.a\n  b: c\n.d\n  e: f\n",
             change: "a loud comment that starts a statement ends at the first line no \
                      deeper than its own, not at the end of the file; both frontends now \
@@ -648,7 +647,7 @@ pub fn allow_list() -> Vec<Allowed> {
                   WHITESPACE@43..44 "\n"
             "#]],
         },
-        Allowed {
+        Fix {
             input: "/* Single-line\n\n/*\n  Multi\n  line\n\n/* Multiline starting on\n   the \
                     first line\n\n/* Preserves\n\n   empty\n\n\n   lines\n\n/* Ignores comment \
                     closer */\n\n/*\n  Handles\n         weird\n   indentation\n       \
@@ -676,7 +675,7 @@ pub fn allow_list() -> Vec<Allowed> {
                   WHITESPACE@308..309 "\n"
             "#]],
         },
-        Allowed {
+        Fix {
             input: ".a\n\tcolor: red\n        b: c\n",
             change: "a line indented with spaces in a file indented with tabs: the layout \
                      frontend reports it (Dart: `Expected tabs, was spaces.`)",
@@ -717,7 +716,7 @@ pub fn allow_list() -> Vec<Allowed> {
                 error 15..23: expected tabs, was spaces
             "#]],
         },
-        Allowed {
+        Fix {
             input: ".a\n  \tcolor: red\n  \tb: c\n",
             change: "indentation mixing tabs and spaces: the layout frontend reports it, \
                      once (Dart: `Tabs and spaces may not be mixed.`)",
@@ -756,7 +755,7 @@ pub fn allow_list() -> Vec<Allowed> {
                 error 3..6: tabs and spaces may not be mixed
             "#]],
         },
-        Allowed {
+        Fix {
             input: ".a\n    .b\n      c: d\n  .e\n    f: g\n",
             change: "a dedent to a column no open block has: the layout frontend reports \
                      it and closes the blocks deeper than the line, as legacy silently did \
@@ -816,7 +815,7 @@ pub fn allow_list() -> Vec<Allowed> {
                 error 21..23: inconsistent indentation, expected 4 spaces
             "#]],
         },
-        Allowed {
+        Fix {
             input: "a\n    b: c\n d: e\n",
             change: "a dedent to a column no open block has, from sass-spec \
                      `non_conformant/sass/indentation/error/inconsistent`: reported (Dart: \
@@ -856,7 +855,7 @@ pub fn allow_list() -> Vec<Allowed> {
                 error 11..12: inconsistent indentation, expected 4 spaces
             "#]],
         },
-        Allowed {
+        Fix {
             input: "a\u{c}  b\r c",
             change: "a dedent to a column no open block has, after a form feed and a \
                      carriage return, from the line-facts tests: reported (Dart: \
@@ -888,7 +887,7 @@ pub fn allow_list() -> Vec<Allowed> {
                 error 6..7: inconsistent indentation, expected 2 spaces
             "#]],
         },
-        Allowed {
+        Fix {
             input: ".a\n\tb: c\n\t\t.d\n  \te: f\n",
             change: "indentation mixing tabs and spaces, from the line-facts tests: \
                      reported (Dart stops earlier, at `expected \":\".`)",
@@ -939,7 +938,7 @@ pub fn allow_list() -> Vec<Allowed> {
                 error 14..17: tabs and spaces may not be mixed
             "#]],
         },
-        Allowed {
+        Fix {
             input: ".a\n  b: c\n    ",
             change: "whitespace indented deeper at the end of the input opened a block, \
                      turning the declaration into a nested property; the input ends at \
@@ -968,7 +967,7 @@ pub fn allow_list() -> Vec<Allowed> {
                       RBRACE@14..14 ""
             "#]],
         },
-        Allowed {
+        Fix {
             input: "a {\n  b: c\n}\n  ",
             change: "whitespace indented deeper at the end of the input, from sass-spec \
                      `parser/indentation/error/mixed_syntax/block`: no block opens there \
@@ -1005,7 +1004,7 @@ pub fn allow_list() -> Vec<Allowed> {
                 error 11..12: expected rule
             "#]],
         },
-        Allowed {
+        Fix {
             input: "// c\n\n  more\n.a\n  b: c\n",
             change: "a silent comment stopped at a blank line, so the deeper line after it \
                      became a rule of its own; it now takes that line, as in Dart, which \
@@ -1038,7 +1037,7 @@ pub fn allow_list() -> Vec<Allowed> {
                   WHITESPACE@22..23 "\n"
             "#]],
         },
-        Allowed {
+        Fix {
             input: ".a /* x\n  y\n.b\n  c: d\n",
             change: "a loud comment that does not start its line and never closes was \
                      silently taken as a comment to the end of the file; it is now \
@@ -1057,7 +1056,7 @@ pub fn allow_list() -> Vec<Allowed> {
                 error 3..22: unterminated comment
             "#]],
         },
-        Allowed {
+        Fix {
             input: ".a\n  b: c /* never closed\n  d: e\n",
             change: "an unterminated loud comment after a value, from the line-facts \
                      tests: reported (Dart: `expected more input.`)",
@@ -1087,7 +1086,7 @@ pub fn allow_list() -> Vec<Allowed> {
                 error 10..33: unterminated comment
             "#]],
         },
-        Allowed {
+        Fix {
             input: "$a: 1 +\n  /* c\n    d\n    2\n.b\n  c: $a\n",
             change: "a loud comment on a continued line is an ordinary one, so one that \
                      never closes runs to the end of the file; legacy took it as a comment, \
@@ -1114,7 +1113,7 @@ pub fn allow_list() -> Vec<Allowed> {
                 error 10..38: unterminated comment
             "#]],
         },
-        Allowed {
+        Fix {
             input: "a\n  b: c /* d\n",
             change: "an unterminated loud comment after a value, from sass-spec \
                      `css/comment/error/loud/unterminated/sass`: reported (Dart: `expected \
@@ -1144,7 +1143,7 @@ pub fn allow_list() -> Vec<Allowed> {
                 error 9..14: unterminated comment
             "#]],
         },
-        Allowed {
+        Fix {
             input: ".a\n  b: fn(1\n.c\n  d: e\n.f\n  g: h\n",
             change: "an unclosed bracket made every later line break plain whitespace, so \
                      the rest of the file joined the declaration; once its error is \
@@ -1220,9 +1219,9 @@ pub fn allow_list() -> Vec<Allowed> {
                 error 13..14: expected RPAREN
             "#]],
         },
-        Allowed {
+        Fix {
             input: ".a\n  b: fn(1\n.c\n  d: e\n",
-            change: "an unclosed bracket, as above, from the `parse_sass_legacy` tests",
+            change: "an unclosed bracket, as above, followed by a rule",
             expected: expect![[r#"
                 SOURCE_FILE@0..23
                   RULE_SET@0..12

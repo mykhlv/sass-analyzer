@@ -213,13 +213,13 @@ impl<'src> IndentedLexer<'src> {
 }
 
 #[inline]
-pub fn contains_newline(text: &str) -> bool {
+fn contains_newline(text: &str) -> bool {
     text.bytes().any(is_newline)
 }
 
 /// The indentation after the last newline in `whitespace`: its leading space and tab
 /// bytes, each tab counting as one column, as in Dart Sass.
-pub fn indent_after_last_newline(whitespace: &str) -> u32 {
+fn indent_after_last_newline(whitespace: &str) -> u32 {
     let bytes = whitespace.as_bytes();
     let line_start = bytes
         .iter()

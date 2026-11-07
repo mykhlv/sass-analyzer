@@ -47,8 +47,3 @@ doc = false
 name = "fuzz_sass_parser_roundtrip"
 path = "fuzz_targets/fuzz_sass_parser_roundtrip.rs"
 doc = false
-
-[[bin]]
-name = "fuzz_sass_layout_differential"
-path = "fuzz_targets/fuzz_sass_layout_differential.rs"
-doc = false

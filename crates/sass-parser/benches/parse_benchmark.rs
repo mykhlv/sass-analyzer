@@ -173,7 +173,7 @@ fn parse_and_build_tree_angular_material(bencher: Bencher<'_, '_>) {
 // ── Vuetify (~290 KB indented-Sass corpus) ─────────────────────────────
 
 #[divan::bench]
-fn lex_vuetify_sass(bencher: Bencher<'_, '_>) {
+fn lex_and_build_input_vuetify_sass(bencher: Bencher<'_, '_>) {
     let source = &*VUETIFY_SASS;
     if source.is_empty() {
         return;
@@ -181,7 +181,7 @@ fn lex_vuetify_sass(bencher: Bencher<'_, '_>) {
     bencher
         .counter(divan::counter::BytesCount::of_str(source))
         .with_inputs(|| source.as_str())
-        .bench_values(sass_parser::sass_lexer::sass_tokenize);
+        .bench_values(sass_parser::input::Input::from_source_indented);
 }
 
 #[divan::bench]
@@ -194,20 +194,6 @@ fn parse_vuetify_sass(bencher: Bencher<'_, '_>) {
         .counter(divan::counter::BytesCount::of_str(source))
         .with_inputs(|| source.as_str())
         .bench_values(sass_parser::parse_sass);
-}
-
-/// The same corpus through the previous frontend, in which the lexer decided where
-/// statements end, for comparison until it is deleted.
-#[divan::bench]
-fn parse_legacy_vuetify_sass(bencher: Bencher<'_, '_>) {
-    let source = &*VUETIFY_SASS;
-    if source.is_empty() {
-        return;
-    }
-    bencher
-        .counter(divan::counter::BytesCount::of_str(source))
-        .with_inputs(|| source.as_str())
-        .bench_values(sass_parser::parse_sass_legacy);
 }
 
 // A comment on every continued line: each one read first as reaching over the deeper

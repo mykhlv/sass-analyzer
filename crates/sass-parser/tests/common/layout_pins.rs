@@ -1,0 +1,161 @@
+//! Indented inputs whose trees were checked against the former, lexer-driven frontend
+//! (or against Dart Sass where the two differ) when the parser took over statement
+//! boundaries, and are pinned by shape since: a change to any of these trees is a
+//! change of behaviour to review, not noise.
+//!
+//! Included with `#[path]` by the test binaries that run it, rather than through
+//! `common/mod.rs`, so that binaries which do not are not left with dead code.
+
+use sass_parser::syntax::{SyntaxNode, debug_tree};
+use sass_parser::syntax_kind::SyntaxKind;
+
+/// `errors rule_sets/declarations/blocks hash`, the hash (64-bit FNV-1a, fixed across
+/// toolchains) taken over the tree and its errors together.
+pub fn fingerprint(tree: &SyntaxNode, errors: &[String]) -> String {
+    let count = |kind| tree.descendants().filter(|n| n.kind() == kind).count();
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for &byte in debug_tree(tree)
+        .as_bytes()
+        .iter()
+        .chain(errors.join("\n").as_bytes())
+    {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!(
+        "{} {}/{}/{} {hash:016x}",
+        errors.len(),
+        count(SyntaxKind::RULE_SET),
+        count(SyntaxKind::DECLARATION),
+        count(SyntaxKind::BLOCK),
+    )
+}
+
+#[rustfmt::skip]
+pub const PINNED: &[&str] = &[
+    ".a\n  >\n    b: c\n",
+    "@foo\n  10%,\n  20%\n    a: b\n",
+    ".a,\n\n.b\n  c: d\n",
+    ".x\n  @for $i from 1 through\n    3\n    a: $i\n",
+    ".x\n  @each $v in\n    1 2\n    a: $v\n",
+    ".a\n  b: c and\n    d\n",
+    ".a\n  b: c and\n  d\n",
+    ".a\n  b: c or\n    d\n",
+    ".a\n  b: 1 and\n    2\n",
+    ".a\n  b: c not\n    d\n",
+    ".a\n  content: not\n    d\n",
+    ".a\n  b: c and\n    d e\n",
+    ".a\n  b: c, d and\n  e\n",
+    ".a\n  b: c and\n    d\n  e: f\n",
+    "+J@\n\t(\n",
+    "=@\n ,\n",
+    "=,\u{c}@\u{c} ,",
+    ".a\n  b: fn(1, !\n    2)\n  c: d\n",
+    ".a:not(.b\n  c: d\n",
+    "$a: 1 +\n  2\n",
+    "@each $a\n  , $b in (1 2)\n  .x\n    c: $a\n",
+    "@function f\n  ($a)\n  @return $a\n",
+    "@if\n  $a\n  b: c\n",
+    "@function f($a)\n  @return $a +\n    1\n",
+    "$m: (\na: 1\n)\n",
+    ".a\n  b: fn(1,\n2)\n",
+    "@for $i\n  from 1 through 3\n  .a\n    b: $i\n",
+    ".a,\n.b\n  c: d\n",
+    "$a:\n  1px\n",
+    ".a,\n  .b\n  c: d\n",
+    ".a,\n\n  .b\n  c: d\n",
+    ".a\n  @extend .b,\n    .c\n",
+    ".a\n  @extend .b,\n\n    .c\n",
+    "@each $a,\n  $b in c\n  d: e\n",
+    "@each $a,\n\n  $b in c\n  d: e\n",
+    "@each $a in b,\n  c\n  d: e\n",
+    "@each $a in b,\n\n  c\n  d: e\n",
+    ".a\n  b: c,\n    d\n",
+    ".a\n  b: c,\n\n    d\n",
+    "$a: 1,\n  2\n",
+    "$a: 1,\n\n  2\n",
+    "@use \"a\" show b,\n  c\n",
+    "@use \"a\" show b,\n\n  c\n",
+    "@import \"a\",\n  \"b\"\n",
+    "@import \"a\",\n\n  \"b\"\n",
+    "@layer a,\n  b\n",
+    "@layer a,\n\n  b\n",
+    "@keyframes k\n  10%,\n    20%\n    a: b\n",
+    "@keyframes k\n  10%,\n\n    20%\n    a: b\n",
+    "@foo\n  10%,\n\n  20%\n    a: b\n",
+    "@media screen,\n  print\n  .a\n    b: c\n",
+    "@media screen,\n\n  print\n  .a\n    b: c\n",
+    "@foo a,\n  b\n  c: d\n",
+    "@foo a,\n\n  b\n  c: d\n",
+    ".a\n  --x: a,\n    b\n",
+    ".a\n  --x: a,\n\n    b\n",
+    "@mixin foo($x: 1)\n  a: $x\n.a\n  @include foo\n    ($x)\n",
+    "@use \"x\"\n  as y\n",
+    "@media screen and\n  (min-width: 1px)\n  .a\n    b: c\n",
+    "@container card (width > 400px) and\n  (height > 100px)\n  .a\n    b: c\n",
+    "@container card\n  (width > 400px)\n  .a\n    b: c\n",
+    "@scope (.a) to\n  (.b)\n  .c\n    d: e\n",
+    ".a\n  @at-root\n    (without: media)\n    .b\n      c: d\n",
+    "$b: true\n@if false\n  a: b\n@else\n  if $b\n  c: d\n",
+    "$x: true\n$y: true\n@if $x\n  and $y\n  a: b\n",
+    ".a\n  b: c,\n  d\n",
+    "@function f()\n  @return 1,\n    2\n",
+    "$a: 1\n  2\n",
+    "$a: 1\n  , 2\n",
+    "$m: (\n  a: 1,\n    b: 2\n)\n.x\n  c: map-get($m,\n'a')\n",
+    ".a\n  font:\n    family: fantasy\n",
+    ".a\n  font: bold\n    family: x\n",
+    "@mixin foo\n  // c\n.a\n  b: c\n",
+    "@media screen\n  /* c */\n.a\n  b: c\n",
+    ".a\n  color:red\n",
+    "@namespace svg\n  \"http://www.w3.org/2000/svg\"\n",
+    "@each $a\n  , $b in (1 2)\n  c: $a\n",
+    "@function f\n  ($a)\n  @return $a +\n    1\n",
+    "// c\n  continued\n    deeper\n.a\n  // body\n\n  b: c\n",
+    "// c\r\n  crlf continuation\r\n.a\r\n  b: c\r\n",
+    "\u{feff}.a\n  b: c\n",
+    ".a\n  b: c\n    \n",
+    "@mixin m\n  b: c\n// dedented comment\n  d: e\n",
+    "=m\n  b: c\n.a\n  +m\n",
+    ".nav\n  color: red\n  .item\n    margin: 0\n    &:hover\n      color: blue\n.footer\n  padding: 0\n",
+    "@media screen and (min-width: 100px),\n  print\n  .a\n    color: red\n@include button($bg,\n  $border)\n",
+    "// leading comment\n// second line\n.a\n  // only a comment\n  color: red\n@mixin empty\n  // comment-only body\n.b\n  /* loud */\n  margin: 0\n",
+    ".a\n  b: c /* d\n",
+    ".a\n  b: c /* d\n  ",
+    ".x\n  @if $and\n    a: b\n",
+    "\u{e}[:\n}+\n0",
+    "$||{z:\u{c},,",
+    "//\n\n //\n 4",
+    "$0*\n",
+    "$||:\u{c}",
+    ":*\n",
+    "=\n\n\t//\n",
+    "$+*//\n",
+    "$@\n ''",
+    "$\n\t //\n #\n",
+    "=\u{8}\n\t //\n //\u{8}\n",
+    "@:*\n",
+    "@:*\n:",
+    "$/or//or\n",
+    ".nav\n  color: red\n  .item\n    margin: 0\n.footer\n  padding: 0\n",
+    "// c\n@mixin m($a,\n  $b)\n  // body comment\n  width: $a\n@include m(1,\n  2)\n",
+    "",
+    ".a\n  b: (1 +)\n.c\n  d: e\n",
+    ".a\n  b: \"x\n  c: d\n",
+    ".a\n  b: 'x\n",
+    ".a\n  b: \"x #{$y} z\n  c: d\n",
+    ".a\n  b: \"x #{$y}\n  c: d\n",
+    "$m: (\n  a: \"x,\n  b: 2,\n)\n.e\n  f: g\n",
+    ".a\n  b: f(\n    \"x\n    2\n  )\n  c: d\n",
+    "@use \"a\n@import 'b\n.e\n  f: g\n",
+    ".a\n  b: f(\"x, 1,\n    2)\n.e\n  f: g\n",
+    ".a\n  b: c\n",
+    ".a // c\n  b: c\n",
+    ".a\n  b: c // d",
+    ".a\n  .b\n    c: d\n.e\n  f: g",
+    "@mixin m\n  // c\n.a\n  b: c\n",
+    "@if $a\n  // c\n\n  b: c\n",
+    ".a\n  @extend .b\n    .c\n",
+    ".a\r\n  b: c\r\n\r\n.d\r\n  e: f\r\n",
+    "  \n.a\n  b: c\n    \n",
+];

@@ -251,9 +251,9 @@ pub(crate) fn bump_operator(p: &mut Parser<'_>) {
 
 /// Whether the line goes on after the token at the cursor, a word that a CSS value reads
 /// as a plain identifier but Dart Sass as an operator, when it ends its line: `and` or
-/// `or` after an operand, or `not`. Dart takes the next line as its operand, as legacy
-/// did. A next line that starts like a declaration (`name:`) cannot be one — Dart
-/// rejects it — and is left a statement of its own rather than taken into the value.
+/// `or` after an operand, or `not`. Dart takes the next line as its operand. A next line
+/// that starts like a declaration (`name:`) cannot be one — Dart rejects it — and is left
+/// a statement of its own rather than taken into the value.
 pub(crate) fn word_operator_goes_on(p: &Parser<'_>, operand_before: bool) -> bool {
     if !p.at(IDENT) {
         return false;
