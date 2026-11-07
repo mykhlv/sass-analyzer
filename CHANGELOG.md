@@ -276,6 +276,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Lines indented beneath a statement that takes no block, such as a variable, `@use` or
   `@return`, are one "nothing may be indented beneath …" error, and a line that starts no
   statement, or is left over after one, is one error rather than one per token
+- Indented Sass: a nested `name:value` with no space after the colon, as `color:red`, is
+  read as a selector, as Dart Sass reads it — `a:hover` and `color:red` look the same to
+  it. It was read as a declaration. Where nothing but a declaration may stand, in a
+  nested property's block, and for a custom property such as `--x:red`, it still is,
+  and a colon followed by anything that does not start a name, as in `margin:0` or
+  `color:#fff`, still makes a declaration. Since the empty rule compiles to nothing, the
+  language server warns that a space is likely missing after the `:`
 - Dependencies refreshed: 47 transitive Rust crates within semver, `rowan` 0.16 → 0.17,
   TypeScript 6 → 7, `@types/node` 25 → 26, esbuild 0.27 → 0.28
 - `@types/vscode` is now pinned with a tilde (`~1.110.0`) so it tracks the supported

@@ -143,6 +143,12 @@ fn block_item(p: &mut Parser<'_>) {
 /// The scan reads on across the line breaks the grammar will absorb (after a comma or an
 /// operator), so that it sees the whole statement in the indented syntax too.
 fn looks_like_declaration(p: &Parser<'_>) -> bool {
+    declaration_ahead(p, false)
+}
+
+/// [`looks_like_declaration`], `in_property` in a nested property's block, where Dart Sass
+/// reads every `name:` as a declaration.
+fn declaration_ahead(p: &Parser<'_>, in_property: bool) -> bool {
     let j = p.joined(lines::LINE_JOINS);
     let hack = matches!(p.current(), STAR | DOT | HASH | COLON)
         && matches!(p.nth_joined(j, 1), IDENT | HASH_LBRACE);
@@ -167,8 +173,12 @@ fn looks_like_declaration(p: &Parser<'_>) -> bool {
     if p.nth_joined(j, colon + 1) == LBRACE {
         return true;
     }
-    // Dart reads `.a:b` as a selector in the indented syntax, a hack declaration in SCSS.
-    if hack && !p.braced() && could_start_pseudo_class(p, j, colon + 1) {
+    // In the indented syntax Dart reads `name:` followed directly by the start of a name
+    // as a selector with a pseudo-class, `color:red` as `a:hover`, and `.a:b` too, except
+    // where only a declaration may stand and for a custom property. SCSS reads all of
+    // these as declarations.
+    let custom = !hack && p.current_text().starts_with("--");
+    if !p.braced() && !in_property && !custom && could_start_pseudo_class(p, j, colon + 1) {
         return false;
     }
     scan_for_declaration_end(p, j, colon + 1)
@@ -645,14 +655,13 @@ pub(crate) fn property_block(p: &mut Parser<'_>) {
     while !g.at(RBRACE) && !g.at_end() {
         if g.at(SEMICOLON) {
             g.bump();
-        } else if g.at(AT)
-            || g.at(DOLLAR)
-            || g.at_shorthand()
-            || at_namespace_var_assignment(&g)
-            || looks_like_declaration(&g)
-        {
+        } else if g.at(AT) || g.at(DOLLAR) || g.at_shorthand() || at_namespace_var_assignment(&g) {
             let errors = g.error_count();
             block_item(&mut g);
+            lines::rest_of_line(&mut g, errors);
+        } else if declaration_ahead(&g, true) {
+            let errors = g.error_count();
+            declarations::declaration(&mut g);
             lines::rest_of_line(&mut g, errors);
         } else {
             lines::err_line(&mut g, "expected declaration", true);

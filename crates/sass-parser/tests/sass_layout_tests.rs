@@ -127,7 +127,7 @@ fn pinned_inputs_keep_their_trees() {
         0 1/1/2 e047af0c0b7c55b2 ".a\n  font: bold\n    family: x\n"
         0 1/1/2 7b808659ee4a3575 "@mixin foo\n  // c\n.a\n  b: c\n"
         0 1/1/2 4cc0ceaa7dd88070 "@media screen\n  /* c */\n.a\n  b: c\n"
-        0 1/1/1 9e809b2d6496068b ".a\n  color:red\n"
+        0 2/0/1 085969a8dc7f06b0 ".a\n  color:red\n"
         3 0/0/0 d0203306c0abcb6a "@namespace svg\n  \"http://www.w3.org/2000/svg\"\n"
         0 0/1/1 a32eee13df33d86b "@each $a\n  , $b in (1 2)\n  c: $a\n"
         0 0/0/1 078b472a060189b4 "@function f\n  ($a)\n  @return $a +\n    1\n"
@@ -1059,6 +1059,146 @@ fn a_comma_does_not_continue_a_variable_value_from_below() {
                   RBRACE@11..11 ""
               WHITESPACE@11..12 "\n"
             error 5..5: nothing may be indented beneath a variable declaration
+        "#]],
+    );
+}
+
+// ── A colon with no space after it ──────────────────────────────────
+
+/// In the indented syntax Dart Sass reads `name:` followed directly by the start of a
+/// name as a selector with a pseudo-class, as `a:hover` is, whatever the name: an empty
+/// rule, which compiles to nothing.
+#[test]
+fn a_colon_followed_directly_by_a_name_is_a_selector() {
+    for source in [
+        ".a\n  color:red\n",
+        ".a\n  color:red blue\n",
+        ".a\n  color:-webkit-x\n",
+        ".a\n  color:#{x}\n",
+        ".a\n  #{b}:c\n",
+        "@font-face\n  font-family:foo\n",
+        ".a\n  font:bold\n    family: x\n",
+    ] {
+        let tree = render(parse_sass, source);
+        assert!(!tree.contains("\nerror "), "{source:?}:\n{tree}");
+        assert!(!tree.contains("DECLARATION@2"), "{source:?}:\n{tree}");
+        assert!(
+            tree.matches("RULE_SET@").count() >= 1,
+            "{source:?}:\n{tree}"
+        );
+    }
+}
+
+/// What does not start a name after the colon makes a declaration, as does a space, and
+/// so does any colon in a nested property's block, which holds declarations only, and in
+/// a custom property.
+#[test]
+fn a_colon_followed_by_a_value_is_a_declaration() {
+    for source in [
+        ".a\n  color:1px\n",
+        ".a\n  color:#fff\n",
+        ".a\n  color:\"x\"\n",
+        ".a\n  color:$x\n",
+        ".a\n  color:-1px\n",
+        ".a\n  color:(1px)\n",
+        ".a\n  color: red\n",
+        ".a\n  color:\tred\n",
+        ".a\n  --x:red\n",
+        ".a\n  *zoom:1\n",
+        ".a\n  font:\n    family:x\n",
+    ] {
+        let tree = render(parse_sass, source);
+        assert!(!tree.contains("\nerror "), "{source:?}:\n{tree}");
+        assert!(
+            tree.contains("DECLARATION@") || tree.contains("CUSTOM_PROPERTY_DECL@"),
+            "{source:?}:\n{tree}"
+        );
+    }
+}
+
+#[test]
+fn a_colon_rule_is_an_empty_rule() {
+    check(
+        ".a\n  color:red\n  d: e\n",
+        expect![[r#"
+            SOURCE_FILE@0..22
+              RULE_SET@0..21
+                SELECTOR_LIST@0..2
+                  SELECTOR@0..2
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "a"
+                BLOCK@2..21
+                  LBRACE@2..2 ""
+                  RULE_SET@2..14
+                    SELECTOR_LIST@2..14
+                      SELECTOR@2..14
+                        SIMPLE_SELECTOR@2..10
+                          WHITESPACE@2..5 "\n  "
+                          IDENT@5..10 "color"
+                        PSEUDO_SELECTOR@10..14
+                          COLON@10..11 ":"
+                          IDENT@11..14 "red"
+                  SEMICOLON@14..14 ""
+                  DECLARATION@14..21
+                    PROPERTY@14..18
+                      WHITESPACE@14..17 "\n  "
+                      IDENT@17..18 "d"
+                    COLON@18..19 ":"
+                    VALUE@19..21
+                      VALUE@19..21
+                        WHITESPACE@19..20 " "
+                        IDENT@20..21 "e"
+                    SEMICOLON@21..21 ""
+                  RBRACE@21..21 ""
+              WHITESPACE@21..22 "\n"
+        "#]],
+    );
+}
+
+/// Read as a selector, `color:red !important` has a stray `!important` on its line: one
+/// error, as Dart Sass reports it, and the next statement parses.
+#[test]
+fn a_colon_rule_with_a_flag_is_one_error() {
+    check(
+        ".a\n  color:red !important\n  d: e\n",
+        expect![[r#"
+            SOURCE_FILE@0..33
+              RULE_SET@0..32
+                SELECTOR_LIST@0..2
+                  SELECTOR@0..2
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "a"
+                BLOCK@2..32
+                  LBRACE@2..2 ""
+                  RULE_SET@2..14
+                    SELECTOR_LIST@2..14
+                      SELECTOR@2..14
+                        SIMPLE_SELECTOR@2..10
+                          WHITESPACE@2..5 "\n  "
+                          IDENT@5..10 "color"
+                        PSEUDO_SELECTOR@10..14
+                          COLON@10..11 ":"
+                          IDENT@11..14 "red"
+                  ERROR@14..25
+                    WHITESPACE@14..15 " "
+                    BANG@15..16 "!"
+                    IDENT@16..25 "important"
+                  SEMICOLON@25..25 ""
+                  DECLARATION@25..32
+                    PROPERTY@25..29
+                      WHITESPACE@25..28 "\n  "
+                      IDENT@28..29 "d"
+                    COLON@29..30 ":"
+                    VALUE@30..32
+                      VALUE@30..32
+                        WHITESPACE@30..31 " "
+                        IDENT@31..32 "e"
+                    SEMICOLON@32..32 ""
+                  RBRACE@32..32 ""
+              WHITESPACE@32..33 "\n"
+            error 15..16: expected newline
         "#]],
     );
 }
