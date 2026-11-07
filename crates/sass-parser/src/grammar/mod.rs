@@ -379,17 +379,70 @@ fn missing_rule_block(p: &mut Parser<'_>, selector_reported: bool) {
         }
         return;
     }
+    skip_to_rule_block(p, true);
+}
+
+/// Whether the cursor is at an identifier as Dart Sass's `interpolatedIdentifier` reads
+/// one: a word or an interpolation, or a `-` joined to one.
+pub(crate) fn at_interpolated_identifier(p: &Parser<'_>) -> bool {
+    match p.current() {
+        IDENT | HASH_LBRACE => true,
+        MINUS => !p.nth_has_whitespace_before(1) && matches!(p.nth(1), IDENT | HASH_LBRACE),
+        _ => false,
+    }
+}
+
+/// An identifier as Dart Sass's `interpolatedIdentifier` reads one: words,
+/// interpolations, `-` and digits with no whitespace between them, as in `-#{$a}-b`,
+/// `#{$a}-` or `x#{$b}-2`. A number with a `.` or an exponent is no part of a name.
+pub(crate) fn interpolated_identifier(p: &mut Parser<'_>) {
+    debug_assert!(at_interpolated_identifier(p));
+    loop {
+        if p.at(HASH_LBRACE) {
+            let _ = expressions::interpolation(p);
+        } else {
+            p.bump();
+        }
+        let digits = p.at(NUMBER) && p.current_text().bytes().all(|b| b.is_ascii_digit());
+        let piece = matches!(p.current(), IDENT | HASH_LBRACE | MINUS) || digits;
+        if p.has_whitespace_before() || !piece {
+            break;
+        }
+    }
+}
+
+/// Report the tokens at the cursor, where a `{` belongs, if `report`, and skip them as one
+/// error up to the next `{`, `;` or `}`, or the line break of a string left unclosed on a
+/// line below; a block there is still the rule's. A string that swallowed the block's `{` on the line
+/// the tokens start on is that one mistake, reported as the string: the `{` it took is
+/// put back where the indentation below agrees, and opens the block.
+pub(crate) fn skip_to_rule_block(p: &mut Parser<'_>, report: bool) {
     let m = p.start();
-    p.error("expected `{`");
+    let at = p.error_range();
+    let strings = p.unclosed_strings();
+    let mut first = true;
+    let mut same_line = true;
     let mut interpolation: u32 = 0;
-    while !p.at_end() {
+    // A string left unclosed on a line below ends at its line break the statement it
+    // starts; on the first line it is more of the mistake.
+    while !p.at_end() && (same_line || !p.at_unclosed_string_break()) {
         match p.current() {
             LBRACE | RBRACE | SEMICOLON if interpolation == 0 => break,
             HASH_LBRACE | LBRACE => interpolation += 1,
             RBRACE => interpolation -= 1,
             _ => {}
         }
-        p.bump();
+        same_line &= first || !p.at_line_break();
+        first = false;
+        if p.at(STRING_START) {
+            let _ = expressions::interpolated_string(p, ParseContext::CssValue);
+        } else {
+            p.bump();
+        }
+    }
+    let took_block = p.unclosed_strings() > strings && same_line && p.at_virtual() && p.at(LBRACE);
+    if report && !took_block {
+        p.error_at_start(&m, at, "expected `{`");
     }
     let _ = m.complete(p, SyntaxKind::ERROR);
     if p.at(LBRACE) {
@@ -475,17 +528,19 @@ fn skip_until_block_end(p: &mut Parser<'_>) {
 
 /// Consume `open ... close`, treating content as opaque. Braced, a `{` or `}` outside
 /// interpolation ends a bracket left unclosed: no selector argument or at-rule prelude
-/// holds one, and the rules after it stay intact. The indented layout recovers at a line
-/// start instead.
+/// holds one, and the rules after it stay intact. The indented layout ends it at a line
+/// instead: see [`Parser::end_unclosed_bracket`].
 pub(crate) fn eat_balanced(p: &mut Parser<'_>, open: SyntaxKind, close: SyntaxKind) {
     assert!(p.at(open));
     let p = &mut *p.transparent_guard();
     let braced = p.braced();
+    p.end_unclosed_bracket(open, close);
     p.bump();
     let mut depth: u32 = 1;
     let mut interpolation: u32 = 0;
-    // A string left unclosed took the rest of its line, the closing bracket and all.
-    while !p.at_end() && depth > 0 && !p.at_unclosed_string_break() {
+    // A string left unclosed took the rest of its line, the closing bracket and all. A
+    // zero-width token comes where a closer of another kind took the bracket's place.
+    while !p.at_end() && depth > 0 && !p.at_unclosed_string_break() && !p.at_virtual() {
         let kind = p.current();
         if braced {
             match kind {
@@ -503,14 +558,19 @@ pub(crate) fn eat_balanced(p: &mut Parser<'_>, open: SyntaxKind, close: SyntaxKi
         }
         p.bump();
     }
-    if braced && depth > 0 && !p.at_unclosed_string_break() {
-        // At a `{` the rule's block starts: that is where the bracket is found unclosed.
-        let msg = format!("expected {close:?}");
-        if p.at(LBRACE) {
-            p.error(msg);
-        } else {
-            p.error_after_prev(msg);
-        }
+    if depth > 0 && !p.at_unclosed_string_break() {
+        report_unclosed(p, close);
+    }
+}
+
+/// Report a bracket left unclosed, at the end of its contents. At a `{` the rule's block
+/// starts: that is where the bracket is found unclosed.
+pub(crate) fn report_unclosed(p: &mut Parser<'_>, close: SyntaxKind) {
+    let msg = format!("expected {close:?}");
+    if p.braced() && p.at(LBRACE) {
+        p.error(msg);
+    } else {
+        p.error_after_prev(msg);
     }
 }
 

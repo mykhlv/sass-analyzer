@@ -76,6 +76,13 @@ pub struct Parser<'src> {
     open_strings: Vec<TextSize>,
     /// In the braced layout, where each `{` and `#{` not yet closed starts, innermost last.
     open_braces: Vec<TextSize>,
+    /// For [`Parser::bracket_closes_in_kind`]: the first bracket it was asked about, and
+    /// the openers from there on that do not close in kind, in order.
+    unclosed_in_kind: Option<(usize, Vec<usize>)>,
+    /// What that reading took each string left unclosed to have swallowed, by token
+    /// index, for checking that the parser puts back the same brace.
+    #[cfg(debug_assertions)]
+    swallowed_in_kind: Vec<(usize, Option<SyntaxKind>)>,
 }
 
 impl<'src> Parser<'src> {
@@ -107,6 +114,9 @@ impl<'src> Parser<'src> {
             unclosed_string_tail: StringTail::Plain,
             open_strings: Vec::new(),
             open_braces: Vec::new(),
+            unclosed_in_kind: None,
+            #[cfg(debug_assertions)]
+            swallowed_in_kind: Vec::new(),
         };
         if layout == Layout::Indented {
             parser.find_line_start(0);
@@ -157,6 +167,155 @@ impl<'src> Parser<'src> {
     #[inline]
     pub fn at_end(&self) -> bool {
         self.pos >= self.fence.index && self.fence.kind == SyntaxKind::EOF
+    }
+
+    /// Whether the cursor is at a zero-width token of the indented layout: a `{`, `;` or
+    /// `}` that the indentation implies.
+    #[inline]
+    pub fn at_virtual(&self) -> bool {
+        self.pos >= self.fence.index && self.fence.kind != SyntaxKind::EOF
+    }
+
+    /// Whether the bracket at the cursor closes in kind: read on from it, its own closer
+    /// comes before any closer of another kind, every bracket opened in between closing in
+    /// kind too, and before the end of input. Braced layout only: the indented one lexes
+    /// some lines again as it goes.
+    ///
+    /// Read once from the first bracket asked about: every bracket still open when a
+    /// closer of another kind comes, or when the input ends, is one that does not close,
+    /// whichever bracket the reading started at, and the cursor never goes back, so later
+    /// ones are looked up.
+    pub fn bracket_closes_in_kind(&mut self) -> bool {
+        debug_assert_eq!(
+            self.layout,
+            Layout::Braced,
+            "tokens may change when indented"
+        );
+        debug_assert!(bracket_closer(self.current()).is_some(), "not at a bracket");
+        let pos = self.pos;
+        let (from, unclosed) = if let Some(cached) = self.unclosed_in_kind.take() {
+            cached
+        } else {
+            #[cfg(debug_assertions)]
+            let mut swallowed = Vec::new();
+            let unclosed = self.openers_not_closing_in_kind(
+                pos,
+                #[cfg(debug_assertions)]
+                &mut swallowed,
+            );
+            #[cfg(debug_assertions)]
+            {
+                self.swallowed_in_kind = swallowed;
+            }
+            (pos, unclosed)
+        };
+        debug_assert!(
+            from <= pos,
+            "asked about a bracket before the first one asked"
+        );
+        let closes = unclosed.binary_search(&pos).is_err();
+        self.unclosed_in_kind = Some((from, unclosed));
+        closes
+    }
+
+    /// The openers from `from` on that do not close in kind. A string left unclosed counts
+    /// as the brace it swallowed where the parser puts that brace back (see
+    /// [`Parser::swallowed_brace`]), and as nothing otherwise.
+    fn openers_not_closing_in_kind(
+        &self,
+        from: usize,
+        #[cfg(debug_assertions)] swallowed: &mut Vec<(usize, Option<SyntaxKind>)>,
+    ) -> Vec<usize> {
+        let mut open: Vec<(usize, SyntaxKind)> = Vec::new();
+        let mut unclosed = Vec::new();
+        // Where each `{` and `#{` open stands, as `open_braces` will when the parser gets
+        // there: every brace token opens or closes one, whatever the kinds around it.
+        let mut braces = self.open_braces.clone();
+        let mut string_starts: Vec<TextSize> = Vec::new();
+        for index in from..self.input.len() {
+            let range = self.input.range(index);
+            let mut kind = self.input.kind(index);
+            let string = match kind {
+                SyntaxKind::QUOTED_STRING => Some((range.start(), &self.source[range][1..])),
+                SyntaxKind::STRING_START => {
+                    string_starts.push(range.start());
+                    None
+                }
+                SyntaxKind::STRING_END => string_starts
+                    .pop()
+                    .map(|start| (start, &self.source[range])),
+                _ => None,
+            };
+            if let Some((start, end_text)) = string {
+                if !self.string_left_unclosed(start, end_text) {
+                    continue;
+                }
+                let innermost = braces.last().copied();
+                let brace = self.brace_swallowed(end_text.trim_end(), start, index + 1, innermost);
+                #[cfg(debug_assertions)]
+                swallowed.push((index, brace));
+                match brace {
+                    Some(brace) => kind = brace,
+                    None => continue,
+                }
+            }
+            match kind {
+                SyntaxKind::LBRACE | SyntaxKind::HASH_LBRACE => {
+                    // A brace put back after a string stands where the string ends.
+                    let at = if self.input.kind(index) == kind {
+                        range.start()
+                    } else {
+                        range.end()
+                    };
+                    braces.push(at);
+                }
+                SyntaxKind::RBRACE => {
+                    braces.pop();
+                }
+                _ => {}
+            }
+            if let Some(closer) = bracket_closer(kind) {
+                open.push((index, closer));
+                continue;
+            }
+            if !matches!(
+                kind,
+                SyntaxKind::RPAREN | SyntaxKind::RBRACKET | SyntaxKind::RBRACE
+            ) {
+                continue;
+            }
+            match open.last() {
+                Some(&(_, closer)) if closer == kind => {
+                    open.pop();
+                }
+                Some(_) => unclosed.extend(open.drain(..).map(|(index, _)| index)),
+                // A closer of nothing: no bracket is open to see it.
+                None => {}
+            }
+        }
+        unclosed.extend(open.into_iter().map(|(index, _)| index));
+        unclosed
+    }
+
+    /// Whether the string starting at `start`, whose text ends in `end_text`, lacks its
+    /// closing quote.
+    fn string_left_unclosed(&self, start: TextSize, end_text: &str) -> bool {
+        let quote = self.source.as_bytes()[usize::from(start)];
+        !crate::lexer::closes_string(end_text, quote)
+    }
+
+    /// Whether a line break comes before the token at the cursor, in the trivia after the
+    /// token before it.
+    pub fn at_line_break(&self) -> bool {
+        self.pos < self.fence.index
+            && self
+                .input
+                .trivia_before(self.pos)
+                .iter()
+                .any(|&(kind, range)| {
+                    kind == SyntaxKind::WHITESPACE
+                        && self.source[range].contains(['\n', '\r', '\x0c'])
+                })
     }
 
     /// Whether blocks and statements are delimited by real tokens only. In the indented
@@ -254,8 +413,7 @@ impl<'src> Parser<'src> {
     /// quote: the lexer ended it at a newline or at the end of input instead. That is the
     /// only trace such a string leaves, as it lexes as an ordinary string otherwise.
     fn check_string_end(&mut self, start: TextSize, end_text: &str, end: TextSize) {
-        let quote = self.source.as_bytes()[usize::from(start)];
-        if !crate::lexer::closes_string(end_text, quote) {
+        if self.string_left_unclosed(start, end_text) {
             self.unclosed_string(TextRange::new(start, end), end_text);
         }
     }
@@ -362,7 +520,18 @@ impl<'src> Parser<'src> {
         } else {
             StringTail::Plain
         };
-        if let Some(kind) = self.swallowed_brace(tail, range.start()) {
+        let swallowed = self.swallowed_brace(tail, range.start());
+        #[cfg(debug_assertions)]
+        if let Ok(at) = self
+            .swallowed_in_kind
+            .binary_search_by_key(&(self.pos - 1), |&(index, _)| index)
+        {
+            debug_assert_eq!(
+                self.swallowed_in_kind[at].1, swallowed,
+                "the look ahead and the parser disagree on a swallowed brace"
+            );
+        }
+        if let Some(kind) = swallowed {
             #[allow(clippy::cast_possible_truncation)]
             let trivia = self.input.trivia_start_index(self.pos) as u32;
             self.fence = Fence {
@@ -386,15 +555,26 @@ impl<'src> Parser<'src> {
         if self.layout != Layout::Braced {
             return None;
         }
-        let innermost = self.open_braces.last().copied();
+        self.brace_swallowed(tail, start, self.pos, self.open_braces.last().copied())
+    }
+
+    /// [`Parser::swallowed_brace`] of a string starting at `start` and ending in `tail`,
+    /// the token after it at `next`, inside the `{` or `#{` that starts at `innermost`.
+    fn brace_swallowed(
+        &self,
+        tail: &str,
+        start: TextSize,
+        next: usize,
+        innermost: Option<TextSize>,
+    ) -> Option<SyntaxKind> {
         if innermost.is_some_and(|at| self.source[usize::from(at)..].starts_with("#{")) {
             return None;
         }
         let opens = tail.matches('{').count();
         let closes = tail.matches('}').count();
-        let next = (self.pos < self.input.len()).then(|| {
-            let indent = self.line_indent(self.input.range(self.pos).start());
-            (self.input.kind(self.pos), indent)
+        let next = (next < self.input.len()).then(|| {
+            let indent = self.line_indent(self.input.range(next).start());
+            (self.input.kind(next), indent)
         });
         if tail.ends_with('}') && closes > opens {
             let block = self.line_indent(innermost?);
@@ -509,7 +689,16 @@ impl<'src> Parser<'src> {
     // ── Errors ───────────────────────────────────────────────────────
 
     pub fn error(&mut self, msg: impl Into<String>) {
-        let range = if self.pos < self.fence.index {
+        let range = self.error_range();
+        self.error_at(range, msg);
+        if self.layout == Layout::Indented {
+            self.error_reported();
+        }
+    }
+
+    /// Where [`Parser::error`] reports at the cursor.
+    pub fn error_range(&self) -> TextRange {
+        if self.pos < self.fence.index {
             self.input.range(self.pos)
         } else if self.fence.kind != SyntaxKind::EOF {
             TextRange::empty(self.virtual_offset())
@@ -518,11 +707,18 @@ impl<'src> Parser<'src> {
             self.input.range(self.fence.index)
         } else {
             TextRange::empty(TextSize::of(self.source))
-        };
-        self.error_at(range, msg);
-        if self.layout == Layout::Indented {
-            self.error_reported();
         }
+    }
+
+    /// Report `msg` at `range`, taken with [`Parser::error_range`] where `m` was started,
+    /// as if it had been reported there and then: before the errors reported since. For
+    /// a mistake known only once the tokens after it have been read. Braced layout only.
+    pub fn error_at_start(&mut self, m: &Marker, range: TextRange, msg: impl Into<String>) {
+        debug_assert_eq!(self.layout, Layout::Braced, "no bracket recovery to update");
+        let len = self.events.len();
+        self.error_at(range, msg);
+        let event = self.events.remove(len);
+        self.events.insert(m.pos as usize + 1, event);
     }
 
     /// How many errors have been reported so far.
@@ -617,6 +813,16 @@ enum StringTail {
     /// In a token that closes a construct: `)`, `]`, `;`, `{` or `}`.
     Closer,
     Plain,
+}
+
+/// The closer of a bracket that `kind` opens, if it opens one.
+fn bracket_closer(kind: SyntaxKind) -> Option<SyntaxKind> {
+    match kind {
+        SyntaxKind::LPAREN => Some(SyntaxKind::RPAREN),
+        SyntaxKind::LBRACKET => Some(SyntaxKind::RBRACKET),
+        SyntaxKind::LBRACE | SyntaxKind::HASH_LBRACE => Some(SyntaxKind::RBRACE),
+        _ => None,
+    }
 }
 
 fn eof_fence(input: &Input) -> Fence {

@@ -41,6 +41,11 @@ pub struct HeaderLines {
     pub name_continues: bool,
 }
 
+/// How many lines [`Parser::bracket_left_unclosed`] reads at most: far beyond any
+/// selector argument or at-rule prelude laid out over lines. Every line counts, those of
+/// the block below the bracket's line included.
+const UNCLOSED_LOOKAHEAD_LINES: u32 = 256;
+
 /// How far [`Parser::joined`] reads past the cursor at most, in tokens: beyond any
 /// grammar scanner's budget.
 const JOINED_LOOKAHEAD: usize = 256;
@@ -65,6 +70,10 @@ pub(super) struct IndentedState {
     /// The line breaks after them count as being that much less deep.
     unwound: u16,
     brackets: Vec<Bracket>,
+    /// The last answer of `line_at_or_before_column`: `(column, from, found)`. It holds for
+    /// any start from `from` up to `found`, as for the brackets opened or erroring on one
+    /// line, which would otherwise each walk the same lines again.
+    line_search: Option<(u32, usize, usize)>,
     /// How the file indents: decided by its first indented line.
     indent_kind: IndentKind,
     reported_mixed: bool,
@@ -127,6 +136,7 @@ impl IndentedState {
             header: None,
             unwound: 0,
             brackets: Vec::new(),
+            line_search: None,
             indent_kind: IndentKind::None,
             reported_mixed: false,
             reported_kind: false,
@@ -612,6 +622,7 @@ impl<'src> Parser<'src> {
                 .relex_continued(self.source, line.next, across_blank)
         {
             self.indented.line.end = self.input.line_break_range(line.index).1;
+            self.indented.line_search = None;
         }
     }
 
@@ -759,6 +770,9 @@ impl<'src> Parser<'src> {
             return;
         };
         if self.error_messages.len() == bracket.errors {
+            if bracket.sync.is_some() {
+                self.fence = self.locate_fence();
+            }
             return;
         }
         let mut depth = 1u32;
@@ -795,7 +809,8 @@ impl<'src> Parser<'src> {
         for i in 0..self.indented.brackets.len() {
             if self.indented.brackets[i].sync.is_none() {
                 let column = self.indented.brackets[i].column;
-                self.indented.brackets[i].sync = Some(self.line_at_or_before_column(column));
+                self.indented.brackets[i].sync =
+                    Some(self.line_at_or_before_column(self.pos, column));
                 changed = true;
             }
         }
@@ -804,15 +819,110 @@ impl<'src> Parser<'src> {
         }
     }
 
-    /// The first token at or after the cursor that starts a line indented no deeper than
-    /// `column`, inside brackets or not; the input's length if there is none.
-    fn line_at_or_before_column(&self, column: u32) -> usize {
-        (self.pos..self.input.len())
-            .find(|&index| {
-                let (start, end) = self.input.line_break_range(index);
-                end > start && self.input.line_break(end - 1).column() <= column
-            })
-            .unwrap_or(self.input.len())
+    /// The bracket just entered, at its `open` token, is one whose contents the grammar
+    /// takes as they come, counting only `open` and `close`, and reports nothing inside.
+    /// If it is left unclosed (see [`Parser::bracket_left_unclosed`]), it ends as one
+    /// with an error inside does, at the next line no deeper than the one it opened on, or
+    /// at the end of input: the grammar reports it unclosed there. Braced, it ends at a
+    /// brace instead.
+    pub fn end_unclosed_bracket(&mut self, open: SyntaxKind, close: SyntaxKind) {
+        if self.layout != super::Layout::Indented {
+            return;
+        }
+        let Some(&Bracket {
+            pos, column, sync, ..
+        }) = self.indented.brackets.last()
+        else {
+            debug_assert!(false, "no bracket entered");
+            return;
+        };
+        debug_assert_eq!(pos, self.pos, "the bracket is entered at its opening token");
+        debug_assert_eq!(self.input.kind(pos), open, "the bracket opens with `open`");
+        if sync.is_some() || !self.bracket_left_unclosed(pos, column, open, close) {
+            return;
+        }
+        let sync = self.line_at_or_before_column(pos + 1, column);
+        if let Some(bracket) = self.indented.brackets.last_mut() {
+            bracket.sync = Some(sync);
+        }
+        self.fence = self.locate_fence();
+    }
+
+    /// Whether the bracket opened at `pos`, on a line indented by `column`, is left
+    /// unclosed: the input ends, or a line below heads a block, before its `close`. Such
+    /// a line is indented no deeper than `column`, is followed by a deeper one, and does
+    /// not end in a comma, which goes on with the line after it whatever its indentation.
+    /// Inside a bracket Dart Sass reads line breaks as whitespace, so a bracket that closes
+    /// on a later line, `.a:is(.b,` / `.c,` / `.d)`, is valid, but the deeper line below
+    /// such a header is its block, which no selector or prelude takes in. Brackets are
+    /// matched by kind: `open` nests, any other closer is content. The search gives up
+    /// after `UNCLOSED_LOOKAHEAD_LINES` lines with the bracket still open, as unclosed.
+    fn bracket_left_unclosed(
+        &self,
+        pos: usize,
+        column: u32,
+        open: SyntaxKind,
+        close: SyntaxKind,
+    ) -> bool {
+        let mut depth = 1u32;
+        let mut lines = 0;
+        // The indentation of the line being read, if it may head a block.
+        let mut header: Option<u32> = None;
+        for index in pos + 1..self.input.len() {
+            let (start, end) = self.input.line_break_range(index);
+            if end > start {
+                let indent = self.input.line_break(end - 1).column();
+                if header.is_some_and(|header| indent > header)
+                    && self.input.kind(index - 1) != SyntaxKind::COMMA
+                {
+                    return true;
+                }
+                lines += 1;
+                if lines > UNCLOSED_LOOKAHEAD_LINES {
+                    return true;
+                }
+                header = (indent <= column).then_some(indent);
+            }
+            let kind = self.input.kind(index);
+            if kind == open {
+                depth += 1;
+            } else if kind == close {
+                depth -= 1;
+                if depth == 0 {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    /// The first token at or after `from` that starts a line indented no deeper than
+    /// `column`, inside brackets or not; the input's length if there is none. Walks the
+    /// lines, not their tokens.
+    fn line_at_or_before_column(&mut self, from: usize, column: u32) -> usize {
+        if let Some((last_column, last_from, found)) = self.indented.line_search
+            && last_column == column
+            && (last_from..=found).contains(&from)
+        {
+            return found;
+        }
+        let found = self.find_line_at_or_before_column(from, column);
+        self.indented.line_search = Some((column, from, found));
+        found
+    }
+
+    fn find_line_at_or_before_column(&self, from: usize, column: u32) -> usize {
+        let count = self.input.line_break_count();
+        let mut index = self.input.line_break_range(from).0;
+        while index < count {
+            let token = self.input.line_break_owner(index);
+            let (_, end) = self.input.line_break_range(token);
+            if self.input.line_break(end - 1).column() <= column {
+                return token;
+            }
+            index = end;
+        }
+        self.input.len()
     }
 
     fn recovery_index(&self) -> Option<usize> {

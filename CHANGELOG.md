@@ -35,15 +35,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of a file, or a nested `.b` followed by `color: red;`, was silently accepted as a rule
   with no block. The same applies to a keyframe stop such as `50%` with no block. A
   pseudo-class or attribute selector left unclosed, as in `.a:not(.b`, is now reported
-  too and ends at the next `{` or `}`, where it previously swallowed every rule after it
-  up to the end of the file
-- Parser: a `(` left unclosed in the prelude of an unknown at-rule, as in `@foo (a`, or in
-  the parameters of a CSS `@function`, is reported as "expected RPAREN" and ends at the
-  next `{` or `}`, as in Dart Sass. It used to swallow every rule after it into the
-  prelude without a diagnostic. In `@-moz-document` and `@document`, an unquoted
-  `url-prefix(…)` argument, and `domain(…)` in `@-moz-document`, is read as a URL like
-  `url(…)`, so the `//` in `url-prefix(http://…)` no longer starts a comment that hid the
-  `)` and the rest of its line
+  too, where it previously swallowed every rule after it up to the end of the file. In
+  SCSS it ends at the next `{` or `}`. In indented Sass, where line breaks inside a
+  bracket are whitespace, a bracket still open at the end of the file, or at a line
+  below indented no deeper than its own that heads a block, ends at the first such line;
+  one taken by a closer of another kind, as in `.a:not(.b]`, ends with its line. A
+  bracket closed on a later line, as in `.a:is(.b,` / `.c,` / `.d)`, is read as before
+- Parser: a `(` left unclosed in the prelude of an unknown at-rule, as in `@foo (a`, in
+  the parameters of a CSS `@function`, or in the condition of `@media`, `@supports`,
+  `@container` or `@scope`, as in `@media (a`, is reported as "expected RPAREN" and ends
+  at the next `{` or `}`, or in indented Sass as an unclosed selector bracket does. It
+  used to swallow every rule after it into the prelude without a diagnostic, even when a
+  `)` further down the file seemed to close it. Only `@supports` may hold braces inside
+  its parentheses, as Dart Sass allows: they stay part of the condition when the
+  parentheses close and every bracket inside them closes in kind, as in
+  `@supports (a {b})` or `@supports (a {b} or (c))`. In `@media`, `@container` and
+  `@scope`, as in `@media (a {b})`, the first `{` is reported as "expected RPAREN", as in
+  Dart Sass. In `@-moz-document` and `@document`, an unquoted `url-prefix(…)`
+  argument, and `domain(…)` in `@-moz-document`, is read as a URL like `url(…)`, so the
+  `//` in `url-prefix(http://…)` no longer starts a comment that hid the `)` and the rest
+  of its line
+- Parser: in SCSS, a `@media` query and a `@supports` condition are read as Dart Sass
+  reads them, and end where Dart's do: a media query is conditions in parentheses
+  joined by `and` or `or`, `not` and a condition, or a media type, after an optional
+  modifier, followed by `and` and conditions, with queries separated by commas; a
+  `@supports` condition is `not` and a condition, or conditions joined by one of `and`
+  and `or`, each in parentheses, an interpolation or a function such as `selector(…)`.
+  Names may be interpolated as in Dart, `#{$a}-#{$b}` or `-#{$x}-b(c)`, and a media
+  type's modifier may stand on the line above it, `@media screen` / `div {` being the
+  query `screen div`. Where no block follows, one "expected `{`" is reported, unless the
+  query reported an error of its own: tokens left on the query's line are skipped up to
+  a block, which is then the rule's, as in `@media screen and (a) "x" {`, and a statement
+  on the next line keeps its own place, as in `@supports (a)` / `@include m;` or
+  `@media screen` / `$v: 1;`. A string left unclosed on the query's line that took the
+  block's `{`, as in `@media screen and (a) "x {`, is reported only as that. Rules of
+  this kind used to be read into the query without a
+  diagnostic, and `@supports (a)` at the end of a file or `.p { @media (a) }` was
+  silently accepted. `@container` and `@scope` may go without a block, as in Dart Sass,
+  and indented Sass is unchanged
 - Parser: a nested `name:value` statement holding something only a selector can, as in
   `div:hover .x` or `a:not(.b)`, is read as a rule missing its `{`, as Dart Sass reads it.
   The first was silently accepted as a declaration, and the second reported two

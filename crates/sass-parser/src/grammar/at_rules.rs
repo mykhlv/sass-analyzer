@@ -145,29 +145,82 @@ fn generic_at_rule(p: &mut Parser<'_>) {
     let _ = m.complete(p, GENERIC_AT_RULE);
 }
 
-/// Consume tokens opaquely until a token in `stop` is reached at paren-depth 0.
-/// Tracks `(` / `)` nesting and handles `#{` interpolation.
-/// Used by `@media`, `@supports`, `@container`, `@scope` conditions.
-pub(super) fn eat_opaque_condition(p: &mut Parser<'_>, stop: TokenSet) {
-    let mut depth: u32 = 0;
-    while !p.at_end() {
-        if depth == 0 && stop.contains(p.current()) {
-            break;
-        }
+/// Consume tokens opaquely until a token in `stop` is reached outside parentheses.
+/// Handles `#{` interpolation. Used by `@media`, `@supports`, `@container`, `@scope`
+/// conditions; only `@supports` holds brace groups inside its parentheses.
+pub(super) fn eat_opaque_condition(p: &mut Parser<'_>, stop: TokenSet, braces: bool) {
+    while !p.at_end() && !p.at_ts(stop) {
         match p.current() {
-            LPAREN => {
-                depth += 1;
-                p.bump();
-            }
-            RPAREN => {
-                depth = depth.saturating_sub(1);
-                p.bump();
-            }
+            LPAREN => eat_condition_parens(p, braces),
             HASH_LBRACE => {
                 let _ = interpolation(p);
             }
             _ => lines::bump_in_run(p),
         }
+    }
+}
+
+/// `( ... )` in a condition, nested ones included. A `;` inside stays part of it, and so
+/// do brace groups if the parentheses close in kind (see
+/// [`Parser::bracket_closes_in_kind`]). Only `@supports`, with `braces_inside`, may hold
+/// them, `@supports (a {b})`; elsewhere the first is reported, as Dart Sass reports
+/// `@media (a {b})`, and read on as part of the parentheses. If they do not close, the
+/// first `{` ends them unclosed, most likely opening the block of the rule below; a `}`
+/// that closes nothing inside always does. The indented layout ends them as
+/// `eat_balanced` does.
+pub(super) fn eat_condition_parens(p: &mut Parser<'_>, braces_inside: bool) {
+    assert!(p.at(LPAREN));
+    let p = &mut *p.transparent_guard();
+    let closes = p.braced() && p.bracket_closes_in_kind();
+    let unclosed = p.braced() && !closes;
+    // Outside `@supports`, the first brace group is reported, once.
+    let mut brace_reported = false;
+    p.end_unclosed_bracket(LPAREN, RPAREN);
+    p.bump();
+    let mut depth: u32 = 1;
+    let mut braces: u32 = 0;
+    while !p.at_end() && depth > 0 {
+        if p.at_virtual() {
+            // Braced, the `}` a string left unclosed swallowed, put back: it closes the
+            // brace group the string is in, as the parentheses go on below.
+            if p.braced() && braces > 0 && p.at(RBRACE) {
+                braces -= 1;
+                p.bump();
+                continue;
+            }
+            break;
+        }
+        // A string left unclosed took the rest of its line, but the closers below it
+        // still close the parentheses if they close in kind.
+        if !closes && p.at_unclosed_string_break() {
+            break;
+        }
+        match p.current() {
+            LPAREN => depth += 1,
+            RPAREN => depth -= 1,
+            LBRACE if unclosed => break,
+            LBRACE => {
+                if braces == 0 && !braces_inside && !brace_reported {
+                    brace_reported = true;
+                    p.error("expected RPAREN");
+                }
+                braces += 1;
+            }
+            RBRACE if braces == 0 => break,
+            RBRACE => braces -= 1,
+            HASH_LBRACE => {
+                let _ = interpolation(p);
+                continue;
+            }
+            _ => {
+                lines::bump_in_run(p);
+                continue;
+            }
+        }
+        p.bump();
+    }
+    if depth > 0 && !p.at_unclosed_string_break() {
+        super::report_unclosed(p, RPAREN);
     }
 }
 
