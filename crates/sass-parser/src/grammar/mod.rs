@@ -379,6 +379,12 @@ fn missing_rule_block(p: &mut Parser<'_>, selector_reported: bool) {
         }
         return;
     }
+    skip_to_rule_block(p);
+}
+
+/// Report the tokens at the cursor, where a `{` belongs, and skip them as one error up to
+/// the next `{`, `;` or `}`; a block there is still the rule's.
+pub(crate) fn skip_to_rule_block(p: &mut Parser<'_>) {
     let m = p.start();
     p.error("expected `{`");
     let mut interpolation: u32 = 0;

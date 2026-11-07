@@ -18,16 +18,31 @@ pub fn media_rule(p: &mut Parser<'_>) {
 
 fn media_query_list(p: &mut Parser<'_>) {
     let m = p.start();
-    super::eat_opaque_condition(p, query_stop(p), false);
+    if p.braced() {
+        loop {
+            media_query(p);
+            if !p.eat(COMMA) {
+                break;
+            }
+        }
+    } else {
+        super::eat_opaque_condition(p, BLOCK_STOP, false);
+    }
     let _ = m.complete(p, MEDIA_QUERY);
 }
 
-/// The block of a braced `@media` or `@supports`, which Dart Sass requires: one error if
-/// it is missing, unless the query reported one of its own since `errors`.
+/// The block of a braced `@media` or `@supports`, which Dart Sass requires. If it is
+/// missing, tokens left on the query's line are reported where the `{` belongs and
+/// skipped up to a block that is then the rule's, as in `@media screen and (a) "x" {`.
+/// Otherwise it is reported right after the query, unless the query reported an error
+/// of its own since `errors`, and a statement on the next line is left to itself.
 fn rule_body(p: &mut Parser<'_>, errors: usize) {
     if p.at(LBRACE) {
         super::block(p);
-    } else if p.braced() && p.error_count() == errors {
+    } else if !p.braced() {
+    } else if !p.at_end() && !p.at(SEMICOLON) && !p.at(RBRACE) && !p.at_line_break() {
+        super::super::skip_to_rule_block(p);
+    } else if p.error_count() == errors {
         p.error_after_prev("expected `{`");
     }
 }
@@ -38,17 +53,96 @@ const BLOCK_STOP: crate::token_set::TokenSet = crate::token_set::TokenSet::new(&
     LBRACE, RBRACE, SEMICOLON,
 ]);
 
-/// Those, and tokens that start a selector but no media query or `@supports` condition:
-/// braced, the query ends before them, as in Dart Sass, and leaves the rule they start to
-/// itself, `@supports (a)` / `.z { … }`.
-#[rustfmt::skip]
-const QUERY_STOP: crate::token_set::TokenSet = crate::token_set::TokenSet::new(&[
-    LBRACE, RBRACE, SEMICOLON,
-    DOT, HASH, COLON, COLON_COLON, LBRACKET, AMP, PERCENT, STAR, PIPE, GT, PLUS, TILDE,
-]);
+/// Whether the cursor is at the word `word`, in any case.
+fn at_word(p: &Parser<'_>, word: &str) -> bool {
+    p.at(IDENT) && p.current_text().eq_ignore_ascii_case(word)
+}
 
-fn query_stop(p: &Parser<'_>) -> crate::token_set::TokenSet {
-    if p.braced() { QUERY_STOP } else { BLOCK_STOP }
+fn at_identifier(p: &Parser<'_>) -> bool {
+    p.at(IDENT) || p.at(HASH_LBRACE)
+}
+
+/// An identifier, interpolated or not: its words and interpolations up to whitespace.
+fn identifier(p: &mut Parser<'_>) {
+    loop {
+        if p.at(HASH_LBRACE) {
+            let _ = super::interpolation(p);
+        } else {
+            p.bump();
+        }
+        if !at_identifier(p) || p.has_whitespace_before() {
+            break;
+        }
+    }
+}
+
+/// `( … )` or an interpolation, where Dart Sass reads a media condition in parentheses.
+fn media_in_parens(p: &mut Parser<'_>) -> bool {
+    if p.at(LPAREN) {
+        super::eat_condition_parens(p, false);
+    } else if p.at(HASH_LBRACE) {
+        let _ = super::interpolation(p);
+    } else {
+        return false;
+    }
+    true
+}
+
+/// Conditions in parentheses joined by `op`.
+fn media_sequence(p: &mut Parser<'_>, op: &str) {
+    while media_in_parens(p) && at_word(p, op) {
+        p.bump();
+    }
+}
+
+/// One braced media query, read as Dart Sass reads it, so that it ends where Dart's
+/// does: `(…)` joined by `and` or `or`; `not (…)`; or a media type, after an optional
+/// modifier, then `and` and conditions. Dart takes any word before the type as a
+/// modifier; one on a line of its own after the type, as in `@media screen` / `div {`,
+/// is taken for the selector of the rule below instead.
+fn media_query(p: &mut Parser<'_>) {
+    if p.at(LPAREN) {
+        media_in_parens(p);
+        if at_word(p, "and") {
+            p.bump();
+            media_sequence(p, "and");
+        } else if at_word(p, "or") {
+            p.bump();
+            media_sequence(p, "or");
+        }
+        return;
+    }
+    if !at_identifier(p) {
+        return;
+    }
+    let modifier = at_word(p, "not") || at_word(p, "only");
+    let not = at_word(p, "not");
+    identifier(p);
+    if not && !at_identifier(p) {
+        media_in_parens(p);
+        return;
+    }
+    if !at_identifier(p) {
+        return;
+    }
+    if at_word(p, "and") {
+        p.bump();
+    } else {
+        if !modifier && p.at_line_break() {
+            return;
+        }
+        identifier(p);
+        if !at_word(p, "and") {
+            return;
+        }
+        p.bump();
+    }
+    if at_word(p, "not") {
+        p.bump();
+        media_in_parens(p);
+        return;
+    }
+    media_sequence(p, "and");
 }
 
 /// `@supports condition { }`
@@ -66,8 +160,54 @@ pub fn supports_rule(p: &mut Parser<'_>) {
 
 fn supports_condition(p: &mut Parser<'_>) {
     let m = p.start();
-    super::eat_opaque_condition(p, query_stop(p), true);
+    if p.braced() {
+        supports_logic(p);
+    } else {
+        super::eat_opaque_condition(p, BLOCK_STOP, true);
+    }
     let _ = m.complete(p, SUPPORTS_CONDITION);
+}
+
+/// A braced `@supports` condition, read as Dart Sass reads it: `not` and a condition in
+/// parentheses, or conditions in parentheses joined by one of `and` and `or`. It ends
+/// before anything else, as Dart's does.
+fn supports_logic(p: &mut Parser<'_>) {
+    if at_word(p, "not") {
+        p.bump();
+        supports_in_parens(p);
+        return;
+    }
+    if !supports_in_parens(p) {
+        return;
+    }
+    let mut op: Option<String> = None;
+    while p.at(IDENT) {
+        let word = p.current_text().to_ascii_lowercase();
+        match &op {
+            Some(op) if *op == word => {}
+            None if word == "and" || word == "or" => op = Some(word),
+            _ => return,
+        }
+        p.bump();
+        if !supports_in_parens(p) {
+            return;
+        }
+    }
+}
+
+/// `( … )`, an interpolation, or a function such as `selector(…)` or `#{"a"}(b)`.
+fn supports_in_parens(p: &mut Parser<'_>) -> bool {
+    if at_identifier(p) {
+        identifier(p);
+        if p.at(LPAREN) && !p.has_whitespace_before() {
+            super::eat_condition_parens(p, true);
+        }
+    } else if p.at(LPAREN) {
+        super::eat_condition_parens(p, true);
+    } else {
+        return false;
+    }
+    true
 }
 
 /// `@keyframes name { from { } to { } 50% { } }`

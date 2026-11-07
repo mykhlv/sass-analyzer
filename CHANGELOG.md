@@ -55,11 +55,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   argument, and `domain(…)` in `@-moz-document`, is read as a URL like `url(…)`, so the
   `//` in `url-prefix(http://…)` no longer starts a comment that hid the `)` and the rest
   of its line
-- Parser: a braced `@media` or `@supports` with no block, as in `@supports (a)` at the
-  end of a file, `@media (a);` or `.p { @media (a) }`, is reported as "expected `{`", as
-  in Dart Sass. The query also ends before a token that starts a selector, so in
-  `@supports (a)` / `.z { e: f }` the rule `.z` keeps its block instead of being read
-  into the query. `@container` and `@scope` may go without a block, as in Dart Sass
+- Parser: in SCSS, a `@media` query and a `@supports` condition are read as Dart Sass
+  reads them, and end where Dart's do: a media query is conditions in parentheses
+  joined by `and` or `or`, `not` and a condition, or a media type, after an optional
+  modifier, followed by `and` and conditions, with queries separated by commas; a
+  `@supports` condition is `not` and a condition, or conditions joined by one of `and`
+  and `or`, each in parentheses, an interpolation or a function such as `selector(…)`.
+  A word on a line of its own after a media type starts the next rule. Where no block
+  follows, one "expected `{`" is reported, unless the query reported an error of its
+  own: tokens left on the query's line are skipped up to a block, which is then the
+  rule's, as in `@media screen and (a) "x" {`, and a statement on the next line keeps
+  its own place, as in `@media screen` / `div { e: f }` or `@supports (a)` /
+  `@include m;`. Rules of this kind used to be read into the query without a
+  diagnostic, and `@supports (a)` at the end of a file or `.p { @media (a) }` was
+  silently accepted. `@container` and `@scope` may go without a block, as in Dart Sass,
+  and indented Sass is unchanged
 - Parser: a nested `name:value` statement holding something only a selector can, as in
   `div:hover .x` or `a:not(.b)`, is read as a rule missing its `{`, as Dart Sass reads it.
   The first was silently accepted as a declaration, and the second reported two

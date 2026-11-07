@@ -168,11 +168,13 @@ pub(super) fn eat_opaque_condition(p: &mut Parser<'_>, stop: TokenSet, braces: b
 /// first `{` ends them unclosed, most likely opening the block of the rule below; a `}`
 /// that closes nothing inside always does. The indented layout ends them as
 /// `eat_balanced` does.
-fn eat_condition_parens(p: &mut Parser<'_>, braces_inside: bool) {
+pub(super) fn eat_condition_parens(p: &mut Parser<'_>, braces_inside: bool) {
     assert!(p.at(LPAREN));
     let p = &mut *p.transparent_guard();
-    let unclosed = p.braced() && !p.bracket_closes_in_kind();
-    let mut reported = braces_inside;
+    let closes = p.braced() && p.bracket_closes_in_kind();
+    let unclosed = p.braced() && !closes;
+    // Outside `@supports`, the first brace group is reported, once.
+    let mut brace_reported = false;
     p.end_unclosed_bracket(LPAREN, RPAREN);
     p.bump();
     let mut depth: u32 = 1;
@@ -188,7 +190,9 @@ fn eat_condition_parens(p: &mut Parser<'_>, braces_inside: bool) {
             }
             break;
         }
-        if p.at_unclosed_string_break() {
+        // A string left unclosed took the rest of its line, but the closers below it
+        // still close the parentheses if they close in kind.
+        if !closes && p.at_unclosed_string_break() {
             break;
         }
         match p.current() {
@@ -196,8 +200,8 @@ fn eat_condition_parens(p: &mut Parser<'_>, braces_inside: bool) {
             RPAREN => depth -= 1,
             LBRACE if unclosed => break,
             LBRACE => {
-                if braces == 0 && !reported {
-                    reported = true;
+                if braces == 0 && !braces_inside && !brace_reported {
+                    brace_reported = true;
                     p.error("expected RPAREN");
                 }
                 braces += 1;
