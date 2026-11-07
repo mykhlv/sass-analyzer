@@ -76,9 +76,9 @@ pub struct Parser<'src> {
     open_strings: Vec<TextSize>,
     /// In the braced layout, where each `{` and `#{` not yet closed starts, innermost last.
     open_braces: Vec<TextSize>,
-    /// For [`Parser::bracket_closes_in_kind`]: the token it first read from, and the
-    /// openers from there on that do not close in kind, in order.
-    unclosed_in_kind: Option<(usize, Vec<u32>)>,
+    /// For [`Parser::bracket_closes_in_kind`]: the openers from the first bracket it was
+    /// asked about on that do not close in kind, in order.
+    unclosed_in_kind: Option<Vec<usize>>,
 }
 
 impl<'src> Parser<'src> {
@@ -177,51 +177,34 @@ impl<'src> Parser<'src> {
     ///
     /// Read once from the first bracket asked about: every bracket still open when a
     /// closer of another kind comes, or when the input ends, is one that does not close,
-    /// whichever bracket the reading started at, so later ones are looked up.
+    /// whichever bracket the reading started at, and the cursor never goes back, so later
+    /// ones are looked up.
     pub fn bracket_closes_in_kind(&mut self) -> bool {
         debug_assert_eq!(
             self.layout,
             Layout::Braced,
             "tokens may change when indented"
         );
-        debug_assert!(
-            matches!(
-                self.current(),
-                SyntaxKind::LPAREN
-                    | SyntaxKind::LBRACKET
-                    | SyntaxKind::LBRACE
-                    | SyntaxKind::HASH_LBRACE
-            ),
-            "not at a bracket",
-        );
+        debug_assert!(bracket_closer(self.current()).is_some(), "not at a bracket");
         let pos = self.pos;
-        let fresh = matches!(self.unclosed_in_kind, Some((start, _)) if start <= pos);
-        if !fresh {
-            self.unclosed_in_kind = Some((pos, self.openers_not_closing_in_kind(pos)));
-        }
-        let Some((_, unclosed)) = &self.unclosed_in_kind else {
-            return false;
-        };
-        u32::try_from(pos).is_ok_and(|pos| unclosed.binary_search(&pos).is_err())
+        let unclosed = self
+            .unclosed_in_kind
+            .take()
+            .unwrap_or_else(|| self.openers_not_closing_in_kind(pos));
+        let closes = unclosed.binary_search(&pos).is_err();
+        self.unclosed_in_kind = Some(unclosed);
+        closes
     }
 
-    fn openers_not_closing_in_kind(&self, from: usize) -> Vec<u32> {
-        let mut open: Vec<(u32, SyntaxKind)> = Vec::new();
+    fn openers_not_closing_in_kind(&self, from: usize) -> Vec<usize> {
+        let mut open: Vec<(usize, SyntaxKind)> = Vec::new();
         let mut unclosed = Vec::new();
         for index in from..self.input.len() {
-            #[allow(clippy::cast_possible_truncation)]
-            let token = index as u32;
-            let closer = match self.input.kind(index) {
-                SyntaxKind::LPAREN => Some(SyntaxKind::RPAREN),
-                SyntaxKind::LBRACKET => Some(SyntaxKind::RBRACKET),
-                SyntaxKind::LBRACE | SyntaxKind::HASH_LBRACE => Some(SyntaxKind::RBRACE),
-                _ => None,
-            };
-            if let Some(closer) = closer {
-                open.push((token, closer));
+            let kind = self.bracket_kind_of(index);
+            if let Some(closer) = bracket_closer(kind) {
+                open.push((index, closer));
                 continue;
             }
-            let kind = self.input.kind(index);
             if !matches!(
                 kind,
                 SyntaxKind::RPAREN | SyntaxKind::RBRACKET | SyntaxKind::RBRACE
@@ -232,13 +215,34 @@ impl<'src> Parser<'src> {
                 Some(&(_, closer)) if closer == kind => {
                     open.pop();
                 }
-                Some(_) => unclosed.extend(open.drain(..).map(|(token, _)| token)),
+                Some(_) => unclosed.extend(open.drain(..).map(|(index, _)| index)),
                 // A closer of nothing: no bracket is open to see it.
                 None => {}
             }
         }
-        unclosed.extend(open.into_iter().map(|(token, _)| token));
+        unclosed.extend(open.into_iter().map(|(index, _)| index));
         unclosed
+    }
+
+    /// The kind of the token at `index`, as brackets go: a quoted string left unclosed
+    /// counts as the bracket its line ends in, which it most likely took, `"d }`.
+    fn bracket_kind_of(&self, index: usize) -> SyntaxKind {
+        let kind = self.input.kind(index);
+        if kind != SyntaxKind::QUOTED_STRING {
+            return kind;
+        }
+        let text = &self.source[self.input.range(index)];
+        let quote = text.as_bytes()[0];
+        if crate::lexer::closes_string(&text[1..], quote) {
+            return kind;
+        }
+        match text.trim_end().as_bytes().last() {
+            Some(b')') => SyntaxKind::RPAREN,
+            Some(b']') => SyntaxKind::RBRACKET,
+            Some(b'}') => SyntaxKind::RBRACE,
+            Some(b'{') => SyntaxKind::LBRACE,
+            _ => kind,
+        }
     }
 
     /// Whether blocks and statements are delimited by real tokens only. In the indented
@@ -699,6 +703,16 @@ enum StringTail {
     /// In a token that closes a construct: `)`, `]`, `;`, `{` or `}`.
     Closer,
     Plain,
+}
+
+/// The closer of a bracket that `kind` opens, if it opens one.
+fn bracket_closer(kind: SyntaxKind) -> Option<SyntaxKind> {
+    match kind {
+        SyntaxKind::LPAREN => Some(SyntaxKind::RPAREN),
+        SyntaxKind::LBRACKET => Some(SyntaxKind::RBRACKET),
+        SyntaxKind::LBRACE | SyntaxKind::HASH_LBRACE => Some(SyntaxKind::RBRACE),
+        _ => None,
+    }
 }
 
 fn eof_fence(input: &Input) -> Fence {

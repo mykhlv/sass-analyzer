@@ -10,18 +10,26 @@ pub fn media_rule(p: &mut Parser<'_>) {
     p.continue_header(&super::lines::QUERY);
 
     // Media query list — opaque until `;` or `{`
+    let errors = p.error_count();
     media_query_list(p);
-
-    if p.at(LBRACE) {
-        super::block(p);
-    }
+    rule_body(p, errors);
     let _ = m.complete(p, MEDIA_RULE);
 }
 
 fn media_query_list(p: &mut Parser<'_>) {
     let m = p.start();
-    super::eat_opaque_condition(p, BLOCK_STOP);
+    super::eat_opaque_condition(p, query_stop(p), false);
     let _ = m.complete(p, MEDIA_QUERY);
+}
+
+/// The block of a braced `@media` or `@supports`, which Dart Sass requires: one error if
+/// it is missing, unless the query reported one of its own since `errors`.
+fn rule_body(p: &mut Parser<'_>, errors: usize) {
+    if p.at(LBRACE) {
+        super::block(p);
+    } else if p.braced() && p.error_count() == errors {
+        p.error_after_prev("expected `{`");
+    }
 }
 
 /// Tokens that stop opaque condition consumption.
@@ -30,6 +38,19 @@ const BLOCK_STOP: crate::token_set::TokenSet = crate::token_set::TokenSet::new(&
     LBRACE, RBRACE, SEMICOLON,
 ]);
 
+/// Those, and tokens that start a selector but no media query or `@supports` condition:
+/// braced, the query ends before them, as in Dart Sass, and leaves the rule they start to
+/// itself, `@supports (a)` / `.z { … }`.
+#[rustfmt::skip]
+const QUERY_STOP: crate::token_set::TokenSet = crate::token_set::TokenSet::new(&[
+    LBRACE, RBRACE, SEMICOLON,
+    DOT, HASH, COLON, COLON_COLON, LBRACKET, AMP, PERCENT, STAR, PIPE, GT, PLUS, TILDE,
+]);
+
+fn query_stop(p: &Parser<'_>) -> crate::token_set::TokenSet {
+    if p.braced() { QUERY_STOP } else { BLOCK_STOP }
+}
+
 /// `@supports condition { }`
 pub fn supports_rule(p: &mut Parser<'_>) {
     let m = p.start();
@@ -37,17 +58,15 @@ pub fn supports_rule(p: &mut Parser<'_>) {
     p.bump(); // supports
     p.continue_header(&super::lines::QUERY);
 
+    let errors = p.error_count();
     supports_condition(p);
-
-    if p.at(LBRACE) {
-        super::block(p);
-    }
+    rule_body(p, errors);
     let _ = m.complete(p, SUPPORTS_RULE);
 }
 
 fn supports_condition(p: &mut Parser<'_>) {
     let m = p.start();
-    super::eat_opaque_condition(p, BLOCK_STOP);
+    super::eat_opaque_condition(p, query_stop(p), true);
     let _ = m.complete(p, SUPPORTS_CONDITION);
 }
 

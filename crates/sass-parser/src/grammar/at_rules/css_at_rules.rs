@@ -73,7 +73,7 @@ pub fn container_rule(p: &mut Parser<'_>) {
         p.bump();
     }
 
-    super::eat_opaque_condition(p, BLOCK_STOP);
+    super::eat_opaque_condition(p, BLOCK_STOP, false);
 
     if p.at(LBRACE) {
         super::block(p);
@@ -88,7 +88,7 @@ pub fn scope_rule(p: &mut Parser<'_>) {
     p.bump(); // scope
     p.continue_header(&super::lines::SCOPE);
 
-    super::eat_opaque_condition(p, BLOCK_STOP);
+    super::eat_opaque_condition(p, BLOCK_STOP, false);
 
     if p.at(LBRACE) {
         super::block(p);

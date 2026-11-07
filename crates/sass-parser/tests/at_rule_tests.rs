@@ -1607,6 +1607,272 @@ fn many_unclosed_condition_parens_stay_proportional() {
 }
 
 #[test]
+fn media_brace_group_in_parens_is_one_error() {
+    check(
+        "@media (a {b}) { .x { c: d } }",
+        expect![[r#"
+        SOURCE_FILE@0..30
+          MEDIA_RULE@0..30
+            AT@0..1 "@"
+            IDENT@1..6 "media"
+            MEDIA_QUERY@6..14
+              WHITESPACE@6..7 " "
+              LPAREN@7..8 "("
+              IDENT@8..9 "a"
+              WHITESPACE@9..10 " "
+              LBRACE@10..11 "{"
+              IDENT@11..12 "b"
+              RBRACE@12..13 "}"
+              RPAREN@13..14 ")"
+            BLOCK@14..30
+              WHITESPACE@14..15 " "
+              LBRACE@15..16 "{"
+              RULE_SET@16..28
+                SELECTOR_LIST@16..19
+                  SELECTOR@16..19
+                    SIMPLE_SELECTOR@16..19
+                      WHITESPACE@16..17 " "
+                      DOT@17..18 "."
+                      IDENT@18..19 "x"
+                BLOCK@19..28
+                  WHITESPACE@19..20 " "
+                  LBRACE@20..21 "{"
+                  DECLARATION@21..26
+                    PROPERTY@21..23
+                      WHITESPACE@21..22 " "
+                      IDENT@22..23 "c"
+                    COLON@23..24 ":"
+                    VALUE@24..26
+                      VALUE@24..26
+                        WHITESPACE@24..25 " "
+                        IDENT@25..26 "d"
+                  WHITESPACE@26..27 " "
+                  RBRACE@27..28 "}"
+              WHITESPACE@28..29 " "
+              RBRACE@29..30 "}"
+        errors:
+          10..11: expected RPAREN
+    "#]],
+    );
+}
+
+#[test]
+fn container_and_scope_brace_group_in_parens_is_one_error() {
+    for (source, at) in [
+        ("@container (a {b}) { .x { c: d } }", 14),
+        ("@scope (.a {b}) { .x { c: d } }", 11),
+    ] {
+        let (green, errors) = sass_parser::parse_scss(source);
+        assert_eq!(SyntaxNode::new_root(green).text().to_string(), source);
+        let found: Vec<_> = errors
+            .iter()
+            .map(|(m, r)| (m.as_str(), u32::from(r.start())))
+            .collect();
+        assert_eq!(found, [("expected RPAREN", at)], "{source:?}");
+    }
+}
+
+#[test]
+fn supports_brace_groups_of_any_content_stay_part_of_the_condition() {
+    for source in [
+        "@supports (a {b {c}}) { .x { y: z } }",
+        "@supports (a {b: c}) { .x { y: z } }",
+        "@supports (a {b; c}) { .x { y: z } }",
+        "@supports (a {\n  b\n}) { .x { y: z } }",
+    ] {
+        let (green, errors) = sass_parser::parse_scss(source);
+        assert_eq!(SyntaxNode::new_root(green).text().to_string(), source);
+        assert!(errors.is_empty(), "{source:?}: {errors:?}");
+    }
+}
+
+#[test]
+fn supports_without_a_block_at_eof() {
+    check(
+        "@supports (a)",
+        expect![[r#"
+        SOURCE_FILE@0..13
+          SUPPORTS_RULE@0..13
+            AT@0..1 "@"
+            IDENT@1..9 "supports"
+            SUPPORTS_CONDITION@9..13
+              WHITESPACE@9..10 " "
+              LPAREN@10..11 "("
+              IDENT@11..12 "a"
+              RPAREN@12..13 ")"
+        errors:
+          13..13: expected `{`
+    "#]],
+    );
+}
+
+#[test]
+fn supports_without_a_block_leaves_the_rule_below_alone() {
+    check(
+        "@supports (a {b})\n.z { e: f }\n",
+        expect![[r#"
+        SOURCE_FILE@0..30
+          SUPPORTS_RULE@0..17
+            AT@0..1 "@"
+            IDENT@1..9 "supports"
+            SUPPORTS_CONDITION@9..17
+              WHITESPACE@9..10 " "
+              LPAREN@10..11 "("
+              IDENT@11..12 "a"
+              WHITESPACE@12..13 " "
+              LBRACE@13..14 "{"
+              IDENT@14..15 "b"
+              RBRACE@15..16 "}"
+              RPAREN@16..17 ")"
+          RULE_SET@17..29
+            SELECTOR_LIST@17..20
+              SELECTOR@17..20
+                SIMPLE_SELECTOR@17..20
+                  WHITESPACE@17..18 "\n"
+                  DOT@18..19 "."
+                  IDENT@19..20 "z"
+            BLOCK@20..29
+              WHITESPACE@20..21 " "
+              LBRACE@21..22 "{"
+              DECLARATION@22..27
+                PROPERTY@22..24
+                  WHITESPACE@22..23 " "
+                  IDENT@23..24 "e"
+                COLON@24..25 ":"
+                VALUE@25..27
+                  VALUE@25..27
+                    WHITESPACE@25..26 " "
+                    IDENT@26..27 "f"
+              WHITESPACE@27..28 " "
+              RBRACE@28..29 "}"
+          WHITESPACE@29..30 "\n"
+        errors:
+          17..17: expected `{`
+    "#]],
+    );
+}
+
+#[test]
+fn supports_condition_closed_by_a_stray_paren_below_lacks_a_block() {
+    // Dart Sass reads everything up to the `)` as the condition, then expects `{`.
+    check(
+        "@supports (a {\n  .x { c: d }\n}\n.z { e: f }\n)\n",
+        expect![[r#"
+        SOURCE_FILE@0..45
+          SUPPORTS_RULE@0..44
+            AT@0..1 "@"
+            IDENT@1..9 "supports"
+            SUPPORTS_CONDITION@9..44
+              WHITESPACE@9..10 " "
+              LPAREN@10..11 "("
+              IDENT@11..12 "a"
+              WHITESPACE@12..13 " "
+              LBRACE@13..14 "{"
+              WHITESPACE@14..17 "\n  "
+              DOT@17..18 "."
+              IDENT@18..19 "x"
+              WHITESPACE@19..20 " "
+              LBRACE@20..21 "{"
+              WHITESPACE@21..22 " "
+              IDENT@22..23 "c"
+              COLON@23..24 ":"
+              WHITESPACE@24..25 " "
+              IDENT@25..26 "d"
+              WHITESPACE@26..27 " "
+              RBRACE@27..28 "}"
+              WHITESPACE@28..29 "\n"
+              RBRACE@29..30 "}"
+              WHITESPACE@30..31 "\n"
+              DOT@31..32 "."
+              IDENT@32..33 "z"
+              WHITESPACE@33..34 " "
+              LBRACE@34..35 "{"
+              WHITESPACE@35..36 " "
+              IDENT@36..37 "e"
+              COLON@37..38 ":"
+              WHITESPACE@38..39 " "
+              IDENT@39..40 "f"
+              WHITESPACE@40..41 " "
+              RBRACE@41..42 "}"
+              WHITESPACE@42..43 "\n"
+              RPAREN@43..44 ")"
+          WHITESPACE@44..45 "\n"
+        errors:
+          44..44: expected `{`
+    "#]],
+    );
+}
+
+#[test]
+fn media_and_supports_need_a_block_while_container_and_scope_do_not() {
+    for (source, errors) in [
+        ("@media (a);", 1),
+        ("@media (a)", 1),
+        (".p { @media (a) }", 1),
+        (".p { @supports (a) }", 1),
+        ("@supports (a);", 1),
+        ("@media screen .z { e: f }", 1),
+        ("@container (a);", 0),
+        ("@container (a)", 0),
+        ("@scope (.a);", 0),
+        ("@scope (.a)", 0),
+    ] {
+        let (green, found) = sass_parser::parse_scss(source);
+        assert_eq!(SyntaxNode::new_root(green).text().to_string(), source);
+        assert_eq!(found.len(), errors, "{source:?}: {found:?}");
+        assert!(
+            found.iter().all(|(m, _)| m == "expected `{`"),
+            "{source:?}: {found:?}"
+        );
+    }
+}
+
+#[test]
+fn supports_brace_group_with_a_string_left_unclosed_inside() {
+    check(
+        ".a { @supports (b {c: \"d }\n) {} }\n",
+        expect![[r#"
+        SOURCE_FILE@0..34
+          RULE_SET@0..33
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            BLOCK@2..33
+              WHITESPACE@2..3 " "
+              LBRACE@3..4 "{"
+              SUPPORTS_RULE@4..31
+                WHITESPACE@4..5 " "
+                AT@5..6 "@"
+                IDENT@6..14 "supports"
+                SUPPORTS_CONDITION@14..28
+                  WHITESPACE@14..15 " "
+                  LPAREN@15..16 "("
+                  IDENT@16..17 "b"
+                  WHITESPACE@17..18 " "
+                  LBRACE@18..19 "{"
+                  IDENT@19..20 "c"
+                  COLON@20..21 ":"
+                  WHITESPACE@21..22 " "
+                  QUOTED_STRING@22..26 "\"d }"
+                  RBRACE@26..26 ""
+                  WHITESPACE@26..27 "\n"
+                  RPAREN@27..28 ")"
+                BLOCK@28..31
+                  WHITESPACE@28..29 " "
+                  LBRACE@29..30 "{"
+                  RBRACE@30..31 "}"
+              WHITESPACE@31..32 " "
+              RBRACE@32..33 "}"
+          WHITESPACE@33..34 "\n"
+        errors:
+          22..26: unterminated string
+    "#]],
+    );
+}
+
+#[test]
 fn supports_balanced_braces_in_parens_stay_part_of_them() {
     check(
         "@supports (a {b} c) { d: e }",
@@ -2923,11 +3189,11 @@ fn regression_supports_missing_brace_recovery() {
                 BLOCK@2..44
                   WHITESPACE@2..3 " "
                   LBRACE@3..4 "{"
-                  SUPPORTS_RULE@4..41
+                  SUPPORTS_RULE@4..36
                     WHITESPACE@4..5 " "
                     AT@5..6 "@"
                     IDENT@6..14 "supports"
-                    SUPPORTS_CONDITION@14..41
+                    SUPPORTS_CONDITION@14..36
                       WHITESPACE@14..15 " "
                       LPAREN@15..16 "("
                       IDENT@16..23 "display"
@@ -2937,12 +3203,19 @@ fn regression_supports_missing_brace_recovery() {
                       RPAREN@29..30 ")"
                       WHITESPACE@30..31 " "
                       IDENT@31..36 "color"
-                      COLON@36..37 ":"
-                      WHITESPACE@37..38 " "
-                      IDENT@38..41 "red"
+                  RULE_SET@36..41
+                    SELECTOR_LIST@36..41
+                      SELECTOR@36..41
+                        PSEUDO_SELECTOR@36..41
+                          COLON@36..37 ":"
+                          WHITESPACE@37..38 " "
+                          IDENT@38..41 "red"
                   SEMICOLON@41..42 ";"
                   WHITESPACE@42..43 " "
                   RBRACE@43..44 "}"
+            errors:
+              36..36: expected `{`
+              41..41: expected `{`
         "#]],
     );
 }
@@ -3123,6 +3396,8 @@ fn regression_media_malformed_rbrace_stops() {
                   LBRACE@24..25 "{"
                   WHITESPACE@25..26 " "
                   RBRACE@26..27 "}"
+            errors:
+              18..18: expected `{`
         "#]],
     );
 }
