@@ -149,7 +149,7 @@ fn pinned_inputs_keep_their_trees() {
         3 0/0/0 6d4bef7e27410221 "$0*\n"
         4 0/0/0 5f254e93c53cd367 "$||:\u{c}"
         1 1/0/0 837a7e16c16fb00b ":*\n"
-        1 0/0/1 d054bbebb19a622c "=\n\n\t//\n"
+        1 0/0/0 ee072256d86b4eaa "=\n\n\t//\n"
         4 0/0/0 d200374b7fef73eb "$+*//\n"
         5 0/0/1 ba4b05b7bc932812 "$@\n ''"
         5 1/0/0 b1b365469fd5b620 "$\n\t //\n #\n"
@@ -1201,6 +1201,121 @@ fn a_colon_rule_with_a_flag_is_one_error() {
             error 15..16: expected newline
         "#]],
     );
+}
+
+// ── Blank lines in a continued statement ────────────────────────────
+
+/// Where a header requires more, Dart Sass reads on across blank lines too: after the
+/// rule's name and after a word that needs an argument, a comment line or not.
+#[test]
+fn a_header_goes_on_across_a_blank_line() {
+    for source in [
+        "@mixin\n\n  foo\n  a: b\n",
+        "@mixin\n\n\n  foo\n  a: b\n",
+        "@mixin\n  // c\n\n  foo\n  a: b\n",
+        "=\n\n  foo\n  a: b\n",
+        "@function\n\n  f()\n  @return 1\n",
+        "@mixin foo\n  a: b\n.x\n  @include\n\n    foo\n",
+        ".b\n  c: d\n.a\n  @extend\n\n    .b\n",
+        ".x\n  @if\n\n    true\n    a: b\n",
+        "@use \"sass:math\" as\n\n  m\n",
+        ".x\n  @each $v in\n\n    1 2\n    a: $v\n",
+        "$a: 1\n.x\n  @if $a and\n\n    $a\n    b: c\n",
+    ] {
+        let tree = render(parse_sass, source);
+        assert!(!tree.contains("\nerror "), "{source:?}:\n{tree}");
+    }
+}
+
+#[test]
+fn a_mixin_name_after_a_blank_line_is_its_name() {
+    check(
+        "@mixin\n\n  foo\n  a: b\n",
+        expect![[r#"
+            SOURCE_FILE@0..21
+              MIXIN_RULE@0..20
+                AT@0..1 "@"
+                IDENT@1..6 "mixin"
+                WHITESPACE@6..10 "\n\n  "
+                IDENT@10..13 "foo"
+                BLOCK@13..20
+                  LBRACE@13..13 ""
+                  DECLARATION@13..20
+                    PROPERTY@13..17
+                      WHITESPACE@13..16 "\n  "
+                      IDENT@16..17 "a"
+                    COLON@17..18 ":"
+                    VALUE@18..20
+                      VALUE@18..20
+                        WHITESPACE@18..19 " "
+                        IDENT@19..20 "b"
+                    SEMICOLON@20..20 ""
+                  RBRACE@20..20 ""
+              WHITESPACE@20..21 "\n"
+        "#]],
+    );
+}
+
+/// An operator's operand may follow it after blank lines, as in Dart Sass, when the line
+/// it is on starts like an expression.
+#[test]
+fn an_operator_goes_on_across_a_blank_line() {
+    for source in [
+        "$a: 1 +\n\n  2\n",
+        "$a: 1 +\n\n2\n",
+        ".x\n  b: 1 +\n\n    2\n",
+        ".x\n  b: 1 -\n\n    2\n",
+        ".x\n  b: c and\n\n    d\n",
+        ".x\n  b: not\n\n    c\n",
+        "$i: 6\n@while $i >\n\n  5\n  $i: $i - 1\n",
+    ] {
+        let tree = render(parse_sass, source);
+        assert!(!tree.contains("\nerror "), "{source:?}:\n{tree}");
+    }
+}
+
+#[test]
+fn an_operand_after_a_blank_line_is_the_operand() {
+    check(
+        ".x\n  b: 1 +\n\n    2\n",
+        expect![[r#"
+            SOURCE_FILE@0..19
+              RULE_SET@0..18
+                SELECTOR_LIST@0..2
+                  SELECTOR@0..2
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "x"
+                BLOCK@2..18
+                  LBRACE@2..2 ""
+                  DECLARATION@2..18
+                    PROPERTY@2..6
+                      WHITESPACE@2..5 "\n  "
+                      IDENT@5..6 "b"
+                    COLON@6..7 ":"
+                    VALUE@7..18
+                      NUMBER_LITERAL@7..9
+                        WHITESPACE@7..8 " "
+                        NUMBER@8..9 "1"
+                      UNARY_EXPR@9..18
+                        WHITESPACE@9..10 " "
+                        PLUS@10..11 "+"
+                        NUMBER_LITERAL@11..18
+                          WHITESPACE@11..17 "\n\n    "
+                          NUMBER@17..18 "2"
+                    SEMICOLON@18..18 ""
+                  RBRACE@18..18 ""
+              WHITESPACE@18..19 "\n"
+        "#]],
+    );
+}
+
+/// A header that ends at the end of the input, after a blank line, is still missing its
+/// name: one error.
+#[test]
+fn a_header_with_only_blank_lines_after_it_is_one_error() {
+    assert_eq!(error_count("@mixin\n\n"), 1);
+    assert_eq!(error_count("@mixin\n\n.a\n  b: c\n"), 1);
 }
 
 // ── Line breaks the grammar absorbs ──────────────────────────────────

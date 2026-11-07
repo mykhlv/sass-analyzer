@@ -152,7 +152,7 @@ fn value(p: &mut Parser<'_>) {
         // In CssValue context, `/` is a separator — just consume it
         if p.at(SLASH) {
             p.bump();
-            p.continue_line();
+            p.continue_line_to(expressions::EXPR_START);
             has_content = true;
             operand_before = false;
             continue;
@@ -177,7 +177,7 @@ fn value(p: &mut Parser<'_>) {
             operand_before = true;
             match operator {
                 WordOperator::GoesOn => {
-                    p.continue_line();
+                    p.continue_line_to(expressions::EXPR_START);
                 }
                 WordOperator::NoOperand => {
                     p.error_after_prev(format!("expected expression after `{}`", p.prev_text()));

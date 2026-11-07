@@ -12,6 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without a changelog entry.
 
 ### Fixed
+- Indented Sass: a header goes on across blank lines where it requires more, as in Dart
+  Sass: a name after `@mixin`, `=`, `@function`, `@include` or `@extend` on a later line,
+  a condition after `@if`, and an argument after a word such as `in` or `as`. Each of
+  these reported an error when a blank line came first. An operator's operand may also
+  follow it after a blank line, as in `$a: 1 +` / (blank) / `2`, when that line starts
+  like an expression; before a line that does not, as a rule's `.b`, the operand is
+  still reported missing and the rule below is left alone
 - Indented Sass: a declaration value ending in `and`, `or` or `not` before a line that is
   a declaration of its own, as `content: not` / `b: c`, reports the operator's missing
   operand, as Dart Sass reports the form. It was accepted with no diagnostic. `and` or

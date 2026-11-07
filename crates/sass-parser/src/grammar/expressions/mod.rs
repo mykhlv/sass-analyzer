@@ -81,7 +81,7 @@ pub(crate) fn sass_value(p: &mut Parser<'_>, ctx: ParseContext) -> Option<Comple
         if p.at(SLASH) {
             // CSS separator: `11px/1.5`, `font: 12px/1.4 sans-serif`
             p.bump();
-            p.continue_line();
+            p.continue_line_to(EXPR_START);
         } else if p.at_ts(EXPR_START) {
             expr(p, ctx);
         } else {
@@ -173,7 +173,7 @@ fn lhs(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarker> {
     if let Some(r_bp) = prefix_bp(kind, text, ctx) {
         let m = p.start();
         p.bump(); // operator
-        p.continue_line();
+        p.continue_line_to(EXPR_START);
         expr_bp(p, r_bp, ctx);
         return Some(m.complete(p, UNARY_EXPR));
     }

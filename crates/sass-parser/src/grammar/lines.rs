@@ -78,19 +78,24 @@ pub(crate) fn bump_in_run(p: &mut Parser<'_>) {
         p.bump();
         p.continue_line_across_blank();
     } else if UNFINISHED.contains(kind) {
-        bump_operator(p);
+        let unit = p.at(PERCENT) && p.prev_kind() == NUMBER;
+        p.bump();
+        if !unit {
+            p.continue_line();
+        }
     } else {
         p.bump();
     }
 }
 
-/// Bump an operator, which continues its statement on the next line if it ends this
-/// one — except a `%` right after a number, which reads as the number's unit there.
+/// Bump an operator of an expression, which continues its statement on the next line if
+/// it ends this one, across blank lines to a line that starts an expression, as in Dart
+/// Sass — except a `%` right after a number, which reads as the number's unit there.
 pub(crate) fn bump_operator(p: &mut Parser<'_>) {
     let unit = p.at(PERCENT) && p.prev_kind() == NUMBER;
     p.bump();
     if !unit {
-        p.continue_line();
+        p.continue_line_to(super::expressions::EXPR_START);
     }
 }
 

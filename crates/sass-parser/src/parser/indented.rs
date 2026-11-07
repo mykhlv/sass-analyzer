@@ -28,7 +28,7 @@ use crate::token_set::TokenSet;
 ///
 /// A header goes on over a line break when the line ends with the header's name and
 /// `name_continues` (`@mixin` / `  name`), or with one of `end_words` (`@for $i from` /
-/// `  1 through 3`), unless a blank line follows. Elsewhere the grammar continues the
+/// `  1 through 3`), blank lines included. Elsewhere the grammar continues the
 /// line itself where the header cannot end (see [`Parser::continue_line`]).
 #[derive(Debug)]
 pub struct HeaderLines {
@@ -158,6 +158,19 @@ impl<'src> Parser<'src> {
     #[inline]
     pub fn continue_line_across_blank(&mut self) -> bool {
         self.layout == super::Layout::Indented && self.absorb_line_breaks(true)
+    }
+
+    /// [`Parser::continue_line`], across blank lines too if the line after them starts
+    /// with one of `starts`, as an operator's operand does.
+    #[inline]
+    pub fn continue_line_to(&mut self, starts: TokenSet) -> bool {
+        if self.layout != super::Layout::Indented {
+            return false;
+        }
+        let line = self.indented.line;
+        let across_blank =
+            line.index < self.input.len() && starts.contains(self.input.kind(line.index));
+        self.absorb_line_breaks(across_blank)
     }
 
     /// Declare how the header of the statement being parsed goes on across lines (see
@@ -591,12 +604,13 @@ impl<'src> Parser<'src> {
 
     /// Whether the statement goes on over `line_break`, the next to process before `line`,
     /// because the line above it is unfinished: where the grammar said so, or the header
-    /// being parsed. A blank line stops it, except after a comma.
+    /// being parsed, whose name or word that requires more goes on across blank lines too.
+    /// Otherwise a blank line stops it, except after a comma.
     fn goes_on_over(&self, line: &Line, line_break: LineBreak) -> bool {
         match line.goes_on {
             GoesOn::AcrossBlank => true,
             GoesOn::Lines if !line_break.is_blank_line() => true,
-            _ => !line_break.is_blank_line() && self.header_goes_on_at_end_of_line(line),
+            _ => self.header_goes_on_at_end_of_line(line),
         }
     }
 
@@ -608,7 +622,8 @@ impl<'src> Parser<'src> {
         let after_break = self.input.line_break(line.next).trivia() as usize + 1;
         let comment_follows = after_break < self.input.trivia_end_index(line.index)
             && self.input.all_trivia()[after_break].0 != SyntaxKind::WHITESPACE;
-        let across_blank = line.goes_on == GoesOn::AcrossBlank;
+        let across_blank =
+            line.goes_on == GoesOn::AcrossBlank || self.header_goes_on_at_end_of_line(&line);
         if comment_follows
             && self
                 .input
