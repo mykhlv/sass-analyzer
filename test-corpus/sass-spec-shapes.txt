@@ -166,11 +166,11 @@ sass	directives/each/sass/inline	0	1	1	2	e6ee8db450b1d026
 sass	directives/each/sass/multiline/after_each	0	1	1	2	5073667dfacb8278
 sass	directives/each/sass/multiline/after_in	0	1	1	2	3052cdaf4e234c3e
 sass	directives/each/sass/multiline/after_variable	0	1	1	2	1f8203cbe4216f55
-sass	directives/each/sass/multiline/in_expression	0	1	1	2	ffcf41f0f403dc1e
+sass	directives/each/sass/multiline/in_expression	0	2	1	3	28972a97e09a775c
 sass	directives/each/sass/multiline/in_wrapped_expression	0	1	1	2	b925c8074c9e8ed8
 sass	directives/extend/whitespace/after_arg/sass	0	3	2	3	82bb24355334f9ef
 sass	directives/extend/whitespace/before_arg/sass	0	2	2	2	dcb8adf8e58f6d6b
-sass	directives/extend/whitespace/multiple_selectors/comma/sass	0	3	2	3	ca5e0dab659c7551
+sass	directives/extend/whitespace/multiple_selectors/comma/sass	0	4	2	3	db16263e1697c392
 sass	directives/extend/whitespace/multiple_selectors/newline/sass	0	4	2	3	c1ce78310faed502
 sass	directives/for/comment/after_from/loud/sass	0	0	0	0	c76726775ca93465
 sass	directives/for/comment/after_from/silent/sass	0	0	0	0	da89b4c64176b78a
@@ -217,9 +217,9 @@ sass	directives/if/sass/if_statement_unwrapped_multiline	0	1	1	2	7e397fd4c43f874
 sass	directives/if/sass/if_statement_wrapped	0	1	1	2	1feb7c0d3d1ad5e9
 sass	directives/if/sass/if_statement_wrapped_multiline	0	1	1	2	4e5c98156085d81b
 sass	directives/if/whitespace/condition/after_and/sass	0	0	0	0	184eff6cf2ce1bf3
-sass	directives/if/whitespace/condition/before_and/sass	0	0	0	0	96d440e71b925b8f
+sass	directives/if/whitespace/condition/before_and/sass	0	1	0	1	9b22f222ceb83015
 sass	directives/if/whitespace/else_if/before_condition/sass	0	0	0	0	38740b3abd5b84e7
-sass	directives/if/whitespace/else_if/before_if/sass	0	0	0	0	fa36b6347cef2439
+sass	directives/if/whitespace/else_if/before_if/sass	0	1	0	1	0b37c4137bbff5b7
 sass	directives/if/whitespace/if/before_condition/sass	0	0	0	0	906f5692b2f38ced
 sass	directives/import/css/sass/semicolon	0	0	0	0	3b915b22cf7b1259
 sass	directives/import/css/unquoted	0	0	0	0	3ab4233cb7afcd16
@@ -286,7 +286,7 @@ sass	expressions/if/syntax/newline/parens/before_close	0	1	1	1	c1833fcbee5de3d7
 sass	expressions/if/syntax/newline/sass/after_expression	0	1	1	1	ef424fb24ddb2974
 sass	expressions/if/syntax/newline/sass/before_expression	0	1	1	1	f6a6c1ac326049a4
 sass	libsass-closed-issues/issue_1546	0	1	1	2	331bdec5ce970fc1
-sass	libsass-closed-issues/issue_1578	0	2	2	2	e0c7490dfa549aca
+sass	libsass-closed-issues/issue_1578	0	3	1	2	2f868b58d4bc6065
 sass	libsass-closed-issues/issue_1926	0	4	2	6	df8e38db89bb650d
 sass	libsass-closed-issues/issue_2177	0	3	1	3	47982b57b52115ad
 sass	libsass-closed-issues/issue_2243/sass	0	0	0	0	07833ad71e6e2175
@@ -329,7 +329,7 @@ sass	values/lists/brackets/whitespace/multiple/before_rbracket/sass	0	1	1	1	74b8
 sass	values/lists/brackets/whitespace/single/after_lbracket/sass	0	1	1	1	9cc4c2e6be076311
 sass	values/lists/brackets/whitespace/single/after_val/sass	0	1	1	1	423112acc8f685b3
 sass	values/lists/sass/inline/comma	0	1	1	1	5df0334b5bf47bad
-sass	values/lists/sass/inline/trailing_comma	0	1	1	1	9f2fab43072a4ac3
+sass	values/lists/sass/inline/trailing_comma	0	1	1	1	6c36a9f5552f981a
 sass	values/lists/sass/inline/wrapped	0	1	1	1	cf594948750095fe
 sass	values/lists/sass/paren/indented_under	0	1	1	1	3365bba21b8129f6
 sass	values/lists/sass/paren/no_indent	0	1	1	1	08e7d0fb3af51008
