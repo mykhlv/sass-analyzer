@@ -1623,6 +1623,81 @@ fn a_selector_list_scanned_across_a_continued_line_stays_a_selector() {
     );
 }
 
+/// A silent comment takes in the lines indented deeper than it after a blank line too, as
+/// in Dart Sass; a line at its own column after the blank line is a statement.
+#[test]
+fn a_silent_comment_goes_on_across_a_blank_line() {
+    check(
+        ".a\n  // c\n\n    deeper\n  b: c\n",
+        expect![[r#"
+            SOURCE_FILE@0..29
+              RULE_SET@0..28
+                SELECTOR_LIST@0..2
+                  SELECTOR@0..2
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "a"
+                BLOCK@2..28
+                  LBRACE@2..2 ""
+                  DECLARATION@2..28
+                    PROPERTY@2..25
+                      WHITESPACE@2..5 "\n  "
+                      SINGLE_LINE_COMMENT@5..9 "// c"
+                      WHITESPACE@9..15 "\n\n    "
+                      SINGLE_LINE_COMMENT@15..21 "deeper"
+                      WHITESPACE@21..24 "\n  "
+                      IDENT@24..25 "b"
+                    COLON@25..26 ":"
+                    VALUE@26..28
+                      VALUE@26..28
+                        WHITESPACE@26..27 " "
+                        IDENT@27..28 "c"
+                    SEMICOLON@28..28 ""
+                  RBRACE@28..28 ""
+              WHITESPACE@28..29 "\n"
+        "#]],
+    );
+}
+
+#[test]
+fn a_line_at_the_comment_column_after_a_blank_line_ends_the_comment() {
+    check(
+        ".a\n  // c\n\n  d\n  b: c\n",
+        expect![[r#"
+            SOURCE_FILE@0..22
+              RULE_SET@0..21
+                SELECTOR_LIST@0..2
+                  SELECTOR@0..2
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "a"
+                BLOCK@2..21
+                  LBRACE@2..2 ""
+                  RULE_SET@2..14
+                    SELECTOR_LIST@2..14
+                      SELECTOR@2..14
+                        SIMPLE_SELECTOR@2..14
+                          WHITESPACE@2..5 "\n  "
+                          SINGLE_LINE_COMMENT@5..9 "// c"
+                          WHITESPACE@9..13 "\n\n  "
+                          IDENT@13..14 "d"
+                  SEMICOLON@14..14 ""
+                  DECLARATION@14..21
+                    PROPERTY@14..18
+                      WHITESPACE@14..17 "\n  "
+                      IDENT@17..18 "b"
+                    COLON@18..19 ":"
+                    VALUE@19..21
+                      VALUE@19..21
+                        WHITESPACE@19..20 " "
+                        IDENT@20..21 "c"
+                    SEMICOLON@21..21 ""
+                  RBRACE@21..21 ""
+              WHITESPACE@21..22 "\n"
+        "#]],
+    );
+}
+
 #[test]
 fn a_comment_on_a_continued_line_is_an_ordinary_comment() {
     // Read as starting a statement, the comment would take the deeper line below it.
