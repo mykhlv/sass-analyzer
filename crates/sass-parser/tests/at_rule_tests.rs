@@ -4222,6 +4222,321 @@ fn supports_scan_tracks_braces_past_a_mismatched_closer() {
 }
 
 #[test]
+fn media_stray_tokens_then_a_string_unclosed_below() {
+    check(
+        "@media (a) x\n$v: \"y;\n.b { c: d }\n",
+        expect![[r#"
+        SOURCE_FILE@0..33
+          MEDIA_RULE@0..20
+            AT@0..1 "@"
+            IDENT@1..6 "media"
+            MEDIA_QUERY@6..10
+              WHITESPACE@6..7 " "
+              LPAREN@7..8 "("
+              IDENT@8..9 "a"
+              RPAREN@9..10 ")"
+            ERROR@10..20
+              WHITESPACE@10..11 " "
+              IDENT@11..12 "x"
+              WHITESPACE@12..13 "\n"
+              DOLLAR@13..14 "$"
+              IDENT@14..15 "v"
+              COLON@15..16 ":"
+              WHITESPACE@16..17 " "
+              QUOTED_STRING@17..20 "\"y;"
+          RULE_SET@20..32
+            SELECTOR_LIST@20..23
+              SELECTOR@20..23
+                SIMPLE_SELECTOR@20..23
+                  WHITESPACE@20..21 "\n"
+                  DOT@21..22 "."
+                  IDENT@22..23 "b"
+            BLOCK@23..32
+              WHITESPACE@23..24 " "
+              LBRACE@24..25 "{"
+              DECLARATION@25..30
+                PROPERTY@25..27
+                  WHITESPACE@25..26 " "
+                  IDENT@26..27 "c"
+                COLON@27..28 ":"
+                VALUE@28..30
+                  VALUE@28..30
+                    WHITESPACE@28..29 " "
+                    IDENT@29..30 "d"
+              WHITESPACE@30..31 " "
+              RBRACE@31..32 "}"
+          WHITESPACE@32..33 "\n"
+        errors:
+          11..12: expected `{`
+          17..20: unterminated string
+    "#]],
+    );
+}
+
+#[test]
+fn media_stray_tokens_with_an_unclosed_interpolated_string() {
+    check(
+        "$z: 1;\n@media (a) x \"y #{$z}\n.b { c: d }\n",
+        expect![[r##"
+            SOURCE_FILE@0..41
+              VARIABLE_DECL@0..6
+                DOLLAR@0..1 "$"
+                IDENT@1..2 "z"
+                COLON@2..3 ":"
+                NUMBER_LITERAL@3..5
+                  WHITESPACE@3..4 " "
+                  NUMBER@4..5 "1"
+                SEMICOLON@5..6 ";"
+              MEDIA_RULE@6..40
+                WHITESPACE@6..7 "\n"
+                AT@7..8 "@"
+                IDENT@8..13 "media"
+                MEDIA_QUERY@13..17
+                  WHITESPACE@13..14 " "
+                  LPAREN@14..15 "("
+                  IDENT@15..16 "a"
+                  RPAREN@16..17 ")"
+                ERROR@17..31
+                  WHITESPACE@17..18 " "
+                  IDENT@18..19 "x"
+                  INTERPOLATED_STRING@19..28
+                    WHITESPACE@19..20 " "
+                    STRING_START@20..23 "\"y "
+                    INTERPOLATION@23..28
+                      HASH_LBRACE@23..25 "#{"
+                      VARIABLE_REF@25..27
+                        DOLLAR@25..26 "$"
+                        IDENT@26..27 "z"
+                      RBRACE@27..28 "}"
+                  WHITESPACE@28..29 "\n"
+                  DOT@29..30 "."
+                  IDENT@30..31 "b"
+                BLOCK@31..40
+                  WHITESPACE@31..32 " "
+                  LBRACE@32..33 "{"
+                  DECLARATION@33..38
+                    PROPERTY@33..35
+                      WHITESPACE@33..34 " "
+                      IDENT@34..35 "c"
+                    COLON@35..36 ":"
+                    VALUE@36..38
+                      VALUE@36..38
+                        WHITESPACE@36..37 " "
+                        IDENT@37..38 "d"
+                  WHITESPACE@38..39 " "
+                  RBRACE@39..40 "}"
+              WHITESPACE@40..41 "\n"
+            errors:
+              18..19: expected `{`
+              20..28: unterminated string
+        "##]],
+    );
+}
+
+/// Dart Sass reads only digits into a name, and rejects these at the number.
+#[test]
+fn media_name_with_a_fractional_number_lacks_a_block() {
+    check(
+        "@media #{$x}.5 { .x { c: d } }",
+        expect![[r##"
+        SOURCE_FILE@0..30
+          MEDIA_RULE@0..30
+            AT@0..1 "@"
+            IDENT@1..6 "media"
+            MEDIA_QUERY@6..12
+              INTERPOLATION@6..12
+                WHITESPACE@6..7 " "
+                HASH_LBRACE@7..9 "#{"
+                VARIABLE_REF@9..11
+                  DOLLAR@9..10 "$"
+                  IDENT@10..11 "x"
+                RBRACE@11..12 "}"
+            ERROR@12..14
+              NUMBER@12..14 ".5"
+            BLOCK@14..30
+              WHITESPACE@14..15 " "
+              LBRACE@15..16 "{"
+              RULE_SET@16..28
+                SELECTOR_LIST@16..19
+                  SELECTOR@16..19
+                    SIMPLE_SELECTOR@16..19
+                      WHITESPACE@16..17 " "
+                      DOT@17..18 "."
+                      IDENT@18..19 "x"
+                BLOCK@19..28
+                  WHITESPACE@19..20 " "
+                  LBRACE@20..21 "{"
+                  DECLARATION@21..26
+                    PROPERTY@21..23
+                      WHITESPACE@21..22 " "
+                      IDENT@22..23 "c"
+                    COLON@23..24 ":"
+                    VALUE@24..26
+                      VALUE@24..26
+                        WHITESPACE@24..25 " "
+                        IDENT@25..26 "d"
+                  WHITESPACE@26..27 " "
+                  RBRACE@27..28 "}"
+              WHITESPACE@28..29 " "
+              RBRACE@29..30 "}"
+        errors:
+          12..14: expected `{`
+    "##]],
+    );
+    check(
+        "@media x#{$x}-2.5 { .x { c: d } }",
+        expect![[r##"
+        SOURCE_FILE@0..33
+          MEDIA_RULE@0..33
+            AT@0..1 "@"
+            IDENT@1..6 "media"
+            MEDIA_QUERY@6..14
+              WHITESPACE@6..7 " "
+              IDENT@7..8 "x"
+              INTERPOLATION@8..13
+                HASH_LBRACE@8..10 "#{"
+                VARIABLE_REF@10..12
+                  DOLLAR@10..11 "$"
+                  IDENT@11..12 "x"
+                RBRACE@12..13 "}"
+              MINUS@13..14 "-"
+            ERROR@14..17
+              NUMBER@14..17 "2.5"
+            BLOCK@17..33
+              WHITESPACE@17..18 " "
+              LBRACE@18..19 "{"
+              RULE_SET@19..31
+                SELECTOR_LIST@19..22
+                  SELECTOR@19..22
+                    SIMPLE_SELECTOR@19..22
+                      WHITESPACE@19..20 " "
+                      DOT@20..21 "."
+                      IDENT@21..22 "x"
+                BLOCK@22..31
+                  WHITESPACE@22..23 " "
+                  LBRACE@23..24 "{"
+                  DECLARATION@24..29
+                    PROPERTY@24..26
+                      WHITESPACE@24..25 " "
+                      IDENT@25..26 "c"
+                    COLON@26..27 ":"
+                    VALUE@27..29
+                      VALUE@27..29
+                        WHITESPACE@27..28 " "
+                        IDENT@28..29 "d"
+                  WHITESPACE@29..30 " "
+                  RBRACE@30..31 "}"
+              WHITESPACE@31..32 " "
+              RBRACE@32..33 "}"
+        errors:
+          14..17: expected `{`
+    "##]],
+    );
+    check(
+        "@media #{$x}-.5 { .x { c: d } }",
+        expect![[r##"
+        SOURCE_FILE@0..31
+          MEDIA_RULE@0..31
+            AT@0..1 "@"
+            IDENT@1..6 "media"
+            MEDIA_QUERY@6..13
+              INTERPOLATION@6..12
+                WHITESPACE@6..7 " "
+                HASH_LBRACE@7..9 "#{"
+                VARIABLE_REF@9..11
+                  DOLLAR@9..10 "$"
+                  IDENT@10..11 "x"
+                RBRACE@11..12 "}"
+              MINUS@12..13 "-"
+            ERROR@13..15
+              NUMBER@13..15 ".5"
+            BLOCK@15..31
+              WHITESPACE@15..16 " "
+              LBRACE@16..17 "{"
+              RULE_SET@17..29
+                SELECTOR_LIST@17..20
+                  SELECTOR@17..20
+                    SIMPLE_SELECTOR@17..20
+                      WHITESPACE@17..18 " "
+                      DOT@18..19 "."
+                      IDENT@19..20 "x"
+                BLOCK@20..29
+                  WHITESPACE@20..21 " "
+                  LBRACE@21..22 "{"
+                  DECLARATION@22..27
+                    PROPERTY@22..24
+                      WHITESPACE@22..23 " "
+                      IDENT@23..24 "c"
+                    COLON@24..25 ":"
+                    VALUE@25..27
+                      VALUE@25..27
+                        WHITESPACE@25..26 " "
+                        IDENT@26..27 "d"
+                  WHITESPACE@27..28 " "
+                  RBRACE@28..29 "}"
+              WHITESPACE@29..30 " "
+              RBRACE@30..31 "}"
+        errors:
+          13..15: expected `{`
+    "##]],
+    );
+}
+
+#[test]
+fn supports_function_name_with_a_fractional_number_lacks_a_block() {
+    check(
+        "@supports #{$x}2.5(a) { .x { c: d } }",
+        expect![[r##"
+        SOURCE_FILE@0..37
+          SUPPORTS_RULE@0..37
+            AT@0..1 "@"
+            IDENT@1..9 "supports"
+            SUPPORTS_CONDITION@9..15
+              INTERPOLATION@9..15
+                WHITESPACE@9..10 " "
+                HASH_LBRACE@10..12 "#{"
+                VARIABLE_REF@12..14
+                  DOLLAR@12..13 "$"
+                  IDENT@13..14 "x"
+                RBRACE@14..15 "}"
+            ERROR@15..21
+              NUMBER@15..18 "2.5"
+              LPAREN@18..19 "("
+              IDENT@19..20 "a"
+              RPAREN@20..21 ")"
+            BLOCK@21..37
+              WHITESPACE@21..22 " "
+              LBRACE@22..23 "{"
+              RULE_SET@23..35
+                SELECTOR_LIST@23..26
+                  SELECTOR@23..26
+                    SIMPLE_SELECTOR@23..26
+                      WHITESPACE@23..24 " "
+                      DOT@24..25 "."
+                      IDENT@25..26 "x"
+                BLOCK@26..35
+                  WHITESPACE@26..27 " "
+                  LBRACE@27..28 "{"
+                  DECLARATION@28..33
+                    PROPERTY@28..30
+                      WHITESPACE@28..29 " "
+                      IDENT@29..30 "c"
+                    COLON@30..31 ":"
+                    VALUE@31..33
+                      VALUE@31..33
+                        WHITESPACE@31..32 " "
+                        IDENT@32..33 "d"
+                  WHITESPACE@33..34 " "
+                  RBRACE@34..35 "}"
+              WHITESPACE@35..36 " "
+              RBRACE@36..37 "}"
+        errors:
+          15..18: expected `{`
+    "##]],
+    );
+}
+
+#[test]
 fn supports_balanced_braces_in_parens_stay_part_of_them() {
     check(
         "@supports (a {b} c) { d: e }",

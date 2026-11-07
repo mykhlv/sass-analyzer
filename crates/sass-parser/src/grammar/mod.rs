@@ -387,14 +387,14 @@ fn missing_rule_block(p: &mut Parser<'_>, selector_reported: bool) {
 pub(crate) fn at_interpolated_identifier(p: &Parser<'_>) -> bool {
     match p.current() {
         IDENT | HASH_LBRACE => true,
-        MINUS => !p.nth_has_whitespace_before(1) && matches!(p.nth(1), IDENT | HASH_LBRACE | MINUS),
+        MINUS => !p.nth_has_whitespace_before(1) && matches!(p.nth(1), IDENT | HASH_LBRACE),
         _ => false,
     }
 }
 
 /// An identifier as Dart Sass's `interpolatedIdentifier` reads one: words,
-/// interpolations, `-` and numbers with no whitespace between them, as in `-#{$a}-b`,
-/// `#{$a}-` or `x#{$b}-2`.
+/// interpolations, `-` and digits with no whitespace between them, as in `-#{$a}-b`,
+/// `#{$a}-` or `x#{$b}-2`. A number with a `.` or an exponent is no part of a name.
 pub(crate) fn interpolated_identifier(p: &mut Parser<'_>) {
     debug_assert!(at_interpolated_identifier(p));
     loop {
@@ -403,30 +403,46 @@ pub(crate) fn interpolated_identifier(p: &mut Parser<'_>) {
         } else {
             p.bump();
         }
-        if p.has_whitespace_before() || !matches!(p.current(), IDENT | HASH_LBRACE | MINUS | NUMBER)
-        {
+        let digits = p.at(NUMBER) && p.current_text().bytes().all(|b| b.is_ascii_digit());
+        let piece = matches!(p.current(), IDENT | HASH_LBRACE | MINUS) || digits;
+        if p.has_whitespace_before() || !piece {
             break;
         }
     }
 }
 
 /// Report the tokens at the cursor, where a `{` belongs, if `report`, and skip them as one
-/// error up to the next `{`, `;` or `}`; a block there is still the rule's.
+/// error up to the next `{`, `;` or `}`, or the line break of a string left unclosed on a
+/// line below; a block there is still the rule's. A string that swallowed the block's `{` on the line
+/// the tokens start on is that one mistake, reported as the string: the `{` it took is
+/// put back where the indentation below agrees, and opens the block.
 pub(crate) fn skip_to_rule_block(p: &mut Parser<'_>, report: bool) {
     let m = p.start();
-    // A string left unclosed among them is reported as that, which is the one error.
-    if report && !p.unclosed_string_before_block() {
-        p.error("expected `{`");
-    }
+    let at = p.error_range();
+    let strings = p.unclosed_strings();
+    let mut first = true;
+    let mut same_line = true;
     let mut interpolation: u32 = 0;
-    while !p.at_end() {
+    // A string left unclosed on a line below ends at its line break the statement it
+    // starts; on the first line it is more of the mistake.
+    while !p.at_end() && (same_line || !p.at_unclosed_string_break()) {
         match p.current() {
             LBRACE | RBRACE | SEMICOLON if interpolation == 0 => break,
             HASH_LBRACE | LBRACE => interpolation += 1,
             RBRACE => interpolation -= 1,
             _ => {}
         }
-        p.bump();
+        same_line &= first || !p.at_line_break();
+        first = false;
+        if p.at(STRING_START) {
+            let _ = expressions::interpolated_string(p, ParseContext::CssValue);
+        } else {
+            p.bump();
+        }
+    }
+    let took_block = p.unclosed_strings() > strings && same_line && p.at_virtual() && p.at(LBRACE);
+    if report && !took_block {
+        p.error_at_start(&m, at, "expected `{`");
     }
     let _ = m.complete(p, SyntaxKind::ERROR);
     if p.at(LBRACE) {

@@ -196,13 +196,17 @@ impl<'src> Parser<'src> {
         let (from, unclosed) = if let Some(cached) = self.unclosed_in_kind.take() {
             cached
         } else {
-            let (unclosed, swallowed) = self.openers_not_closing_in_kind(pos);
+            #[cfg(debug_assertions)]
+            let mut swallowed = Vec::new();
+            let unclosed = self.openers_not_closing_in_kind(
+                pos,
+                #[cfg(debug_assertions)]
+                &mut swallowed,
+            );
             #[cfg(debug_assertions)]
             {
                 self.swallowed_in_kind = swallowed;
             }
-            #[cfg(not(debug_assertions))]
-            drop(swallowed);
             (pos, unclosed)
         };
         debug_assert!(
@@ -217,12 +221,11 @@ impl<'src> Parser<'src> {
     /// The openers from `from` on that do not close in kind. A string left unclosed counts
     /// as the brace it swallowed where the parser puts that brace back (see
     /// [`Parser::swallowed_brace`]), and as nothing otherwise.
-    #[allow(clippy::type_complexity)]
     fn openers_not_closing_in_kind(
         &self,
         from: usize,
-    ) -> (Vec<usize>, Vec<(usize, Option<SyntaxKind>)>) {
-        let mut swallowed = Vec::new();
+        #[cfg(debug_assertions)] swallowed: &mut Vec<(usize, Option<SyntaxKind>)>,
+    ) -> Vec<usize> {
         let mut open: Vec<(usize, SyntaxKind)> = Vec::new();
         let mut unclosed = Vec::new();
         // Where each `{` and `#{` open stands, as `open_braces` will when the parser gets
@@ -249,6 +252,7 @@ impl<'src> Parser<'src> {
                 }
                 let innermost = braces.last().copied();
                 let brace = self.brace_swallowed(end_text.trim_end(), start, index + 1, innermost);
+                #[cfg(debug_assertions)]
                 swallowed.push((index, brace));
                 match brace {
                     Some(brace) => kind = brace,
@@ -290,42 +294,7 @@ impl<'src> Parser<'src> {
             }
         }
         unclosed.extend(open.into_iter().map(|(index, _)| index));
-        (unclosed, swallowed)
-    }
-
-    /// Whether a string left unclosed comes at or after the cursor, before the next `{`,
-    /// `;` or `}` outside interpolation and before any zero-width token.
-    pub fn unclosed_string_before_block(&self) -> bool {
-        let mut interpolation: u32 = 0;
-        let mut string_starts: Vec<TextSize> = Vec::new();
-        for index in self.pos..self.fence.index {
-            let range = self.input.range(index);
-            match self.input.kind(index) {
-                SyntaxKind::LBRACE | SyntaxKind::RBRACE | SyntaxKind::SEMICOLON
-                    if interpolation == 0 =>
-                {
-                    return false;
-                }
-                SyntaxKind::HASH_LBRACE | SyntaxKind::LBRACE => interpolation += 1,
-                SyntaxKind::RBRACE => interpolation -= 1,
-                SyntaxKind::STRING_START => string_starts.push(range.start()),
-                SyntaxKind::QUOTED_STRING => {
-                    if self.string_left_unclosed(range.start(), &self.source[range][1..]) {
-                        return true;
-                    }
-                }
-                SyntaxKind::STRING_END => {
-                    if string_starts
-                        .pop()
-                        .is_some_and(|start| self.string_left_unclosed(start, &self.source[range]))
-                    {
-                        return true;
-                    }
-                }
-                _ => {}
-            }
-        }
-        false
+        unclosed
     }
 
     /// Whether the string starting at `start`, whose text ends in `end_text`, lacks its
@@ -444,8 +413,7 @@ impl<'src> Parser<'src> {
     /// quote: the lexer ended it at a newline or at the end of input instead. That is the
     /// only trace such a string leaves, as it lexes as an ordinary string otherwise.
     fn check_string_end(&mut self, start: TextSize, end_text: &str, end: TextSize) {
-        let quote = self.source.as_bytes()[usize::from(start)];
-        if !crate::lexer::closes_string(end_text, quote) {
+        if self.string_left_unclosed(start, end_text) {
             self.unclosed_string(TextRange::new(start, end), end_text);
         }
     }
@@ -721,7 +689,16 @@ impl<'src> Parser<'src> {
     // ── Errors ───────────────────────────────────────────────────────
 
     pub fn error(&mut self, msg: impl Into<String>) {
-        let range = if self.pos < self.fence.index {
+        let range = self.error_range();
+        self.error_at(range, msg);
+        if self.layout == Layout::Indented {
+            self.error_reported();
+        }
+    }
+
+    /// Where [`Parser::error`] reports at the cursor.
+    pub fn error_range(&self) -> TextRange {
+        if self.pos < self.fence.index {
             self.input.range(self.pos)
         } else if self.fence.kind != SyntaxKind::EOF {
             TextRange::empty(self.virtual_offset())
@@ -730,11 +707,18 @@ impl<'src> Parser<'src> {
             self.input.range(self.fence.index)
         } else {
             TextRange::empty(TextSize::of(self.source))
-        };
-        self.error_at(range, msg);
-        if self.layout == Layout::Indented {
-            self.error_reported();
         }
+    }
+
+    /// Report `msg` at `range`, taken with [`Parser::error_range`] where `m` was started,
+    /// as if it had been reported there and then: before the errors reported since. For
+    /// a mistake known only once the tokens after it have been read. Braced layout only.
+    pub fn error_at_start(&mut self, m: &Marker, range: TextRange, msg: impl Into<String>) {
+        debug_assert_eq!(self.layout, Layout::Braced, "no bracket recovery to update");
+        let len = self.events.len();
+        self.error_at(range, msg);
+        let event = self.events.remove(len);
+        self.events.insert(m.pos as usize + 1, event);
     }
 
     /// How many errors have been reported so far.

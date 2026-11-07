@@ -1,3 +1,4 @@
+use crate::grammar::{at_interpolated_identifier, interpolated_identifier};
 use crate::parser::Parser;
 #[allow(clippy::wildcard_imports)]
 use crate::syntax_kind::*;
@@ -58,10 +59,6 @@ fn at_word(p: &Parser<'_>, word: &str) -> bool {
     p.at(IDENT) && p.current_text().eq_ignore_ascii_case(word)
 }
 
-use super::super::{
-    at_interpolated_identifier as at_identifier, interpolated_identifier as identifier,
-};
-
 /// `( … )` or an interpolation, where Dart Sass reads a media condition in parentheses.
 fn media_in_parens(p: &mut Parser<'_>) -> bool {
     if p.at(LPAREN) {
@@ -97,22 +94,22 @@ fn media_query(p: &mut Parser<'_>) {
         }
         return;
     }
-    if !at_identifier(p) {
+    if !at_interpolated_identifier(p) {
         return;
     }
     let not = at_word(p, "not");
-    identifier(p);
-    if not && !at_identifier(p) {
+    interpolated_identifier(p);
+    if not && !at_interpolated_identifier(p) {
         media_in_parens(p);
         return;
     }
-    if !at_identifier(p) {
+    if !at_interpolated_identifier(p) {
         return;
     }
     if at_word(p, "and") {
         p.bump();
     } else {
-        identifier(p);
+        interpolated_identifier(p);
         if !at_word(p, "and") {
             return;
         }
@@ -178,8 +175,8 @@ fn supports_logic(p: &mut Parser<'_>) {
 
 /// `( … )`, an interpolation, or a function such as `selector(…)` or `#{"a"}(b)`.
 fn supports_in_parens(p: &mut Parser<'_>) -> bool {
-    if at_identifier(p) {
-        identifier(p);
+    if at_interpolated_identifier(p) {
+        interpolated_identifier(p);
         if p.at(LPAREN) && !p.has_whitespace_before() {
             super::eat_condition_parens(p, true);
         }

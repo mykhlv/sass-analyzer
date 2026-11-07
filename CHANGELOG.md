@@ -67,8 +67,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   query reported an error of its own: tokens left on the query's line are skipped up to
   a block, which is then the rule's, as in `@media screen and (a) "x" {`, and a statement
   on the next line keeps its own place, as in `@supports (a)` / `@include m;` or
-  `@media screen` / `$v: 1;`. A string left unclosed among the skipped tokens is
-  reported only as that. Rules of this kind used to be read into the query without a
+  `@media screen` / `$v: 1;`. A string left unclosed on the query's line that took the
+  block's `{`, as in `@media screen and (a) "x {`, is reported only as that. Rules of
+  this kind used to be read into the query without a
   diagnostic, and `@supports (a)` at the end of a file or `.p { @media (a) }` was
   silently accepted. `@container` and `@scope` may go without a block, as in Dart Sass,
   and indented Sass is unchanged

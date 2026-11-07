@@ -889,6 +889,100 @@ fn interpolation_in_an_unclosed_pseudo_function_does_not_end_it() {
     );
 }
 
+#[test]
+fn stray_tokens_then_a_string_unclosed_below() {
+    check(
+        ".a x)\n$v: \"y;\n.b { c: d }\n",
+        expect![[r#"
+        SOURCE_FILE@0..26
+          RULE_SET@0..13
+            SELECTOR_LIST@0..4
+              SELECTOR@0..4
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+                SIMPLE_SELECTOR@2..4
+                  WHITESPACE@2..3 " "
+                  IDENT@3..4 "x"
+            ERROR@4..13
+              RPAREN@4..5 ")"
+              WHITESPACE@5..6 "\n"
+              DOLLAR@6..7 "$"
+              IDENT@7..8 "v"
+              COLON@8..9 ":"
+              WHITESPACE@9..10 " "
+              QUOTED_STRING@10..13 "\"y;"
+          RULE_SET@13..25
+            SELECTOR_LIST@13..16
+              SELECTOR@13..16
+                SIMPLE_SELECTOR@13..16
+                  WHITESPACE@13..14 "\n"
+                  DOT@14..15 "."
+                  IDENT@15..16 "b"
+            BLOCK@16..25
+              WHITESPACE@16..17 " "
+              LBRACE@17..18 "{"
+              DECLARATION@18..23
+                PROPERTY@18..20
+                  WHITESPACE@18..19 " "
+                  IDENT@19..20 "c"
+                COLON@20..21 ":"
+                VALUE@21..23
+                  VALUE@21..23
+                    WHITESPACE@21..22 " "
+                    IDENT@22..23 "d"
+              WHITESPACE@23..24 " "
+              RBRACE@24..25 "}"
+          WHITESPACE@25..26 "\n"
+        errors:
+          4..5: expected `{`
+          10..13: unterminated string
+    "#]],
+    );
+}
+
+#[test]
+fn stray_closer_and_a_string_unclosed_are_two_mistakes() {
+    check(
+        ".a:is(.b) ) \"y {\nc: d;\n}\n",
+        expect![[r#"
+            SOURCE_FILE@0..25
+              RULE_SET@0..21
+                SELECTOR_LIST@0..9
+                  SELECTOR@0..9
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "a"
+                    PSEUDO_SELECTOR@2..9
+                      COLON@2..3 ":"
+                      IDENT@3..5 "is"
+                      LPAREN@5..6 "("
+                      DOT@6..7 "."
+                      IDENT@7..8 "b"
+                      RPAREN@8..9 ")"
+                ERROR@9..21
+                  WHITESPACE@9..10 " "
+                  RPAREN@10..11 ")"
+                  WHITESPACE@11..12 " "
+                  QUOTED_STRING@12..16 "\"y {"
+                  WHITESPACE@16..17 "\n"
+                  IDENT@17..18 "c"
+                  COLON@18..19 ":"
+                  WHITESPACE@19..20 " "
+                  IDENT@20..21 "d"
+              SEMICOLON@21..22 ";"
+              ERROR@22..24
+                WHITESPACE@22..23 "\n"
+                RBRACE@23..24 "}"
+              WHITESPACE@24..25 "\n"
+            errors:
+              10..11: expected `{`
+              12..16: unterminated string
+              23..24: expected rule
+        "#]],
+    );
+}
+
 // ── Proportionality ─────────────────────────────────────────────────────
 
 #[test]
