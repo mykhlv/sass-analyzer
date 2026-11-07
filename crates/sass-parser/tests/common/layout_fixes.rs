@@ -148,8 +148,8 @@ pub fn fixes() -> Vec<Fix> {
             change: "legacy continues the line after a value ending in `not` and silently \
                      takes `b: c` into it; the layout frontend goes on after `not` only \
                      into a line that could be its operand, so `b: c` is a declaration of \
-                     its own (Dart reports `expected newline.`; reporting it here needs \
-                     `not` to be an operator in CSS values, which would change SCSS)",
+                     its own, and `not` is reported missing its operand (Dart reports \
+                     `expected newline.` at the colon it takes in)",
             expected: expect![[r#"
                 SOURCE_FILE@0..25
                   RULE_SET@0..24
@@ -182,6 +182,7 @@ pub fn fixes() -> Vec<Fix> {
                         SEMICOLON@24..24 ""
                       RBRACE@24..24 ""
                   WHITESPACE@24..25 "\n"
+                error 17..17: expected expression after `not`
             "#]],
         },
         Fix {
@@ -189,8 +190,8 @@ pub fn fixes() -> Vec<Fix> {
             change: "legacy continues the line after a value ending in `and` and silently \
                      takes `d: e` into it; the layout frontend goes on after `and` or `or` \
                      only into a line that could be its operand, so the deeper `d: e` is a \
-                     nested declaration, as without the `and` (Dart reports `expected \
-                     newline.`, as for `not`)",
+                     nested declaration, as without the `and`, and `and` is reported \
+                     missing its operand (Dart reports `expected newline.`, as for `not`)",
             expected: expect![[r#"
                 SOURCE_FILE@0..23
                   RULE_SET@0..22
@@ -228,14 +229,15 @@ pub fn fixes() -> Vec<Fix> {
                           RBRACE@22..22 ""
                       RBRACE@22..22 ""
                   WHITESPACE@22..23 "\n"
+                error 13..13: expected expression after `and`
             "#]],
         },
         Fix {
             input: ".a\n  b: c or\n  d: e\n",
             change: "legacy continues the line after a value ending in `or` and silently \
                      takes `d: e` into it; the layout frontend ends the declaration there, \
-                     so `d: e` is a declaration of its own (Dart reports `expected \
-                     newline.`, as for `not`)",
+                     so `d: e` is a declaration of its own, and `or` is reported missing \
+                     its operand (Dart reports `expected newline.`, as for `not`)",
             expected: expect![[r#"
                 SOURCE_FILE@0..20
                   RULE_SET@0..19
@@ -271,6 +273,7 @@ pub fn fixes() -> Vec<Fix> {
                         SEMICOLON@19..19 ""
                       RBRACE@19..19 ""
                   WHITESPACE@19..20 "\n"
+                error 12..12: expected expression after `or`
             "#]],
         },
         Fix {

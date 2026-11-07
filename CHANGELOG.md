@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without a changelog entry.
 
 ### Fixed
+- Indented Sass: a declaration value ending in `and`, `or` or `not` before a line that is
+  a declaration of its own, as `content: not` / `b: c`, reports the operator's missing
+  operand, as Dart Sass reports the form. It was accepted with no diagnostic. `and` or
+  `or` with nothing before it, as in `content: and`, is still a plain word
 - Indented Sass: a nested property below a value that ends in a comma, as in `font: bold,`
   / `family: x`, is read as one, as in Dart Sass; it was silently taken into the value. A
   variable's value may follow its colon after a blank line, as in `$a:` / (blank) / `b`,
@@ -289,10 +293,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `engines.vscode` floor instead of drifting above it on every dependency update
 
 ### Known issues
-- In indented Sass, a declaration value ending in a bare `and`/`or`/`not` (`content: not`)
-  is accepted without the "expected newline." error Dart Sass reports. The line below is
-  no longer swallowed, but no diagnostic is shown. This form occurs zero times across the
-  Bulma, Vuetify and Quasar corpora
 - In indented Sass, text indented under a closed `/* … */` is accepted without the error
   Dart Sass reports. It does not occur in the Bulma, Vuetify and Quasar corpora
 

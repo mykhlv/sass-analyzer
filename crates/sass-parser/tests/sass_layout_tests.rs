@@ -1283,22 +1283,64 @@ fn a_word_operator_at_the_end_of_a_value_continues_it() {
     );
 }
 
-/// The failing cases: a line that starts like a declaration is no operand, and `and` or
-/// `or` with nothing before it is a plain word. Both end the value, and the next line
-/// has a property of its own, with no diagnostic yet (Dart reports `expected newline.`
-/// for the first).
+/// The failing cases: a line that starts like a declaration is no operand. Dart Sass
+/// takes it in and reports `expected newline.` at its colon; here it is left a statement
+/// of its own, and the operator that has no operand is the one error. `and` or `or` with
+/// nothing before it is a plain word, which Dart accepts.
 #[test]
 fn a_word_operator_does_not_take_a_declaration_into_the_value() {
-    for source in [
-        ".a\n  b: c and\n    d: e\n",
-        ".a\n  b: c or\n  d: e\n",
-        ".a\n  content: not\n  b: c\n",
-        ".a\n  content: and\n  b: c\n",
+    for (source, errors) in [
+        (".a\n  b: c and\n    d: e\n", 1),
+        (".a\n  b: c or\n  d: e\n", 1),
+        (".a\n  b: c and\n  d: e\n", 1),
+        (".a\n  content: not\n  b: c\n", 1),
+        (".a\n  content: and\n  b: c\n", 0),
     ] {
         let tree = render(parse_sass, source);
         assert_eq!(tree.matches(" PROPERTY@").count(), 2, "{source:?}:\n{tree}");
-        assert!(!tree.contains("\nerror "), "{source:?}:\n{tree}");
+        assert_eq!(error_count(source), errors, "{source:?}:\n{tree}");
     }
+}
+
+#[test]
+fn a_word_operator_before_a_declaration_is_one_error() {
+    check(
+        ".a\n  content: not\n  b: c\n",
+        expect![[r#"
+            SOURCE_FILE@0..25
+              RULE_SET@0..24
+                SELECTOR_LIST@0..2
+                  SELECTOR@0..2
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "a"
+                BLOCK@2..24
+                  LBRACE@2..2 ""
+                  DECLARATION@2..17
+                    PROPERTY@2..12
+                      WHITESPACE@2..5 "\n  "
+                      IDENT@5..12 "content"
+                    COLON@12..13 ":"
+                    VALUE@13..17
+                      VALUE@13..17
+                        WHITESPACE@13..14 " "
+                        IDENT@14..17 "not"
+                    SEMICOLON@17..17 ""
+                  DECLARATION@17..24
+                    PROPERTY@17..21
+                      WHITESPACE@17..20 "\n  "
+                      IDENT@20..21 "b"
+                    COLON@21..22 ":"
+                    VALUE@22..24
+                      VALUE@22..24
+                        WHITESPACE@22..23 " "
+                        IDENT@23..24 "c"
+                    SEMICOLON@24..24 ""
+                  RBRACE@24..24 ""
+              WHITESPACE@24..25 "\n"
+            error 17..17: expected expression after `not`
+        "#]],
+    );
 }
 
 #[test]

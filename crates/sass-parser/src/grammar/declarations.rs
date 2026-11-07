@@ -4,6 +4,7 @@ use crate::syntax_kind::*;
 
 use super::ParseContext;
 use super::expressions;
+use super::lines::WordOperator;
 use super::selectors;
 
 /// 2.7: Parse declaration or nested property.
@@ -170,12 +171,18 @@ fn value(p: &mut Parser<'_>) {
             operand_before = false;
             continue;
         }
-        let goes_on = super::lines::word_operator_goes_on(p, operand_before);
+        let operator = super::lines::word_operator(p, operand_before);
         if expressions::expr(p, ctx).is_some() {
             has_content = true;
             operand_before = true;
-            if goes_on {
-                p.continue_line();
+            match operator {
+                WordOperator::GoesOn => {
+                    p.continue_line();
+                }
+                WordOperator::NoOperand => {
+                    p.error_after_prev(format!("expected expression after `{}`", p.prev_text()));
+                }
+                WordOperator::No => {}
             }
         } else {
             break;

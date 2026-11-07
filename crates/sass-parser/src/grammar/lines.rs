@@ -94,14 +94,24 @@ pub(crate) fn bump_operator(p: &mut Parser<'_>) {
     }
 }
 
-/// Whether the line goes on after the token at the cursor, a word that a CSS value reads
-/// as a plain identifier but Dart Sass as an operator, when it ends its line: `and` or
-/// `or` after an operand, or `not`. Dart takes the next line as its operand. A next line
-/// that starts like a declaration (`name:`) cannot be one — Dart rejects it — and is left
-/// a statement of its own rather than taken into the value.
-pub(crate) fn word_operator_goes_on(p: &Parser<'_>, operand_before: bool) -> bool {
+/// How a value goes on after the token at the cursor, when it is a word that a CSS value
+/// reads as a plain identifier but Dart Sass as an operator: `and` or `or` after an
+/// operand, or `not`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WordOperator {
+    /// Not such an operator, or not at the end of its line.
+    No,
+    /// At the end of its line: Dart takes the next line as its operand.
+    GoesOn,
+    /// At the end of its line, before a line that starts like a declaration (`name:`),
+    /// which cannot be its operand — Dart rejects it. The line is left a statement of its
+    /// own, and the operator is missing its operand.
+    NoOperand,
+}
+
+pub(crate) fn word_operator(p: &Parser<'_>, operand_before: bool) -> WordOperator {
     if !p.at(IDENT) {
-        return false;
+        return WordOperator::No;
     }
     let operator = match p.current_text() {
         "and" | "or" => operand_before,
@@ -109,10 +119,14 @@ pub(crate) fn word_operator_goes_on(p: &Parser<'_>, operand_before: bool) -> boo
         _ => false,
     };
     if !operator || !matches!(p.nth(1), SEMICOLON | LBRACE | RBRACE | EOF) {
-        return false;
+        return WordOperator::No;
     }
     let joined = p.joined(TokenSet::new(&[IDENT]));
-    !(p.nth_joined(joined, 1) == IDENT && p.nth_joined(joined, 2) == COLON)
+    if p.nth_joined(joined, 1) == IDENT && p.nth_joined(joined, 2) == COLON {
+        WordOperator::NoOperand
+    } else {
+        WordOperator::GoesOn
+    }
 }
 
 /// [`Parser::err_and_bump`], with the token bumped as in [`bump_in_run`].
