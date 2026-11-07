@@ -173,6 +173,32 @@ async fn sass_folding_continued_header() {
     .await;
 }
 
+/// Folds are the same with `\r\n` and lone `\r` line endings as with `\n`: each is one
+/// line, to the layout and to the editor.
+#[tokio::test]
+async fn sass_folding_with_other_line_endings() {
+    let expected = expect![[r#"
+        0..=5 block: ".nav" .. "      color: blue"
+        2..=5 block: "  .item" .. "      color: blue"
+        4..=5 block: "    &:hover" .. "      color: blue"
+        6..=7 block: ".footer" .. "  padding: 0"
+    "#]];
+    for (id, ending) in [(704, "\r\n"), (705, "\r")] {
+        let source = NESTED_RULE.replace('\n', ending);
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+        let folds = get_folds(
+            &mut reader,
+            &mut writer,
+            "file:///fold_endings.sass",
+            &source,
+            id,
+        )
+        .await;
+        expected.assert_eq(&render_folds(&source.replace(ending, "\n"), &folds));
+    }
+}
+
 #[tokio::test]
 async fn sass_folding_comment_only_lines() {
     check_folds(

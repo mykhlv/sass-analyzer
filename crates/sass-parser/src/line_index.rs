@@ -30,9 +30,17 @@ impl LineIndex {
     #[allow(clippy::cast_possible_truncation)]
     pub fn new(source: &str) -> Self {
         // Source files >4 GiB are not supported; u32 offsets match text-size.
+        // A line ends at `\n`, `\r\n` or a lone `\r`, as in LSP positions; a form feed,
+        // a line break to the indented layout, is no line end in an editor.
+        let bytes = source.as_bytes();
         let mut newlines = vec![0u32];
-        for (i, byte) in source.bytes().enumerate() {
-            if byte == b'\n' {
+        for (i, &byte) in bytes.iter().enumerate() {
+            let ends = match byte {
+                b'\n' => true,
+                b'\r' => bytes.get(i + 1) != Some(&b'\n'),
+                _ => false,
+            };
+            if ends {
                 newlines.push((i + 1) as u32);
             }
         }
@@ -111,11 +119,27 @@ mod tests {
     }
 
     #[test]
-    fn crlf_counts_lf_only() {
+    fn crlf_is_one_line_end() {
         let idx = LineIndex::new("a\r\nb");
         assert_eq!(idx.line_col(TextSize::from(0)), LineCol { line: 1, col: 1 });
         // \r is col 2 on line 1, \n is col 3
         assert_eq!(idx.line_col(TextSize::from(3)), LineCol { line: 2, col: 1 });
+    }
+
+    #[test]
+    fn a_lone_carriage_return_ends_a_line() {
+        let idx = LineIndex::new("a\rb\r\nc\rd");
+        assert_eq!(idx.line_count(), 4);
+        assert_eq!(idx.line_col(TextSize::from(2)), LineCol { line: 2, col: 1 });
+        assert_eq!(idx.line_col(TextSize::from(5)), LineCol { line: 3, col: 1 });
+        assert_eq!(idx.line_col(TextSize::from(7)), LineCol { line: 4, col: 1 });
+    }
+
+    #[test]
+    fn a_form_feed_does_not_end_a_line() {
+        // Editors, and LSP positions, do not break lines at a form feed.
+        let idx = LineIndex::new("a\x0cb");
+        assert_eq!(idx.line_count(), 1);
     }
 
     #[test]

@@ -1318,6 +1318,95 @@ fn a_header_with_only_blank_lines_after_it_is_one_error() {
     assert_eq!(error_count("@mixin\n\n.a\n  b: c\n"), 1);
 }
 
+// ── Line endings ─────────────────────────────────────────────────────
+
+/// The tree of `source` with its ranges and token texts left out, and its errors' messages:
+/// what does not depend on how long each line break is.
+fn shape(source: &str) -> String {
+    let tree = render(parse_sass, source);
+    tree.lines()
+        .map(|line| {
+            let line = line.split('@').next().unwrap_or(line);
+            if let Some(message) = line.trim_start().strip_prefix("error ") {
+                return format!("error{}", &message[message.find(':').unwrap_or(0)..]);
+            }
+            line.to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// `\r\n`, a lone `\r` and a form feed are each one line break, as `\n` is: a blank line
+/// made of them ends a statement, or does not, as one made of `\n` does, and a comment
+/// reaches as far.
+#[test]
+fn every_line_ending_counts_as_one_line_break() {
+    for source in [
+        "$a: 1 +\n\n.b\n  c: d\n",
+        ".x\n  b: 1 +\n\n    2\n",
+        ".a,\n\n.b\n  c: d\n",
+        "@mixin\n\n  foo\n  a: b\n",
+        ".a\n  b: c\n\n.d\n  e: f\n",
+        "// c\n\n  deeper\n.a\n  b: c\n",
+        ".a\n  // c\n\n    deeper\n  b: c\n",
+        ".a\n  // c\n\n  d\n  b: c\n",
+        "$a: 1 +\n  // c\n\n  2\n",
+        "@if $a\n  // c\n\n  b: c\n",
+        ".a\n  b: c and\n\n  d: e\n",
+    ] {
+        let expected = shape(source);
+        for ending in ["\r\n", "\r", "\x0c"] {
+            let variant = source.replace('\n', ending);
+            assert_eq!(shape(&variant), expected, "{variant:?}");
+        }
+        let mixed = source.replacen("\n\n", "\r\n\r", 1);
+        assert_eq!(shape(&mixed), expected, "{mixed:?}");
+    }
+}
+
+#[test]
+fn a_blank_line_of_lone_carriage_returns_ends_a_continued_expression() {
+    check(
+        "$a: 1 +\r\r.b\r  c: d\r",
+        expect![[r#"
+            SOURCE_FILE@0..19
+              VARIABLE_DECL@0..7
+                DOLLAR@0..1 "$"
+                IDENT@1..2 "a"
+                COLON@2..3 ":"
+                NUMBER_LITERAL@3..5
+                  WHITESPACE@3..4 " "
+                  NUMBER@4..5 "1"
+                UNARY_EXPR@5..7
+                  WHITESPACE@5..6 " "
+                  PLUS@6..7 "+"
+                SEMICOLON@7..7 ""
+              RULE_SET@7..18
+                SELECTOR_LIST@7..11
+                  SELECTOR@7..11
+                    SIMPLE_SELECTOR@7..11
+                      WHITESPACE@7..9 "\r\r"
+                      DOT@9..10 "."
+                      IDENT@10..11 "b"
+                BLOCK@11..18
+                  LBRACE@11..11 ""
+                  DECLARATION@11..18
+                    PROPERTY@11..15
+                      WHITESPACE@11..14 "\r  "
+                      IDENT@14..15 "c"
+                    COLON@15..16 ":"
+                    VALUE@16..18
+                      VALUE@16..18
+                        WHITESPACE@16..17 " "
+                        IDENT@17..18 "d"
+                    SEMICOLON@18..18 ""
+                  RBRACE@18..18 ""
+              WHITESPACE@18..19 "\r"
+            error 7..7: expected expression
+        "#]],
+    );
+}
+
 // ── Line breaks the grammar absorbs ──────────────────────────────────
 
 #[test]

@@ -12,6 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without a changelog entry.
 
 ### Fixed
+- Indented Sass: a blank line made of lone `\r` or form-feed line breaks, or of `\r\n`
+  followed by a lone `\r`, ends a statement as one made of `\n` does. Only `\n` was
+  counted, so in a file with old Mac line endings an operator at the end of a line took
+  the rule after a blank line into its value
+- LSP: a lone `\r` ends a line in positions, as the protocol defines, so diagnostics,
+  folding and every other range land on the right line in a file with old Mac line
+  endings; everything was reported on the first line
 - Indented Sass: a header goes on across blank lines where it requires more, as in Dart
   Sass: a name after `@mixin`, `=`, `@function`, `@include` or `@extend` on a later line,
   a condition after `@if`, and an argument after a word such as `in` or `as`. Each of
