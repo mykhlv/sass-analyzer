@@ -787,6 +787,342 @@ fn media_with_condition() {
     );
 }
 
+#[test]
+fn media_unclosed_paren_keeps_later_rules() {
+    check(
+        "@media (a\n.x { b: c; }\n.y { d: e; }\n",
+        expect![[r#"
+        SOURCE_FILE@0..36
+          MEDIA_RULE@0..22
+            AT@0..1 "@"
+            IDENT@1..6 "media"
+            MEDIA_QUERY@6..12
+              WHITESPACE@6..7 " "
+              LPAREN@7..8 "("
+              IDENT@8..9 "a"
+              WHITESPACE@9..10 "\n"
+              DOT@10..11 "."
+              IDENT@11..12 "x"
+            BLOCK@12..22
+              WHITESPACE@12..13 " "
+              LBRACE@13..14 "{"
+              DECLARATION@14..20
+                PROPERTY@14..16
+                  WHITESPACE@14..15 " "
+                  IDENT@15..16 "b"
+                COLON@16..17 ":"
+                VALUE@17..19
+                  VALUE@17..19
+                    WHITESPACE@17..18 " "
+                    IDENT@18..19 "c"
+                SEMICOLON@19..20 ";"
+              WHITESPACE@20..21 " "
+              RBRACE@21..22 "}"
+          RULE_SET@22..35
+            SELECTOR_LIST@22..25
+              SELECTOR@22..25
+                SIMPLE_SELECTOR@22..25
+                  WHITESPACE@22..23 "\n"
+                  DOT@23..24 "."
+                  IDENT@24..25 "y"
+            BLOCK@25..35
+              WHITESPACE@25..26 " "
+              LBRACE@26..27 "{"
+              DECLARATION@27..33
+                PROPERTY@27..29
+                  WHITESPACE@27..28 " "
+                  IDENT@28..29 "d"
+                COLON@29..30 ":"
+                VALUE@30..32
+                  VALUE@30..32
+                    WHITESPACE@30..31 " "
+                    IDENT@31..32 "e"
+                SEMICOLON@32..33 ";"
+              WHITESPACE@33..34 " "
+              RBRACE@34..35 "}"
+          WHITESPACE@35..36 "\n"
+        errors:
+          13..14: expected RPAREN
+    "#]],
+    );
+}
+
+#[test]
+fn media_unclosed_paren_at_eof() {
+    check(
+        "@media (a",
+        expect![[r#"
+        SOURCE_FILE@0..9
+          MEDIA_RULE@0..9
+            AT@0..1 "@"
+            IDENT@1..6 "media"
+            MEDIA_QUERY@6..9
+              WHITESPACE@6..7 " "
+              LPAREN@7..8 "("
+              IDENT@8..9 "a"
+        errors:
+          9..9: expected RPAREN
+    "#]],
+    );
+}
+
+#[test]
+fn media_unclosed_paren_ends_at_the_closing_brace() {
+    check(
+        ".x { @media (a }\n.y { b: c }\n",
+        expect![[r#"
+        SOURCE_FILE@0..29
+          RULE_SET@0..16
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "x"
+            BLOCK@2..16
+              WHITESPACE@2..3 " "
+              LBRACE@3..4 "{"
+              MEDIA_RULE@4..14
+                WHITESPACE@4..5 " "
+                AT@5..6 "@"
+                IDENT@6..11 "media"
+                MEDIA_QUERY@11..14
+                  WHITESPACE@11..12 " "
+                  LPAREN@12..13 "("
+                  IDENT@13..14 "a"
+              WHITESPACE@14..15 " "
+              RBRACE@15..16 "}"
+          RULE_SET@16..28
+            SELECTOR_LIST@16..19
+              SELECTOR@16..19
+                SIMPLE_SELECTOR@16..19
+                  WHITESPACE@16..17 "\n"
+                  DOT@17..18 "."
+                  IDENT@18..19 "y"
+            BLOCK@19..28
+              WHITESPACE@19..20 " "
+              LBRACE@20..21 "{"
+              DECLARATION@21..26
+                PROPERTY@21..23
+                  WHITESPACE@21..22 " "
+                  IDENT@22..23 "b"
+                COLON@23..24 ":"
+                VALUE@24..26
+                  VALUE@24..26
+                    WHITESPACE@24..25 " "
+                    IDENT@25..26 "c"
+              WHITESPACE@26..27 " "
+              RBRACE@27..28 "}"
+          WHITESPACE@28..29 "\n"
+        errors:
+          14..14: expected RPAREN
+    "#]],
+    );
+}
+
+#[test]
+fn media_unclosed_nested_paren_ends_at_the_block() {
+    check(
+        "@media ((a) and (b { c: d }\n",
+        expect![[r#"
+        SOURCE_FILE@0..28
+          MEDIA_RULE@0..27
+            AT@0..1 "@"
+            IDENT@1..6 "media"
+            MEDIA_QUERY@6..18
+              WHITESPACE@6..7 " "
+              LPAREN@7..8 "("
+              LPAREN@8..9 "("
+              IDENT@9..10 "a"
+              RPAREN@10..11 ")"
+              WHITESPACE@11..12 " "
+              IDENT@12..15 "and"
+              WHITESPACE@15..16 " "
+              LPAREN@16..17 "("
+              IDENT@17..18 "b"
+            BLOCK@18..27
+              WHITESPACE@18..19 " "
+              LBRACE@19..20 "{"
+              DECLARATION@20..25
+                PROPERTY@20..22
+                  WHITESPACE@20..21 " "
+                  IDENT@21..22 "c"
+                COLON@22..23 ":"
+                VALUE@23..25
+                  VALUE@23..25
+                    WHITESPACE@23..24 " "
+                    IDENT@24..25 "d"
+              WHITESPACE@25..26 " "
+              RBRACE@26..27 "}"
+          WHITESPACE@27..28 "\n"
+        errors:
+          19..20: expected RPAREN
+    "#]],
+    );
+}
+
+#[test]
+fn media_interpolated_brace_and_semicolon_in_parens() {
+    check(
+        r#"@media (a: #{"{"};b) { c: d }"#,
+        expect![[r##"
+        SOURCE_FILE@0..29
+          MEDIA_RULE@0..29
+            AT@0..1 "@"
+            IDENT@1..6 "media"
+            MEDIA_QUERY@6..20
+              WHITESPACE@6..7 " "
+              LPAREN@7..8 "("
+              IDENT@8..9 "a"
+              COLON@9..10 ":"
+              INTERPOLATION@10..17
+                WHITESPACE@10..11 " "
+                HASH_LBRACE@11..13 "#{"
+                STRING_LITERAL@13..16
+                  QUOTED_STRING@13..16 "\"{\""
+                RBRACE@16..17 "}"
+              SEMICOLON@17..18 ";"
+              IDENT@18..19 "b"
+              RPAREN@19..20 ")"
+            BLOCK@20..29
+              WHITESPACE@20..21 " "
+              LBRACE@21..22 "{"
+              DECLARATION@22..27
+                PROPERTY@22..24
+                  WHITESPACE@22..23 " "
+                  IDENT@23..24 "c"
+                COLON@24..25 ":"
+                VALUE@25..27
+                  VALUE@25..27
+                    WHITESPACE@25..26 " "
+                    IDENT@26..27 "d"
+              WHITESPACE@27..28 " "
+              RBRACE@28..29 "}"
+    "##]],
+    );
+}
+
+#[test]
+fn condition_unclosed_paren_is_one_error_and_spares_the_next_rule() {
+    for source in [
+        "@supports (a: b\n.x { c: d; }\n",
+        "@container card (width > 1px\n.x { c: d; }\n",
+        "@scope (.a) to (.b\n.x { c: d; }\n",
+        "@media screen and (a\n.x { c: d; }\n",
+    ] {
+        let (green, errors) = sass_parser::parse_scss(source);
+        let tree = SyntaxNode::new_root(green);
+        assert_eq!(
+            tree.text().to_string(),
+            source,
+            "lossless round-trip failed"
+        );
+        let messages: Vec<_> = errors.iter().map(|(m, _)| m.as_str()).collect();
+        assert_eq!(messages, ["expected RPAREN"], "{source:?}");
+        let brace = u32::try_from(source.find('{').unwrap()).unwrap();
+        assert_eq!(u32::from(errors[0].1.start()), brace, "{source:?}");
+        let declarations = tree
+            .descendants()
+            .filter(|n| n.kind() == sass_parser::syntax_kind::SyntaxKind::DECLARATION)
+            .count();
+        assert_eq!(declarations, 1, "{source:?}");
+    }
+}
+
+#[test]
+fn supports_balanced_braces_in_parens_stay_part_of_them() {
+    check(
+        "@supports (a {b} c) { d: e }",
+        expect![[r#"
+        SOURCE_FILE@0..28
+          SUPPORTS_RULE@0..28
+            AT@0..1 "@"
+            IDENT@1..9 "supports"
+            SUPPORTS_CONDITION@9..19
+              WHITESPACE@9..10 " "
+              LPAREN@10..11 "("
+              IDENT@11..12 "a"
+              WHITESPACE@12..13 " "
+              LBRACE@13..14 "{"
+              IDENT@14..15 "b"
+              RBRACE@15..16 "}"
+              WHITESPACE@16..17 " "
+              IDENT@17..18 "c"
+              RPAREN@18..19 ")"
+            BLOCK@19..28
+              WHITESPACE@19..20 " "
+              LBRACE@20..21 "{"
+              DECLARATION@21..26
+                PROPERTY@21..23
+                  WHITESPACE@21..22 " "
+                  IDENT@22..23 "d"
+                COLON@23..24 ":"
+                VALUE@24..26
+                  VALUE@24..26
+                    WHITESPACE@24..25 " "
+                    IDENT@25..26 "e"
+              WHITESPACE@26..27 " "
+              RBRACE@27..28 "}"
+    "#]],
+    );
+}
+
+#[test]
+fn supports_unclosed_paren_with_a_brace_ends_at_the_closing_brace() {
+    check(
+        ".x { @supports (a {b} }\n.y { c: d }\n",
+        expect![[r#"
+    SOURCE_FILE@0..36
+      RULE_SET@0..23
+        SELECTOR_LIST@0..2
+          SELECTOR@0..2
+            SIMPLE_SELECTOR@0..2
+              DOT@0..1 "."
+              IDENT@1..2 "x"
+        BLOCK@2..23
+          WHITESPACE@2..3 " "
+          LBRACE@3..4 "{"
+          SUPPORTS_RULE@4..21
+            WHITESPACE@4..5 " "
+            AT@5..6 "@"
+            IDENT@6..14 "supports"
+            SUPPORTS_CONDITION@14..21
+              WHITESPACE@14..15 " "
+              LPAREN@15..16 "("
+              IDENT@16..17 "a"
+              WHITESPACE@17..18 " "
+              LBRACE@18..19 "{"
+              IDENT@19..20 "b"
+              RBRACE@20..21 "}"
+          WHITESPACE@21..22 " "
+          RBRACE@22..23 "}"
+      RULE_SET@23..35
+        SELECTOR_LIST@23..26
+          SELECTOR@23..26
+            SIMPLE_SELECTOR@23..26
+              WHITESPACE@23..24 "\n"
+              DOT@24..25 "."
+              IDENT@25..26 "y"
+        BLOCK@26..35
+          WHITESPACE@26..27 " "
+          LBRACE@27..28 "{"
+          DECLARATION@28..33
+            PROPERTY@28..30
+              WHITESPACE@28..29 " "
+              IDENT@29..30 "c"
+            COLON@30..31 ":"
+            VALUE@31..33
+              VALUE@31..33
+                WHITESPACE@31..32 " "
+                IDENT@32..33 "d"
+          WHITESPACE@33..34 " "
+          RBRACE@34..35 "}"
+      WHITESPACE@35..36 "\n"
+    errors:
+      21..21: expected RPAREN
+"#]],
+    );
+}
+
 // ── @supports ───────────────────────────────────────────────────────────
 
 #[test]

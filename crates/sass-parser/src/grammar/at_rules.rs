@@ -145,29 +145,54 @@ fn generic_at_rule(p: &mut Parser<'_>) {
     let _ = m.complete(p, GENERIC_AT_RULE);
 }
 
-/// Consume tokens opaquely until a token in `stop` is reached at paren-depth 0.
-/// Tracks `(` / `)` nesting and handles `#{` interpolation.
-/// Used by `@media`, `@supports`, `@container`, `@scope` conditions.
+/// Consume tokens opaquely until a token in `stop` is reached outside parentheses.
+/// Handles `#{` interpolation. Used by `@media`, `@supports`, `@container`, `@scope`
+/// conditions.
 pub(super) fn eat_opaque_condition(p: &mut Parser<'_>, stop: TokenSet) {
-    let mut depth: u32 = 0;
-    while !p.at_end() {
-        if depth == 0 && stop.contains(p.current()) {
-            break;
-        }
+    while !p.at_end() && !p.at_ts(stop) {
         match p.current() {
-            LPAREN => {
-                depth += 1;
-                p.bump();
-            }
-            RPAREN => {
-                depth = depth.saturating_sub(1);
-                p.bump();
-            }
+            LPAREN => eat_condition_parens(p),
             HASH_LBRACE => {
                 let _ = interpolation(p);
             }
             _ => lines::bump_in_run(p),
         }
+    }
+}
+
+/// `( ... )` in a condition, nested ones included. A `;` inside stays part of it, as do
+/// braces, balanced, as Dart Sass reads `@supports (a {b})`. A `}` that closes nothing
+/// inside ends it unclosed; so does, if no `)` is ever found, the first `{` or, in the
+/// indented layout, the next line no deeper than the one it opened on.
+fn eat_condition_parens(p: &mut Parser<'_>) {
+    assert!(p.at(LPAREN));
+    let p = &mut *p.transparent_guard();
+    let unclosed = p.at_unclosed_bracket();
+    p.end_unclosed_bracket();
+    p.bump();
+    let mut depth: u32 = 1;
+    let mut braces: u32 = 0;
+    while !p.at_end() && depth > 0 && !p.at_unclosed_string_break() {
+        match p.current() {
+            LPAREN => depth += 1,
+            RPAREN => depth -= 1,
+            LBRACE if unclosed => break,
+            LBRACE => braces += 1,
+            RBRACE if braces == 0 => break,
+            RBRACE => braces -= 1,
+            HASH_LBRACE => {
+                let _ = interpolation(p);
+                continue;
+            }
+            _ => {
+                lines::bump_in_run(p);
+                continue;
+            }
+        }
+        p.bump();
+    }
+    if depth > 0 && !p.at_unclosed_string_break() {
+        super::report_unclosed(p, RPAREN);
     }
 }
 

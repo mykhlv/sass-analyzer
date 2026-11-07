@@ -65,6 +65,10 @@ pub(super) struct IndentedState {
     /// The line breaks after them count as being that much less deep.
     unwound: u16,
     brackets: Vec<Bracket>,
+    /// The last answer of `line_at_or_before_column`: `(column, from, found)`. It holds for
+    /// any start from `from` up to `found`, as for the brackets opened or erroring on one
+    /// line, which would otherwise each walk the same lines again.
+    line_search: Option<(u32, usize, usize)>,
     /// How the file indents: decided by its first indented line.
     indent_kind: IndentKind,
     reported_mixed: bool,
@@ -127,6 +131,7 @@ impl IndentedState {
             header: None,
             unwound: 0,
             brackets: Vec::new(),
+            line_search: None,
             indent_kind: IndentKind::None,
             reported_mixed: false,
             reported_kind: false,
@@ -612,6 +617,7 @@ impl<'src> Parser<'src> {
                 .relex_continued(self.source, line.next, across_blank)
         {
             self.indented.line.end = self.input.line_break_range(line.index).1;
+            self.indented.line_search = None;
         }
     }
 
@@ -795,7 +801,8 @@ impl<'src> Parser<'src> {
         for i in 0..self.indented.brackets.len() {
             if self.indented.brackets[i].sync.is_none() {
                 let column = self.indented.brackets[i].column;
-                self.indented.brackets[i].sync = Some(self.line_at_or_before_column(column));
+                self.indented.brackets[i].sync =
+                    Some(self.line_at_or_before_column(self.pos, column));
                 changed = true;
             }
         }
@@ -804,15 +811,59 @@ impl<'src> Parser<'src> {
         }
     }
 
-    /// The first token at or after the cursor that starts a line indented no deeper than
-    /// `column`, inside brackets or not; the input's length if there is none.
-    fn line_at_or_before_column(&self, column: u32) -> usize {
-        (self.pos..self.input.len())
-            .find(|&index| {
-                let (start, end) = self.input.line_break_range(index);
-                end > start && self.input.line_break(end - 1).column() <= column
-            })
-            .unwrap_or(self.input.len())
+    /// The bracket just entered, at its opening token, is one whose contents the grammar
+    /// takes as they come, reporting nothing inside it. If no closer in the input matches
+    /// it, it ends as one with an error inside does, at the next line no deeper than the
+    /// one it opened on, or at the end of input: the grammar reports it unclosed there.
+    pub fn end_unclosed_bracket(&mut self) {
+        if self.layout != super::Layout::Indented {
+            return;
+        }
+        let Some(&Bracket {
+            pos, column, sync, ..
+        }) = self.indented.brackets.last()
+        else {
+            debug_assert!(false, "no bracket entered");
+            return;
+        };
+        debug_assert_eq!(pos, self.pos, "the bracket is entered at its opening token");
+        if sync.is_some() || !self.input.is_unclosed(pos) {
+            return;
+        }
+        let sync = self.line_at_or_before_column(pos + 1, column);
+        if let Some(bracket) = self.indented.brackets.last_mut() {
+            bracket.sync = Some(sync);
+        }
+        self.fence = self.locate_fence();
+    }
+
+    /// The first token at or after `from` that starts a line indented no deeper than
+    /// `column`, inside brackets or not; the input's length if there is none. Walks the
+    /// lines, not their tokens.
+    fn line_at_or_before_column(&mut self, from: usize, column: u32) -> usize {
+        if let Some((last_column, last_from, found)) = self.indented.line_search
+            && last_column == column
+            && (last_from..=found).contains(&from)
+        {
+            return found;
+        }
+        let found = self.find_line_at_or_before_column(from, column);
+        self.indented.line_search = Some((column, from, found));
+        found
+    }
+
+    fn find_line_at_or_before_column(&self, from: usize, column: u32) -> usize {
+        let count = self.input.line_break_count();
+        let mut index = self.input.line_break_range(from).0;
+        while index < count {
+            let token = self.input.line_break_owner(index);
+            let (_, end) = self.input.line_break_range(token);
+            if self.input.line_break(end - 1).column() <= column {
+                return token;
+            }
+            index = end;
+        }
+        self.input.len()
     }
 
     fn recovery_index(&self) -> Option<usize> {

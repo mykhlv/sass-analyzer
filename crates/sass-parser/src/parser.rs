@@ -167,6 +167,13 @@ impl<'src> Parser<'src> {
         self.layout == Layout::Braced
     }
 
+    /// Whether the cursor is at an opening bracket that no closer after it matches, as
+    /// the indented layout counts brackets: a `{` only inside another, any closer for any
+    /// opener.
+    pub fn at_unclosed_bracket(&self) -> bool {
+        self.pos < self.fence.index && self.input.is_unclosed(self.pos)
+    }
+
     /// The kind of the input token before the cursor, zero-width tokens aside; `EOF` at
     /// the start of the input.
     pub fn prev_kind(&self) -> SyntaxKind {

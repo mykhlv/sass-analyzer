@@ -71,7 +71,7 @@ fn pinned_inputs_keep_their_trees() {
         2 0/0/1 e1e1ebf85bcc8c64 "=@\n ,\n"
         3 0/0/1 9ed6d773c1f44d48 "=,\u{c}@\u{c} ,"
         1 1/2/1 d1216e15a70589f2 ".a\n  b: fn(1, !\n    2)\n  c: d\n"
-        0 1/0/0 1e15775992a93cda ".a:not(.b\n  c: d\n"
+        1 1/0/0 59d58f4731cda17e ".a:not(.b\n  c: d\n"
         0 0/0/0 c76465eff96f3a72 "$a: 1 +\n  2\n"
         0 1/1/2 4d714f6bdea6e3ed "@each $a\n  , $b in (1 2)\n  .x\n    c: $a\n"
         0 0/0/1 9233f1ec933982a9 "@function f\n  ($a)\n  @return $a\n"
@@ -143,7 +143,7 @@ fn pinned_inputs_keep_their_trees() {
         1 1/1/1 2b6c59de254654ba ".a\n  b: c /* d\n"
         1 1/1/1 c7981c7191786c7a ".a\n  b: c /* d\n  "
         0 1/1/2 61a093a4da9159f6 ".x\n  @if $and\n    a: b\n"
-        1 1/0/0 7796ec8391435722 "\u{e}[:\n}+\n0"
+        2 1/0/0 2cc5d3af25001e80 "\u{e}[:\n}+\n0"
         7 1/1/1 d5824fb1b6e58cfc "$||{z:\u{c},,"
         0 0/0/0 4395014d94f85cb0 "//\n\n //\n 4"
         3 0/0/0 6d4bef7e27410221 "$0*\n"
@@ -829,9 +829,356 @@ fn line_breaks_inside_brackets_are_whitespace() {
 }
 
 #[test]
-fn an_unclosed_bracket_without_an_error_runs_to_the_end_of_the_input() {
-    // No error inside the bracket, so nothing recovers early.
+fn an_unclosed_bracket_with_only_deeper_lines_after_it_ends_at_the_end_of_the_input() {
     check_pinned(".a:not(.b\n  c: d\n");
+}
+
+#[test]
+fn an_unclosed_pseudo_class_ends_at_a_line_no_deeper_than_its_own() {
+    check(
+        ".a:not(.b\n.c\n  d: e\n.f\n  g: h\n",
+        expect![[r#"
+        SOURCE_FILE@0..30
+          RULE_SET@0..9
+            SELECTOR_LIST@0..9
+              SELECTOR@0..9
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+                PSEUDO_SELECTOR@2..9
+                  COLON@2..3 ":"
+                  IDENT@3..6 "not"
+                  LPAREN@6..7 "("
+                  DOT@7..8 "."
+                  IDENT@8..9 "b"
+          SEMICOLON@9..9 ""
+          RULE_SET@9..19
+            SELECTOR_LIST@9..12
+              SELECTOR@9..12
+                SIMPLE_SELECTOR@9..12
+                  WHITESPACE@9..10 "\n"
+                  DOT@10..11 "."
+                  IDENT@11..12 "c"
+            BLOCK@12..19
+              LBRACE@12..12 ""
+              DECLARATION@12..19
+                PROPERTY@12..16
+                  WHITESPACE@12..15 "\n  "
+                  IDENT@15..16 "d"
+                COLON@16..17 ":"
+                VALUE@17..19
+                  VALUE@17..19
+                    WHITESPACE@17..18 " "
+                    IDENT@18..19 "e"
+                SEMICOLON@19..19 ""
+              RBRACE@19..19 ""
+          RULE_SET@19..29
+            SELECTOR_LIST@19..22
+              SELECTOR@19..22
+                SIMPLE_SELECTOR@19..22
+                  WHITESPACE@19..20 "\n"
+                  DOT@20..21 "."
+                  IDENT@21..22 "f"
+            BLOCK@22..29
+              LBRACE@22..22 ""
+              DECLARATION@22..29
+                PROPERTY@22..26
+                  WHITESPACE@22..25 "\n  "
+                  IDENT@25..26 "g"
+                COLON@26..27 ":"
+                VALUE@27..29
+                  VALUE@27..29
+                    WHITESPACE@27..28 " "
+                    IDENT@28..29 "h"
+                SEMICOLON@29..29 ""
+              RBRACE@29..29 ""
+          WHITESPACE@29..30 "\n"
+        error 9..9: expected RPAREN
+    "#]],
+    );
+}
+
+#[test]
+fn an_unclosed_attribute_selector_ends_at_a_line_no_deeper_than_its_own() {
+    check(
+        ".x\n  .a[b\n  .c\n    d: e\n",
+        expect![[r#"
+        SOURCE_FILE@0..24
+          RULE_SET@0..23
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "x"
+            BLOCK@2..23
+              LBRACE@2..2 ""
+              RULE_SET@2..9
+                SELECTOR_LIST@2..9
+                  SELECTOR@2..9
+                    SIMPLE_SELECTOR@2..7
+                      WHITESPACE@2..5 "\n  "
+                      DOT@5..6 "."
+                      IDENT@6..7 "a"
+                    ATTR_SELECTOR@7..9
+                      LBRACKET@7..8 "["
+                      IDENT@8..9 "b"
+              SEMICOLON@9..9 ""
+              RULE_SET@9..23
+                SELECTOR_LIST@9..14
+                  SELECTOR@9..14
+                    SIMPLE_SELECTOR@9..14
+                      WHITESPACE@9..12 "\n  "
+                      DOT@12..13 "."
+                      IDENT@13..14 "c"
+                BLOCK@14..23
+                  LBRACE@14..14 ""
+                  DECLARATION@14..23
+                    PROPERTY@14..20
+                      WHITESPACE@14..19 "\n    "
+                      IDENT@19..20 "d"
+                    COLON@20..21 ":"
+                    VALUE@21..23
+                      VALUE@21..23
+                        WHITESPACE@21..22 " "
+                        IDENT@22..23 "e"
+                    SEMICOLON@23..23 ""
+                  RBRACE@23..23 ""
+              RBRACE@23..23 ""
+          WHITESPACE@23..24 "\n"
+        error 9..9: expected RBRACKET
+    "#]],
+    );
+}
+
+#[test]
+fn an_unclosed_paren_in_an_unknown_at_rule_ends_at_a_line_no_deeper_than_its_own() {
+    check(
+        "@foo (a\n.c\n  d: e\n",
+        expect![[r#"
+        SOURCE_FILE@0..18
+          GENERIC_AT_RULE@0..7
+            AT@0..1 "@"
+            IDENT@1..4 "foo"
+            WHITESPACE@4..5 " "
+            LPAREN@5..6 "("
+            IDENT@6..7 "a"
+            SEMICOLON@7..7 ""
+          RULE_SET@7..17
+            SELECTOR_LIST@7..10
+              SELECTOR@7..10
+                SIMPLE_SELECTOR@7..10
+                  WHITESPACE@7..8 "\n"
+                  DOT@8..9 "."
+                  IDENT@9..10 "c"
+            BLOCK@10..17
+              LBRACE@10..10 ""
+              DECLARATION@10..17
+                PROPERTY@10..14
+                  WHITESPACE@10..13 "\n  "
+                  IDENT@13..14 "d"
+                COLON@14..15 ":"
+                VALUE@15..17
+                  VALUE@15..17
+                    WHITESPACE@15..16 " "
+                    IDENT@16..17 "e"
+                SEMICOLON@17..17 ""
+              RBRACE@17..17 ""
+          WHITESPACE@17..18 "\n"
+        error 7..7: expected RPAREN
+    "#]],
+    );
+}
+
+#[test]
+fn an_unclosed_paren_in_a_media_query_ends_at_a_line_no_deeper_than_its_own() {
+    check(
+        "@media (a\n.c\n  d: e\n",
+        expect![[r#"
+        SOURCE_FILE@0..20
+          MEDIA_RULE@0..9
+            AT@0..1 "@"
+            IDENT@1..6 "media"
+            MEDIA_QUERY@6..9
+              WHITESPACE@6..7 " "
+              LPAREN@7..8 "("
+              IDENT@8..9 "a"
+          SEMICOLON@9..9 ""
+          RULE_SET@9..19
+            SELECTOR_LIST@9..12
+              SELECTOR@9..12
+                SIMPLE_SELECTOR@9..12
+                  WHITESPACE@9..10 "\n"
+                  DOT@10..11 "."
+                  IDENT@11..12 "c"
+            BLOCK@12..19
+              LBRACE@12..12 ""
+              DECLARATION@12..19
+                PROPERTY@12..16
+                  WHITESPACE@12..15 "\n  "
+                  IDENT@15..16 "d"
+                COLON@16..17 ":"
+                VALUE@17..19
+                  VALUE@17..19
+                    WHITESPACE@17..18 " "
+                    IDENT@18..19 "e"
+                SEMICOLON@19..19 ""
+              RBRACE@19..19 ""
+          WHITESPACE@19..20 "\n"
+        error 9..9: expected RPAREN
+    "#]],
+    );
+}
+
+#[test]
+fn an_unclosed_paren_in_a_condition_is_one_error_and_spares_the_next_rule() {
+    for source in [
+        "@media screen and (a\n.c\n  d: e\n",
+        "@supports (a: b\n.c\n  d: e\n",
+        "@container card (width > 1px\n.c\n  d: e\n",
+        "@scope (.a) to (.b\n.c\n  d: e\n",
+        ".x\n  @media (a\n  .c\n    d: e\n",
+    ] {
+        let tree = render(parse_sass, source);
+        assert_eq!(error_count(source), 1, "{source:?}:\n{tree}");
+        assert!(
+            tree.contains("error ") && tree.contains("expected RPAREN"),
+            "{tree}"
+        );
+        assert_eq!(
+            tree.matches("RULE_SET@").count(),
+            1 + usize::from(source.starts_with('.')),
+            "{tree}"
+        );
+        assert_eq!(tree.matches("DECLARATION@").count(), 1, "{tree}");
+    }
+}
+
+#[test]
+fn an_unclosed_selector_bracket_at_the_end_of_the_input_is_reported() {
+    check(
+        ".a:not(.b",
+        expect![[r#"
+        SOURCE_FILE@0..9
+          RULE_SET@0..9
+            SELECTOR_LIST@0..9
+              SELECTOR@0..9
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+                PSEUDO_SELECTOR@2..9
+                  COLON@2..3 ":"
+                  IDENT@3..6 "not"
+                  LPAREN@6..7 "("
+                  DOT@7..8 "."
+                  IDENT@8..9 "b"
+          SEMICOLON@9..9 ""
+        error 9..9: expected RPAREN
+    "#]],
+    );
+}
+
+#[test]
+fn each_unclosed_selector_bracket_is_one_error() {
+    check(
+        ".a:not(.b\n.c[d\n.e\n  f: g\n",
+        expect![[r#"
+        SOURCE_FILE@0..25
+          RULE_SET@0..9
+            SELECTOR_LIST@0..9
+              SELECTOR@0..9
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+                PSEUDO_SELECTOR@2..9
+                  COLON@2..3 ":"
+                  IDENT@3..6 "not"
+                  LPAREN@6..7 "("
+                  DOT@7..8 "."
+                  IDENT@8..9 "b"
+          SEMICOLON@9..9 ""
+          RULE_SET@9..14
+            SELECTOR_LIST@9..14
+              SELECTOR@9..14
+                SIMPLE_SELECTOR@9..12
+                  WHITESPACE@9..10 "\n"
+                  DOT@10..11 "."
+                  IDENT@11..12 "c"
+                ATTR_SELECTOR@12..14
+                  LBRACKET@12..13 "["
+                  IDENT@13..14 "d"
+          SEMICOLON@14..14 ""
+          RULE_SET@14..24
+            SELECTOR_LIST@14..17
+              SELECTOR@14..17
+                SIMPLE_SELECTOR@14..17
+                  WHITESPACE@14..15 "\n"
+                  DOT@15..16 "."
+                  IDENT@16..17 "e"
+            BLOCK@17..24
+              LBRACE@17..17 ""
+              DECLARATION@17..24
+                PROPERTY@17..21
+                  WHITESPACE@17..20 "\n  "
+                  IDENT@20..21 "f"
+                COLON@21..22 ":"
+                VALUE@22..24
+                  VALUE@22..24
+                    WHITESPACE@22..23 " "
+                    IDENT@23..24 "g"
+                SEMICOLON@24..24 ""
+              RBRACE@24..24 ""
+          WHITESPACE@24..25 "\n"
+        error 9..9: expected RPAREN
+        error 14..14: expected RBRACKET
+    "#]],
+    );
+}
+
+#[test]
+fn a_bracket_closed_on_a_later_line_is_not_cut() {
+    for source in [
+        ".a:not(.b,\n.c)\n  d: e\n",
+        ".a:not(\n  .b\n)\n  c: d\n",
+        "@foo (a,\nb)\n",
+        "@media screen and (\n  min-width: 1px)\n  .a\n    b: c\n",
+        "@media (min-width:\n1px)\n  .a\n    b: c\n",
+        "@supports (a:\nb)\n  .c\n    d: e\n",
+        ".a:not(.b\n.c:not(.d)\n.e)\n  f: g\n",
+    ] {
+        let tree = render(parse_sass, source);
+        assert!(!tree.contains("\nerror "), "{source:?}:\n{tree}");
+    }
+}
+
+/// A comment on a continued line is lexed again once the parser knows the line goes on,
+/// after the first bracket already asked which brackets are unclosed: the answer follows
+/// the new tokens, whether the comment hid an unclosed bracket or a closed one.
+#[test]
+fn unclosed_brackets_are_known_after_a_comment_is_lexed_again() {
+    let rest = ".c\n  d: e\n.f:not(.g\n.h\n  i: j\n";
+    for (lines, errors) in [
+        // Lexed again up to the line after the comment, then as before.
+        ("    2\n", 1),
+        ("    (2)\n", 1),
+        // Lexed again to the end of the input.
+        ("    (2\n", 3),
+    ] {
+        let source = format!(".a:not(.b)\n  x: y\n$a: 1 +\n  // c\n{lines}{rest}");
+        let tree = render(parse_sass, &source);
+        assert_eq!(error_count(&source), errors, "{source:?}:\n{tree}");
+        assert_eq!(tree.matches("RULE_SET@").count(), 4, "{tree}");
+        assert_eq!(tree.matches("DECLARATION@").count(), 3, "{tree}");
+    }
+}
+
+#[test]
+fn many_unclosed_brackets_stay_proportional() {
+    let one_line = ".a:not(".repeat(5_000);
+    let many_lines = ".a:not(.b\n".repeat(5_000);
+    let nested = format!("{}\n.c\n  d: e\n", "@media (a ".repeat(5_000));
+    assert_eq!(error_count(&one_line), 1);
+    assert_eq!(error_count(&many_lines), 5_000);
+    assert_eq!(error_count(&nested), 1);
 }
 
 #[test]
