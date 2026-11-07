@@ -160,23 +160,22 @@ pub(super) fn eat_opaque_condition(p: &mut Parser<'_>, stop: TokenSet) {
     }
 }
 
-/// `( ... )` in a condition, nested ones included. A `;` inside stays part of it, as do
-/// braces, balanced, as Dart Sass reads `@supports (a {b})`. A `}` that closes nothing
-/// inside ends it unclosed; so does, if no `)` is ever found, the first `{` or, in the
-/// indented layout, the next line no deeper than the one it opened on.
+/// `( ... )` in a condition, nested ones included. A `;` inside stays part of it, as does
+/// a balanced brace group the parentheses go on after, as Dart Sass reads
+/// `@supports (a {b})`. Any other `{`, or a `}` that closes nothing inside, ends it
+/// unclosed; in the indented layout it ends as `eat_balanced` does.
 fn eat_condition_parens(p: &mut Parser<'_>) {
     assert!(p.at(LPAREN));
     let p = &mut *p.transparent_guard();
-    let unclosed = p.at_unclosed_bracket();
-    p.end_unclosed_bracket();
+    p.end_unclosed_bracket(LPAREN, RPAREN);
     p.bump();
     let mut depth: u32 = 1;
     let mut braces: u32 = 0;
-    while !p.at_end() && depth > 0 && !p.at_unclosed_string_break() {
+    while !p.at_end() && depth > 0 && !p.at_unclosed_string_break() && !p.at_virtual() {
         match p.current() {
             LPAREN => depth += 1,
             RPAREN => depth -= 1,
-            LBRACE if unclosed => break,
+            LBRACE if braces == 0 && !at_brace_group_in_parens(p, depth) => break,
             LBRACE => braces += 1,
             RBRACE if braces == 0 => break,
             RBRACE => braces -= 1,
@@ -193,6 +192,47 @@ fn eat_condition_parens(p: &mut Parser<'_>) {
     }
     if depth > 0 && !p.at_unclosed_string_break() {
         super::report_unclosed(p, RPAREN);
+    }
+}
+
+/// At a `{` inside `depth` parentheses of a condition: whether it opens a group whose
+/// brackets all close in kind, after which the parentheses close too, with no `{` or `;`
+/// between the group and their `)`. Otherwise the `{` most likely opens a
+/// block and the parentheses were left unclosed. The look ahead ends at that `{` or `;`,
+/// so it reads each group and what follows it once.
+fn at_brace_group_in_parens(p: &Parser<'_>, depth: u32) -> bool {
+    debug_assert!(p.at(LBRACE));
+    // The closers expected, innermost last, and whether each closes a brace group.
+    let mut expected: Vec<(SyntaxKind, bool)> = vec![(RPAREN, false); depth as usize];
+    expected.push((RBRACE, true));
+    let mut groups = 1u32;
+    let mut offset = 1;
+    loop {
+        let kind = p.nth(offset);
+        offset += 1;
+        match kind {
+            LPAREN => expected.push((RPAREN, false)),
+            LBRACKET => expected.push((RBRACKET, false)),
+            HASH_LBRACE => expected.push((RBRACE, false)),
+            LBRACE | SEMICOLON if groups == 0 => return false,
+            LBRACE => {
+                expected.push((RBRACE, true));
+                groups += 1;
+            }
+            RPAREN | RBRACKET | RBRACE => match expected.pop() {
+                Some((closer, group)) if closer == kind => {
+                    groups -= u32::from(group);
+                    if expected.is_empty() {
+                        return true;
+                    }
+                }
+                // Even a `}` closing the block the condition is in: the group before it is
+                // more likely a rule's block, `.b { c: d }`, than part of the condition.
+                _ => return false,
+            },
+            EOF => return false,
+            _ => {}
+        }
     }
 }
 

@@ -143,7 +143,7 @@ fn pinned_inputs_keep_their_trees() {
         1 1/1/1 2b6c59de254654ba ".a\n  b: c /* d\n"
         1 1/1/1 c7981c7191786c7a ".a\n  b: c /* d\n  "
         0 1/1/2 61a093a4da9159f6 ".x\n  @if $and\n    a: b\n"
-        2 1/0/0 2cc5d3af25001e80 "\u{e}[:\n}+\n0"
+        4 2/0/0 e9dfef149abe24e6 "\u{e}[:\n}+\n0"
         7 1/1/1 d5824fb1b6e58cfc "$||{z:\u{c},,"
         0 0/0/0 4395014d94f85cb0 "//\n\n //\n 4"
         3 0/0/0 6d4bef7e27410221 "$0*\n"
@@ -830,7 +830,439 @@ fn line_breaks_inside_brackets_are_whitespace() {
 
 #[test]
 fn an_unclosed_bracket_with_only_deeper_lines_after_it_ends_at_the_end_of_the_input() {
-    check_pinned(".a:not(.b\n  c: d\n");
+    expect![[r#"
+        SOURCE_FILE@0..17
+          RULE_SET@0..16
+            SELECTOR_LIST@0..16
+              SELECTOR@0..16
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+                PSEUDO_SELECTOR@2..16
+                  COLON@2..3 ":"
+                  IDENT@3..6 "not"
+                  LPAREN@6..7 "("
+                  DOT@7..8 "."
+                  IDENT@8..9 "b"
+                  WHITESPACE@9..12 "\n  "
+                  IDENT@12..13 "c"
+                  COLON@13..14 ":"
+                  WHITESPACE@14..15 " "
+                  IDENT@15..16 "d"
+          SEMICOLON@16..16 ""
+          WHITESPACE@16..17 "\n"
+        error 16..16: expected RPAREN
+    "#]]
+    .assert_eq(&check_pinned(".a:not(.b\n  c: d\n"));
+}
+
+#[test]
+fn a_call_below_does_not_close_an_unclosed_media_query() {
+    check(
+        "@media (a\n  .b\n    c: d\n.e\n  f: g(h))\n",
+        expect![[r#"
+        SOURCE_FILE@0..38
+          MEDIA_RULE@0..23
+            AT@0..1 "@"
+            IDENT@1..6 "media"
+            MEDIA_QUERY@6..23
+              WHITESPACE@6..7 " "
+              LPAREN@7..8 "("
+              IDENT@8..9 "a"
+              WHITESPACE@9..12 "\n  "
+              DOT@12..13 "."
+              IDENT@13..14 "b"
+              WHITESPACE@14..19 "\n    "
+              IDENT@19..20 "c"
+              COLON@20..21 ":"
+              WHITESPACE@21..22 " "
+              IDENT@22..23 "d"
+          SEMICOLON@23..23 ""
+          RULE_SET@23..37
+            SELECTOR_LIST@23..26
+              SELECTOR@23..26
+                SIMPLE_SELECTOR@23..26
+                  WHITESPACE@23..24 "\n"
+                  DOT@24..25 "."
+                  IDENT@25..26 "e"
+            BLOCK@26..37
+              LBRACE@26..26 ""
+              DECLARATION@26..37
+                PROPERTY@26..30
+                  WHITESPACE@26..29 "\n  "
+                  IDENT@29..30 "f"
+                COLON@30..31 ":"
+                VALUE@31..37
+                  FUNCTION_CALL@31..36
+                    WHITESPACE@31..32 " "
+                    IDENT@32..33 "g"
+                    ARG_LIST@33..36
+                      LPAREN@33..34 "("
+                      ARG@34..35
+                        VALUE@34..35
+                          IDENT@34..35 "h"
+                      RPAREN@35..36 ")"
+                  RPAREN@36..37 ")"
+                SEMICOLON@37..37 ""
+              RBRACE@37..37 ""
+          WHITESPACE@37..38 "\n"
+        error 23..23: expected RPAREN
+    "#]],
+    );
+}
+
+#[test]
+fn a_call_below_does_not_close_an_unclosed_pseudo_class() {
+    check(
+        ".a:not(.b\n  c: d\n.e\n  f: g\n.h\n  i: j(k))\n",
+        expect![[r#"
+        SOURCE_FILE@0..41
+          RULE_SET@0..16
+            SELECTOR_LIST@0..16
+              SELECTOR@0..16
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+                PSEUDO_SELECTOR@2..16
+                  COLON@2..3 ":"
+                  IDENT@3..6 "not"
+                  LPAREN@6..7 "("
+                  DOT@7..8 "."
+                  IDENT@8..9 "b"
+                  WHITESPACE@9..12 "\n  "
+                  IDENT@12..13 "c"
+                  COLON@13..14 ":"
+                  WHITESPACE@14..15 " "
+                  IDENT@15..16 "d"
+          SEMICOLON@16..16 ""
+          RULE_SET@16..26
+            SELECTOR_LIST@16..19
+              SELECTOR@16..19
+                SIMPLE_SELECTOR@16..19
+                  WHITESPACE@16..17 "\n"
+                  DOT@17..18 "."
+                  IDENT@18..19 "e"
+            BLOCK@19..26
+              LBRACE@19..19 ""
+              DECLARATION@19..26
+                PROPERTY@19..23
+                  WHITESPACE@19..22 "\n  "
+                  IDENT@22..23 "f"
+                COLON@23..24 ":"
+                VALUE@24..26
+                  VALUE@24..26
+                    WHITESPACE@24..25 " "
+                    IDENT@25..26 "g"
+                SEMICOLON@26..26 ""
+              RBRACE@26..26 ""
+          RULE_SET@26..40
+            SELECTOR_LIST@26..29
+              SELECTOR@26..29
+                SIMPLE_SELECTOR@26..29
+                  WHITESPACE@26..27 "\n"
+                  DOT@27..28 "."
+                  IDENT@28..29 "h"
+            BLOCK@29..40
+              LBRACE@29..29 ""
+              DECLARATION@29..40
+                PROPERTY@29..33
+                  WHITESPACE@29..32 "\n  "
+                  IDENT@32..33 "i"
+                COLON@33..34 ":"
+                VALUE@34..40
+                  FUNCTION_CALL@34..39
+                    WHITESPACE@34..35 " "
+                    IDENT@35..36 "j"
+                    ARG_LIST@36..39
+                      LPAREN@36..37 "("
+                      ARG@37..38
+                        VALUE@37..38
+                          IDENT@37..38 "k"
+                      RPAREN@38..39 ")"
+                  RPAREN@39..40 ")"
+                SEMICOLON@40..40 ""
+              RBRACE@40..40 ""
+          WHITESPACE@40..41 "\n"
+        error 16..16: expected RPAREN
+    "#]],
+    );
+}
+
+#[test]
+fn a_closer_of_another_kind_does_not_close_a_selector_bracket() {
+    check(
+        ".a:not(.b\n.c]\n  d: e\n",
+        expect![[r#"
+        SOURCE_FILE@0..21
+          RULE_SET@0..9
+            SELECTOR_LIST@0..9
+              SELECTOR@0..9
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+                PSEUDO_SELECTOR@2..9
+                  COLON@2..3 ":"
+                  IDENT@3..6 "not"
+                  LPAREN@6..7 "("
+                  DOT@7..8 "."
+                  IDENT@8..9 "b"
+          SEMICOLON@9..9 ""
+          RULE_SET@9..12
+            SELECTOR_LIST@9..12
+              SELECTOR@9..12
+                SIMPLE_SELECTOR@9..12
+                  WHITESPACE@9..10 "\n"
+                  DOT@10..11 "."
+                  IDENT@11..12 "c"
+          ERROR@12..13
+            RBRACKET@12..13 "]"
+            LBRACE@13..13 ""
+          RULE_SET@13..20
+            SELECTOR_LIST@13..20
+              SELECTOR@13..20
+                SIMPLE_SELECTOR@13..17
+                  WHITESPACE@13..16 "\n  "
+                  IDENT@16..17 "d"
+                PSEUDO_SELECTOR@17..20
+                  COLON@17..18 ":"
+                  WHITESPACE@18..19 " "
+                  IDENT@19..20 "e"
+          SEMICOLON@20..20 ""
+          ERROR@20..20
+            RBRACE@20..20 ""
+          WHITESPACE@20..21 "\n"
+        error 9..9: expected RPAREN
+        error 12..13: expected rule
+        error 20..20: expected rule
+    "#]],
+    );
+}
+
+#[test]
+fn a_closer_of_another_kind_ends_a_selector_bracket_at_its_line() {
+    check(
+        ".a:not(.b]\n  c: d\n.e\n  f: g\n",
+        expect![[r#"
+        SOURCE_FILE@0..28
+          RULE_SET@0..17
+            SELECTOR_LIST@0..10
+              SELECTOR@0..10
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+                PSEUDO_SELECTOR@2..10
+                  COLON@2..3 ":"
+                  IDENT@3..6 "not"
+                  LPAREN@6..7 "("
+                  DOT@7..8 "."
+                  IDENT@8..9 "b"
+                  RBRACKET@9..10 "]"
+            BLOCK@10..17
+              LBRACE@10..10 ""
+              DECLARATION@10..17
+                PROPERTY@10..14
+                  WHITESPACE@10..13 "\n  "
+                  IDENT@13..14 "c"
+                COLON@14..15 ":"
+                VALUE@15..17
+                  VALUE@15..17
+                    WHITESPACE@15..16 " "
+                    IDENT@16..17 "d"
+                SEMICOLON@17..17 ""
+              RBRACE@17..17 ""
+          RULE_SET@17..27
+            SELECTOR_LIST@17..20
+              SELECTOR@17..20
+                SIMPLE_SELECTOR@17..20
+                  WHITESPACE@17..18 "\n"
+                  DOT@18..19 "."
+                  IDENT@19..20 "e"
+            BLOCK@20..27
+              LBRACE@20..20 ""
+              DECLARATION@20..27
+                PROPERTY@20..24
+                  WHITESPACE@20..23 "\n  "
+                  IDENT@23..24 "f"
+                COLON@24..25 ":"
+                VALUE@25..27
+                  VALUE@25..27
+                    WHITESPACE@25..26 " "
+                    IDENT@26..27 "g"
+                SEMICOLON@27..27 ""
+              RBRACE@27..27 ""
+          WHITESPACE@27..28 "\n"
+        error 10..10: expected RPAREN
+    "#]],
+    );
+}
+
+#[test]
+fn a_closer_of_another_kind_ends_a_media_query_at_its_line() {
+    check(
+        "@media (a]\n  .b\n    c: d\n",
+        expect![[r#"
+        SOURCE_FILE@0..25
+          MEDIA_RULE@0..24
+            AT@0..1 "@"
+            IDENT@1..6 "media"
+            MEDIA_QUERY@6..10
+              WHITESPACE@6..7 " "
+              LPAREN@7..8 "("
+              IDENT@8..9 "a"
+              RBRACKET@9..10 "]"
+            BLOCK@10..24
+              LBRACE@10..10 ""
+              RULE_SET@10..24
+                SELECTOR_LIST@10..15
+                  SELECTOR@10..15
+                    SIMPLE_SELECTOR@10..15
+                      WHITESPACE@10..13 "\n  "
+                      DOT@13..14 "."
+                      IDENT@14..15 "b"
+                BLOCK@15..24
+                  LBRACE@15..15 ""
+                  DECLARATION@15..24
+                    PROPERTY@15..21
+                      WHITESPACE@15..20 "\n    "
+                      IDENT@20..21 "c"
+                    COLON@21..22 ":"
+                    VALUE@22..24
+                      VALUE@22..24
+                        WHITESPACE@22..23 " "
+                        IDENT@23..24 "d"
+                    SEMICOLON@24..24 ""
+                  RBRACE@24..24 ""
+              RBRACE@24..24 ""
+          WHITESPACE@24..25 "\n"
+        error 10..10: expected RPAREN
+    "#]],
+    );
+}
+
+#[test]
+fn a_stray_closer_of_another_kind_below_does_not_keep_a_bracket_open() {
+    check(
+        ".a:not(.b\n.c\n  d: e\n.f]\n",
+        expect![[r#"
+        SOURCE_FILE@0..24
+          RULE_SET@0..9
+            SELECTOR_LIST@0..9
+              SELECTOR@0..9
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+                PSEUDO_SELECTOR@2..9
+                  COLON@2..3 ":"
+                  IDENT@3..6 "not"
+                  LPAREN@6..7 "("
+                  DOT@7..8 "."
+                  IDENT@8..9 "b"
+          SEMICOLON@9..9 ""
+          RULE_SET@9..19
+            SELECTOR_LIST@9..12
+              SELECTOR@9..12
+                SIMPLE_SELECTOR@9..12
+                  WHITESPACE@9..10 "\n"
+                  DOT@10..11 "."
+                  IDENT@11..12 "c"
+            BLOCK@12..19
+              LBRACE@12..12 ""
+              DECLARATION@12..19
+                PROPERTY@12..16
+                  WHITESPACE@12..15 "\n  "
+                  IDENT@15..16 "d"
+                COLON@16..17 ":"
+                VALUE@17..19
+                  VALUE@17..19
+                    WHITESPACE@17..18 " "
+                    IDENT@18..19 "e"
+                SEMICOLON@19..19 ""
+              RBRACE@19..19 ""
+          RULE_SET@19..22
+            SELECTOR_LIST@19..22
+              SELECTOR@19..22
+                SIMPLE_SELECTOR@19..22
+                  WHITESPACE@19..20 "\n"
+                  DOT@20..21 "."
+                  IDENT@21..22 "f"
+          ERROR@22..23
+            RBRACKET@22..23 "]"
+          SEMICOLON@23..23 ""
+          WHITESPACE@23..24 "\n"
+        error 9..9: expected RPAREN
+        error 22..23: expected rule
+    "#]],
+    );
+}
+
+#[test]
+fn an_unclosed_media_query_nested_in_a_rule_ends_at_its_own_line() {
+    check(
+        ".x\n  @media (a\n  .b\n    c: d\n.e\n  f: g\n",
+        expect![[r#"
+        SOURCE_FILE@0..39
+          RULE_SET@0..28
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "x"
+            BLOCK@2..28
+              LBRACE@2..2 ""
+              MEDIA_RULE@2..14
+                WHITESPACE@2..5 "\n  "
+                AT@5..6 "@"
+                IDENT@6..11 "media"
+                MEDIA_QUERY@11..14
+                  WHITESPACE@11..12 " "
+                  LPAREN@12..13 "("
+                  IDENT@13..14 "a"
+              SEMICOLON@14..14 ""
+              RULE_SET@14..28
+                SELECTOR_LIST@14..19
+                  SELECTOR@14..19
+                    SIMPLE_SELECTOR@14..19
+                      WHITESPACE@14..17 "\n  "
+                      DOT@17..18 "."
+                      IDENT@18..19 "b"
+                BLOCK@19..28
+                  LBRACE@19..19 ""
+                  DECLARATION@19..28
+                    PROPERTY@19..25
+                      WHITESPACE@19..24 "\n    "
+                      IDENT@24..25 "c"
+                    COLON@25..26 ":"
+                    VALUE@26..28
+                      VALUE@26..28
+                        WHITESPACE@26..27 " "
+                        IDENT@27..28 "d"
+                    SEMICOLON@28..28 ""
+                  RBRACE@28..28 ""
+              RBRACE@28..28 ""
+          RULE_SET@28..38
+            SELECTOR_LIST@28..31
+              SELECTOR@28..31
+                SIMPLE_SELECTOR@28..31
+                  WHITESPACE@28..29 "\n"
+                  DOT@29..30 "."
+                  IDENT@30..31 "e"
+            BLOCK@31..38
+              LBRACE@31..31 ""
+              DECLARATION@31..38
+                PROPERTY@31..35
+                  WHITESPACE@31..34 "\n  "
+                  IDENT@34..35 "f"
+                COLON@35..36 ":"
+                VALUE@36..38
+                  VALUE@36..38
+                    WHITESPACE@36..37 " "
+                    IDENT@37..38 "g"
+                SEMICOLON@38..38 ""
+              RBRACE@38..38 ""
+          WHITESPACE@38..39 "\n"
+        error 14..14: expected RPAREN
+    "#]],
+    );
 }
 
 #[test]
@@ -1144,6 +1576,9 @@ fn a_bracket_closed_on_a_later_line_is_not_cut() {
         "@media (min-width:\n1px)\n  .a\n    b: c\n",
         "@supports (a:\nb)\n  .c\n    d: e\n",
         ".a:not(.b\n.c:not(.d)\n.e)\n  f: g\n",
+        ".a:is(.b,\n.c,\n.d)\n  e: f\n",
+        ".a:not(.b,\n.c,\n  .d)\n  e: f\n",
+        "@foo (a,\nb,\nc)\n  d: e\n",
     ] {
         let tree = render(parse_sass, source);
         assert!(!tree.contains("\nerror "), "{source:?}:\n{tree}");

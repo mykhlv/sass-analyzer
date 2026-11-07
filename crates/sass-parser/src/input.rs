@@ -1,5 +1,3 @@
-use std::cell::OnceCell;
-
 use crate::lexer;
 use crate::syntax_kind::SyntaxKind;
 use crate::text_range::{TextRange, TextSize};
@@ -17,10 +15,6 @@ use crate::text_range::{TextRange, TextSize};
 /// - `line_break_starts[i]..line_break_starts[i+1]`: the line breaks before token `i`;
 ///   `n_tokens + 2` entries, so that EOF (`i == n_tokens`) has a slice of its own.
 ///   Both are empty for braced (SCSS) input, which never pays for them.
-///
-/// `unclosed`, found on first use: the openers that no closer ever matches, by token
-/// index, in order, as [`bracket_depth_after`] counts them — the brackets still open at
-/// the end of input.
 pub struct Input {
     kinds: Vec<SyntaxKind>,
     ranges: Vec<TextRange>,
@@ -28,7 +22,6 @@ pub struct Input {
     trivia_starts: Vec<u32>,
     line_breaks: Vec<LineBreak>,
     line_break_starts: Vec<u32>,
-    unclosed: OnceCell<Vec<u32>>,
 }
 
 /// How the indentation after a line break is made up.
@@ -162,7 +155,6 @@ impl Input {
             trivia_starts,
             line_breaks: Vec::new(),
             line_break_starts: Vec::new(),
-            unclosed: OnceCell::new(),
         }
     }
 
@@ -267,7 +259,6 @@ impl Input {
             trivia_starts,
             line_breaks,
             line_break_starts,
-            unclosed: OnceCell::new(),
         }
     }
 
@@ -334,7 +325,6 @@ impl Input {
         let mut pending_trivia_start = self.trivia_starts[k0];
         let mut pending_line_break_start = self.line_break_starts[k0];
         let mut depth = 0u32;
-        let mut open = Vec::new();
         for &(kind, range) in segment {
             let ends_input = range.end() == TextSize::of(source);
             if kind.is_trivia() || is_unterminated_comment(kind, &source[range], ends_input) {
@@ -351,7 +341,7 @@ impl Input {
                 pending_trivia_start = (t0 + trivia.len()) as u32;
                 line_break_starts.push(pending_line_break_start);
                 pending_line_break_start = (b0 + line_breaks.len()) as u32;
-                depth = track_brackets(&mut open, depth, kind, (k0 + kinds.len()) as u32);
+                depth = bracket_depth_after(depth, kind);
                 kinds.push(kind);
                 ranges.push(range);
             }
@@ -359,24 +349,6 @@ impl Input {
         // The first token after the segment: where its trivia and line breaks start.
         trivia_starts.push(pending_trivia_start);
         line_break_starts.push(pending_line_break_start);
-
-        // Nothing is open at the depth-0 break the segment starts at. Unless it runs to the
-        // end of input, it ends at the depth it ended at before, with the same tokens after
-        // it: as many of the brackets open there stay unclosed as did, the outermost ones.
-        if let Some(unclosed) = self.unclosed.take() {
-            let added_tokens = kinds.len().wrapping_sub(k1 - k0) as u32;
-            let kept = unclosed.partition_point(|&opener| (opener as usize) < k1);
-            if k1 < self.kinds.len() {
-                debug_assert!(kept <= open.len(), "unclosed brackets lost in a splice");
-                open.truncate(kept);
-            }
-            open.extend(
-                unclosed[kept..]
-                    .iter()
-                    .map(|&opener| opener.wrapping_add(added_tokens)),
-            );
-            self.unclosed = OnceCell::from(open);
-        }
 
         let added_trivia = trivia.len().wrapping_sub(t1 - t0) as u32;
         let added_line_breaks = line_breaks.len().wrapping_sub(b1 - b0) as u32;
@@ -445,12 +417,6 @@ impl Input {
         debug_assert!(
             self.line_break_starts == expected.line_break_starts,
             "spliced line break starts",
-        );
-        debug_assert!(
-            self.unclosed
-                .get()
-                .is_none_or(|unclosed| *unclosed == unclosed_openers(&expected.kinds)),
-            "spliced unclosed brackets"
         );
     }
 
@@ -623,7 +589,6 @@ impl Input {
             trivia_starts,
             line_breaks: Vec::new(),
             line_break_starts: Vec::new(),
-            unclosed: OnceCell::new(),
         }
     }
 
@@ -780,13 +745,6 @@ impl Input {
     pub fn starts_line(&self, pos: usize) -> bool {
         !self.line_breaks_before(pos).is_empty()
     }
-
-    /// Whether the token at `pos` opens a bracket that no closer after it matches.
-    #[inline]
-    pub fn is_unclosed(&self, pos: usize) -> bool {
-        let unclosed = self.unclosed.get_or_init(|| unclosed_openers(&self.kinds));
-        u32::try_from(pos).is_ok_and(|pos| unclosed.binary_search(&pos).is_ok())
-    }
 }
 
 /// Tokens lexed before, fed back through [`Input::lex`].
@@ -818,31 +776,6 @@ fn count_relex_work() {
 /// the parser reports it once, as unterminated.
 fn is_unterminated_comment(kind: SyntaxKind, text: &str, ends_input: bool) -> bool {
     kind == SyntaxKind::ERROR && ends_input && text.starts_with("/*")
-}
-
-/// The token indices of the brackets still open after `kinds`, outermost first.
-fn unclosed_openers(kinds: &[SyntaxKind]) -> Vec<u32> {
-    let mut open = Vec::new();
-    let mut depth = 0u32;
-    for (index, &kind) in kinds.iter().enumerate() {
-        #[allow(clippy::cast_possible_truncation)]
-        let index = index as u32;
-        depth = track_brackets(&mut open, depth, kind, index);
-    }
-    open
-}
-
-/// [`bracket_depth_after`], keeping `open`, the token indices of the brackets open, in
-/// step with it: `index` is that of `kind`.
-#[inline]
-fn track_brackets(open: &mut Vec<u32>, depth: u32, kind: SyntaxKind, index: u32) -> u32 {
-    let after = bracket_depth_after(depth, kind);
-    if after > depth {
-        open.push(index);
-    } else if after < depth {
-        open.pop();
-    }
-    after
 }
 
 /// Bracket depth after a significant token, counted as the indented lexer counts it for

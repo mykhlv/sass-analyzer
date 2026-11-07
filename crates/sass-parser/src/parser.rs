@@ -159,19 +159,19 @@ impl<'src> Parser<'src> {
         self.pos >= self.fence.index && self.fence.kind == SyntaxKind::EOF
     }
 
+    /// Whether the cursor is at a zero-width token of the indented layout: a `{`, `;` or
+    /// `}` that the indentation implies.
+    #[inline]
+    pub fn at_virtual(&self) -> bool {
+        self.pos >= self.fence.index && self.fence.kind != SyntaxKind::EOF
+    }
+
     /// Whether blocks and statements are delimited by real tokens only. In the indented
     /// layouts a selector line with nothing indented beneath it is a rule with no block,
     /// and a bracket left open recovers at a line start, not at a brace.
     #[inline]
     pub fn braced(&self) -> bool {
         self.layout == Layout::Braced
-    }
-
-    /// Whether the cursor is at an opening bracket that no closer after it matches, as
-    /// the indented layout counts brackets: a `{` only inside another, any closer for any
-    /// opener.
-    pub fn at_unclosed_bracket(&self) -> bool {
-        self.pos < self.fence.index && self.input.is_unclosed(self.pos)
     }
 
     /// The kind of the input token before the cursor, zero-width tokens aside; `EOF` at

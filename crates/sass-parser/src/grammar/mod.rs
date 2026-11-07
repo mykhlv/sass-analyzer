@@ -475,18 +475,19 @@ fn skip_until_block_end(p: &mut Parser<'_>) {
 
 /// Consume `open ... close`, treating content as opaque. Braced, a `{` or `}` outside
 /// interpolation ends a bracket left unclosed: no selector argument or at-rule prelude
-/// holds one, and the rules after it stay intact. The indented layout ends it at the next
-/// line no deeper than the one it opened on instead.
+/// holds one, and the rules after it stay intact. The indented layout ends it at a line
+/// instead: see [`Parser::end_unclosed_bracket`].
 pub(crate) fn eat_balanced(p: &mut Parser<'_>, open: SyntaxKind, close: SyntaxKind) {
     assert!(p.at(open));
     let p = &mut *p.transparent_guard();
     let braced = p.braced();
-    p.end_unclosed_bracket();
+    p.end_unclosed_bracket(open, close);
     p.bump();
     let mut depth: u32 = 1;
     let mut interpolation: u32 = 0;
-    // A string left unclosed took the rest of its line, the closing bracket and all.
-    while !p.at_end() && depth > 0 && !p.at_unclosed_string_break() {
+    // A string left unclosed took the rest of its line, the closing bracket and all. A
+    // zero-width token comes where a closer of another kind took the bracket's place.
+    while !p.at_end() && depth > 0 && !p.at_unclosed_string_break() && !p.at_virtual() {
         let kind = p.current();
         if braced {
             match kind {
