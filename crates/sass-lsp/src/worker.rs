@@ -304,28 +304,47 @@ pub(crate) async fn run_worker(
     }
 }
 
-/// Re-publish diagnostics for open files that depend on a changed/deleted file.
+/// Re-check the open files a changed, created or deleted file may affect: those that
+/// import it, and those with an import that does not resolve, which a new file may
+/// satisfy. Each is re-indexed so its imports resolve again against the disk.
 async fn refresh_dependents(
     module_graph: &workspace::ModuleGraph,
     documents: &DashMap<Uri, DocumentState>,
     client: &Client,
     changed_uri: &Uri,
 ) {
-    for dep_uri in module_graph.dependents_of(changed_uri) {
-        if let Some(doc) = documents.get(&dep_uri) {
+    let dependents = module_graph.dependents_of(changed_uri);
+    let affected: Vec<Uri> = documents
+        .iter()
+        .map(|entry| entry.key().clone())
+        .filter(|uri| dependents.contains(uri) || module_graph.has_unresolved_paths(uri))
+        .collect();
+    for uri in affected {
+        // Computed with the document guard released before publishing.
+        let Some((all_diags, version)) = documents.get(&uri).map(|doc| {
+            module_graph.index_file(
+                &uri,
+                doc.green.clone(),
+                doc.symbols.clone(),
+                doc.line_index.clone(),
+                doc.text.clone(),
+            );
             let mut all_diags = errors_to_diagnostics(&doc.errors, &doc.line_index, &doc.text);
             let semantic = diagnostics::check_file(
-                &dep_uri,
+                &uri,
                 &doc.symbols,
                 module_graph,
                 &doc.green,
                 !doc.errors.is_empty(),
             );
             all_diags.extend(semantic_to_lsp(semantic, &doc.line_index, &doc.text));
-            client
-                .publish_diagnostics(dep_uri.clone(), all_diags, Some(doc.version))
-                .await;
-        }
+            (all_diags, doc.version)
+        }) else {
+            continue;
+        };
+        client
+            .publish_diagnostics(uri, all_diags, Some(version))
+            .await;
     }
     let c = client.clone();
     tokio::spawn(async move {

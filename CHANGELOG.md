@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+- LSP: a `@use`, `@forward` or `@import` of a stylesheet that does not exist, as a
+  misspelled path or one that needs a `loadPaths` entry, is reported as an error on its
+  URL, with Dart Sass's message "Can't find stylesheet to import.", and so is an unknown
+  `sass:` module. Nothing was reported: the only trace was that every undefined-name
+  warning in the file went silent, which it still does, so the one cause gives one
+  diagnostic. URLs the server does not resolve itself are not reported: `pkg:` and other
+  schemes, and the `~` prefix of bundlers. Neither are plain-CSS imports, which Dart
+  Sass leaves to the browser: a URL ending in `.css`, starting with `http://`,
+  `https://` or `//`, written as `url(...)`, or followed by a media query or
+  `supports(...)`
+
 ### Fixed
 - LSP: an open document's state, its diagnostics and the cross-file index now always come
   from the same version of its text. A parse of an older version than the one stored no
@@ -16,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   watcher event for a file opened meanwhile no longer replaces the editor's text with the
   disk's; and a tree re-parsed after being evicted from the cache is no longer stored over
   a newer version of the file
+- LSP: creating a file re-checks the open files whose imports did not resolve, and
+  deleting one re-resolves the imports of the open files that use it. A created file
+  was not seen by its importers until they were edited, and a deleted one was still
+  treated as loaded
 
 ## 0.4.0 — 2026-11-08
 

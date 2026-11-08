@@ -33,6 +33,7 @@ mod references_rename;
 mod sassdoc;
 mod selection_ranges;
 mod signature_help;
+mod unresolved_imports;
 mod workspace_symbols;
 
 /// Convert a filesystem path to a proper `file://` URI string.
