@@ -52,7 +52,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   known re-checks only the files that import it
 - LSP: a `.css` file created or deleted on disk re-checks the open files as a new or
   deleted stylesheet does, so creating `theme.css` clears the error of `@use "theme"`
-  without editing the importer. The CSS file itself is not read as a Sass module
+  without editing the importer. A watcher event alone does not index a CSS file as a Sass
+  module; only an import that resolves to it does
 - LSP: "Check Workspace" no longer holds a lock on the open documents while it
   publishes their diagnostics, which could hang the server if a file was opened at
   that moment
