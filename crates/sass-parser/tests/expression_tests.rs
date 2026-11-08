@@ -3107,10 +3107,7 @@ fn calc_space_separated_values_past_nesting_limit() {
     // "nesting too deep" error each time until memory ran out.
     let levels = "calc(".repeat(1_000);
     for (parse, source) in [
-        (
-            sass_parser::parse_scss as fn(&str) -> _,
-            format!("a{{b:{levels}"),
-        ),
+        (sass_parser::parse_scss as ParseFn, format!("a{{b:{levels}")),
         (
             sass_parser::parse_scss,
             format!("a{{b:calc({}x y", "(".repeat(254)),
@@ -4310,4 +4307,79 @@ fn error_in_interpolation_ends_at_the_string_that_swallowed_its_brace() {
           4..6: unterminated string
     "##]],
     );
+}
+
+// ── Nesting limit ───────────────────────────────────────────────────
+
+type ParseFn = fn(
+    &str,
+) -> (
+    sass_parser::syntax::GreenNode,
+    Vec<(String, sass_parser::text_range::TextRange)>,
+);
+
+/// The errors of `parse` on `source`, after checking the round trip, and the text of each
+/// top-level node that is no error.
+fn errors_and_statements(parse: ParseFn, source: &str) -> (Vec<String>, Vec<String>) {
+    let (green, errors) = parse(source);
+    let tree = SyntaxNode::new_root(green);
+    assert_eq!(tree.text().to_string(), source, "lossless round-trip");
+    let statements = tree
+        .children()
+        .filter(|node| node.kind() != sass_parser::syntax_kind::SyntaxKind::ERROR)
+        .map(|node| node.text().to_string().trim().to_owned())
+        .collect();
+    (errors.into_iter().map(|(msg, _)| msg).collect(), statements)
+}
+
+#[test]
+fn nesting_too_deep_is_one_error_and_the_brackets_end_silently() {
+    // 1000 brackets left open: one error, not one per bracket and per retry.
+    let deep = "[".repeat(1_000);
+    for (parse, source, last) in [
+        (
+            sass_parser::parse_scss as ParseFn,
+            format!("a {{ b: {deep} }}\nc {{ d: e }}\n"),
+            "c { d: e }",
+        ),
+        (
+            sass_parser::parse_sass,
+            format!("a\n  b: {deep}\nc\n  d: e\n"),
+            "c\n  d: e",
+        ),
+        (
+            sass_parser::parse_scss,
+            format!("$a: {};\n$b: c;\n", "(".repeat(1_000)),
+            "$b: c;",
+        ),
+        (
+            sass_parser::parse_scss,
+            format!("a {{ b: {}; }}\nc {{ d: e }}\n", "calc(".repeat(1_000)),
+            "c { d: e }",
+        ),
+    ] {
+        let (errors, statements) = errors_and_statements(parse, &source);
+        assert_eq!(errors, ["nesting too deep"], "{source:.40}");
+        assert_eq!(statements.last().map(String::as_str), Some(last));
+    }
+}
+
+#[test]
+fn nesting_too_deep_closes_the_brackets_written_after_it() {
+    let source = format!(
+        "a {{ b: {}{}; c: d; }}\n",
+        "[".repeat(1_000),
+        "]".repeat(1_000)
+    );
+    let (errors, statements) = errors_and_statements(sass_parser::parse_scss, &source);
+    assert_eq!(errors, ["nesting too deep"]);
+    assert_eq!(statements.len(), 1);
+    let (green, _) = sass_parser::parse_scss(&source);
+    let declarations: Vec<String> = SyntaxNode::new_root(green)
+        .descendants()
+        .filter(|node| node.kind() == sass_parser::syntax_kind::SyntaxKind::DECLARATION)
+        .map(|node| node.text().to_string().trim().to_owned())
+        .collect();
+    assert_eq!(declarations.len(), 2, "{declarations:?}");
+    assert_eq!(declarations[1], "c: d;");
 }

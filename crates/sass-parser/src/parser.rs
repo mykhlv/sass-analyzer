@@ -48,6 +48,8 @@ pub struct Parser<'src> {
     /// errors only occur on malformed input where parsing speed is not critical.
     error_messages: Vec<String>,
     depth: u32,
+    /// The cursor where errors go unreported: see [`Parser::quiet_here`].
+    quiet_at: usize,
     layout: Layout,
     fence: Fence,
     /// Brackets (`()`, `[]`, `#{}`) the cursor is inside, counted by
@@ -102,6 +104,7 @@ impl<'src> Parser<'src> {
             events: Vec::with_capacity(estimated_events),
             error_messages: Vec::new(),
             depth: 0,
+            quiet_at: usize::MAX,
             layout,
             fence,
             transparent: 0,
@@ -763,6 +766,9 @@ impl<'src> Parser<'src> {
     // ── Errors ───────────────────────────────────────────────────────
 
     pub fn error(&mut self, msg: impl Into<String>) {
+        if self.pos == self.quiet_at {
+            return;
+        }
         if self.layout == Layout::Indented {
             self.end_header_before_error();
         }
@@ -806,6 +812,9 @@ impl<'src> Parser<'src> {
     /// Report `msg` at the end of the input token before the cursor rather than at the
     /// cursor: where a missing token belongs, not past the trivia or on the line after.
     pub fn error_after_prev(&mut self, msg: impl Into<String>) {
+        if self.pos == self.quiet_at {
+            return;
+        }
         let Some(prev) = self.pos.checked_sub(1) else {
             self.error(msg);
             return;
@@ -850,6 +859,13 @@ impl<'src> Parser<'src> {
     }
 
     // ── Recursion depth ──────────────────────────────────────────────
+
+    /// Report nothing more at the cursor until it moves: the constructs left open around
+    /// it end there, silently, after a mistake that has been reported for all of them, as
+    /// nesting too deep is.
+    pub fn quiet_here(&mut self) {
+        self.quiet_at = self.pos;
+    }
 
     #[allow(clippy::result_unit_err)]
     pub fn depth_guard(&mut self) -> Result<DepthGuard<'_, 'src>, ()> {

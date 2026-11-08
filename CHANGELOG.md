@@ -76,6 +76,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bracket instead, which reported up to a dozen errors for one, as for
   `@use "a" with (b.$c: d)` or `f((a, b: c)...)`. A parameter or a configured variable
   missing its `$` no longer takes the ones after it with it
+- Parser: an expression nested too deep is one error, "nesting too deep". The rest of
+  the operand that went too deep is skipped with it, and the brackets left open around
+  it end there without errors of their own: 1000 unclosed `[` gave over 1700 errors
 
 ## 0.4.0 — 2026-11-08
 

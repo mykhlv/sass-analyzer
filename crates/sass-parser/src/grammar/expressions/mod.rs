@@ -124,6 +124,7 @@ fn at_value_end(p: &Parser<'_>) -> bool {
 
 fn expr_bp(p: &mut Parser<'_>, min_bp: u8, ctx: ParseContext) -> Option<CompletedMarker> {
     let Ok(mut g) = p.depth_guard() else {
+        skip_too_deep(p);
         return None;
     };
 
@@ -162,6 +163,38 @@ fn expr_bp(p: &mut Parser<'_>, min_bp: u8, ctx: ParseContext) -> Option<Complete
     }
 
     Some(lhs)
+}
+
+/// At the nesting limit, which has just been reported: the rest of the operand that went
+/// too deep, with the brackets it opens, as one error, up to what ends it at the depth it
+/// started at — a `,`, a closer of a bracket opened above, or the end of the statement.
+/// The brackets left open above it then end there with no error of their own.
+pub(crate) fn skip_too_deep(p: &mut Parser<'_>) {
+    let m = p.start();
+    let mut open: Vec<SyntaxKind> = Vec::new();
+    while !p.at_end() && !p.at_virtual() && !p.at_unclosed_string_break() {
+        let closer = match p.current() {
+            LPAREN => Some(RPAREN),
+            LBRACKET => Some(RBRACKET),
+            HASH_LBRACE => Some(RBRACE),
+            _ => None,
+        };
+        if let Some(closer) = closer {
+            open.push(closer);
+        } else {
+            match p.current() {
+                kind @ (RPAREN | RBRACKET | RBRACE) if open.last() == Some(&kind) => {
+                    open.pop();
+                }
+                RPAREN | RBRACKET | RBRACE | LBRACE | SEMICOLON => break,
+                COMMA if open.is_empty() => break,
+                _ => {}
+            }
+        }
+        p.bump();
+    }
+    let _ = m.complete(p, ERROR);
+    p.quiet_here();
 }
 
 // ── LHS: prefix operators + atoms ──────────────────────────────────
