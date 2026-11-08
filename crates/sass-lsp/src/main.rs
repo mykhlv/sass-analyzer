@@ -62,15 +62,24 @@ pub(crate) enum Task {
     Close {
         uri: Uri,
     },
-    ExternalChange {
-        uri: Uri,
-        path: PathBuf,
-    },
-    ExternalDelete {
-        uri: Uri,
+    /// The file-watcher events of one `didChangeWatchedFiles` notification, handled
+    /// together so that the documents they affect are re-checked once.
+    External {
+        events: Vec<ExternalEvent>,
     },
     CheckWorkspace {
         root: PathBuf,
+    },
+}
+
+pub(crate) enum ExternalEvent {
+    /// A file created or changed on disk.
+    Changed {
+        uri: Uri,
+        path: PathBuf,
+    },
+    Deleted {
+        uri: Uri,
     },
 }
 
@@ -531,38 +540,26 @@ impl LanguageServer for Backend {
     async fn did_save(&self, _params: DidSaveTextDocumentParams) {}
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
-        for event in params.changes {
+        let events: Vec<ExternalEvent> = params
+            .changes
+            .into_iter()
             // Skip files that are open in the editor — those are tracked
             // by did_open/did_change and have fresher content.
-            if self.source_texts.contains_key(&event.uri) {
-                continue;
-            }
-
-            if event.typ == FileChangeType::DELETED {
-                if self
-                    .task_tx
-                    .send(Task::ExternalDelete { uri: event.uri })
-                    .is_err()
-                {
-                    tracing::error!("worker channel closed, external delete task dropped");
+            .filter(|event| !self.source_texts.contains_key(&event.uri))
+            .filter_map(|event| {
+                if event.typ == FileChangeType::DELETED {
+                    return Some(ExternalEvent::Deleted { uri: event.uri });
                 }
-            } else {
-                // Created or Changed — send path to worker for async I/O.
-                let path = match event.uri.to_file_path() {
-                    Some(p) => p.into_owned(),
-                    None => continue,
-                };
-                if self
-                    .task_tx
-                    .send(Task::ExternalChange {
-                        uri: event.uri,
-                        path,
-                    })
-                    .is_err()
-                {
-                    tracing::error!("worker channel closed, external change task dropped");
-                }
-            }
+                // Created or Changed — the worker reads the file.
+                let path = event.uri.to_file_path()?.into_owned();
+                Some(ExternalEvent::Changed {
+                    uri: event.uri,
+                    path,
+                })
+            })
+            .collect();
+        if !events.is_empty() && self.task_tx.send(Task::External { events }).is_err() {
+            tracing::error!("worker channel closed, file-watcher events dropped");
         }
     }
 

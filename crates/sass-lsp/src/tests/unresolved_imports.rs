@@ -496,3 +496,66 @@ async fn url_with_trailing_slash_loads_the_directory_index() {
     let def = definition_of(&mut reader, &mut writer, &uri, 0, 7).await;
     assert_eq!(def["uri"], file_uri(&index), "{def}");
 }
+
+/// Many files appearing at once, as on a `git checkout`, re-check an open document
+/// whose import does not resolve once, not once per file.
+#[tokio::test]
+async fn a_burst_of_new_files_rechecks_a_document_once() {
+    const NEW_FILES: usize = 5;
+    let dir = TempDir::new("burst");
+    let (mut reader, mut writer) = spawn_server();
+    do_initialize_with_root(&mut reader, &mut writer, &file_uri(&dir.0)).await;
+    let probe = file_uri(&dir.write("probe.scss", "$p: 1;\n"));
+    open_document(&mut writer, &probe, "$p: 1;\n").await;
+    next_diagnostics(&mut reader, &mut writer, &probe).await;
+    let main = "@use \"later\";\n";
+    let uri = file_uri(&dir.write("main.scss", main));
+    open_document(&mut writer, &uri, main).await;
+    let diags = next_diagnostics(&mut reader, &mut writer, &uri).await;
+    assert_eq!(not_found(&diags).len(), 1, "{diags:#?}");
+
+    let changes: Vec<Value> = (0..NEW_FILES)
+        .map(|i| {
+            let created = dir.write(&format!("_new{i}.scss"), "$x: 1;\n");
+            serde_json::json!({ "uri": file_uri(&created), "type": 1 })
+        })
+        .collect();
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "workspace/didChangeWatchedFiles",
+            "params": { "changes": changes }
+        }),
+    )
+    .await;
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didChange",
+            "params": {
+                "textDocument": { "uri": probe, "version": 2 },
+                "contentChanges": [{ "text": "$p: 2;\n" }]
+            }
+        }),
+    )
+    .await;
+    // The worker handles the watcher events before the debounced parse.
+    let publishes = tokio::time::timeout(Duration::from_secs(5), async {
+        let mut publishes = 0;
+        loop {
+            let msg = recv_msg(&mut reader, &mut writer).await;
+            if msg["method"] == "textDocument/publishDiagnostics" {
+                if msg["params"]["uri"] == uri {
+                    publishes += 1;
+                } else if msg["params"]["uri"] == probe {
+                    return publishes;
+                }
+            }
+        }
+    })
+    .await
+    .expect("the probe's diagnostics");
+    assert_eq!(publishes, 1, "the burst should re-check it once");
+}

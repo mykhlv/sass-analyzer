@@ -18,7 +18,7 @@ use crate::convert::text_range_to_lsp;
 use crate::diagnostics;
 use crate::symbols;
 use crate::workspace;
-use crate::{DocumentState, IncrementalEdit, Task};
+use crate::{DocumentState, ExternalEvent, IncrementalEdit, Task};
 
 #[allow(clippy::case_sensitive_file_extension_comparisons)]
 pub(crate) fn is_sass_file(uri: &Uri) -> bool {
@@ -253,33 +253,10 @@ pub(crate) async fn run_worker(
                         // go-to-definition, which would destroy indexed dependencies.
                         client.publish_diagnostics(uri, vec![], None).await;
                     }
-                    Task::ExternalChange { uri, path } => {
-                        let is_new = !module_graph.contains(&uri);
-                        if apply_external_change(
-                            &documents, &module_graph, &runtime_config, &uri, &path,
-                        ) {
-                            // Importers of the changed file may now resolve its
-                            // members differently. A new file may also be the one an
-                            // unresolved import looked for; a change to a known one
-                            // cannot make an import resolve.
-                            let mut targets = module_graph.dependents_of(&uri);
-                            if is_new {
-                                targets.extend(documents_with_unresolved_imports(
-                                    &documents, &module_graph, &[uri],
-                                ));
-                            }
-                            refresh_documents(
-                                &module_graph, &documents, &client, targets, is_new,
-                            ).await;
-                        }
-                    }
-                    Task::ExternalDelete { uri } => {
-                        let targets = module_graph.dependents_of(&uri);
-                        if apply_external_delete(&documents, &module_graph, &uri) {
-                            refresh_documents(
-                                &module_graph, &documents, &client, targets, true,
-                            ).await;
-                        }
+                    Task::External { events } => {
+                        apply_external_events(
+                            &documents, &module_graph, &runtime_config, &client, events,
+                        ).await;
                     }
                     Task::CheckWorkspace { root } => {
                         check_workspace(
@@ -305,7 +282,7 @@ pub(crate) async fn run_worker(
                     }
                 }
                 // A file opened in the editor before the watcher reports it never
-                // reaches ExternalChange, so a new one is checked against the
+                // reaches apply_external_events, so a new one is checked against the
                 // unresolved imports here.
                 if !new_uris.is_empty() {
                     let targets =
@@ -324,6 +301,57 @@ pub(crate) async fn run_worker(
             }
         }
     }
+}
+
+/// Apply one batch of file-watcher events, then re-check the open documents they
+/// affect, each once however many of the events affect it.
+///
+/// Importers of a changed file may now resolve its members differently, and are
+/// re-published. A new file may also be the one an unresolved import looked for,
+/// and a deleted one may be what an import loaded, so their importers and the
+/// documents with unresolved imports are indexed again first. A change to a known
+/// file cannot make an import resolve.
+async fn apply_external_events(
+    documents: &DashMap<Uri, DocumentState>,
+    module_graph: &workspace::ModuleGraph,
+    runtime_config: &RuntimeConfig,
+    client: &Client,
+    events: Vec<ExternalEvent>,
+) {
+    let mut reindex = Vec::new();
+    let mut republish = Vec::new();
+    let mut new_uris = Vec::new();
+    for event in events {
+        match event {
+            ExternalEvent::Changed { uri, path } => {
+                let is_new = !module_graph.contains(&uri);
+                if apply_external_change(documents, module_graph, runtime_config, &uri, &path) {
+                    if is_new {
+                        reindex.extend(module_graph.dependents_of(&uri));
+                        new_uris.push(uri);
+                    } else {
+                        republish.extend(module_graph.dependents_of(&uri));
+                    }
+                }
+            }
+            ExternalEvent::Deleted { uri } => {
+                let dependents = module_graph.dependents_of(&uri);
+                if apply_external_delete(documents, module_graph, &uri) {
+                    reindex.extend(dependents);
+                }
+            }
+        }
+    }
+    if !new_uris.is_empty() {
+        reindex.extend(documents_with_unresolved_imports(
+            documents,
+            module_graph,
+            &new_uris,
+        ));
+    }
+    republish.retain(|uri| !reindex.contains(uri));
+    refresh_documents(module_graph, documents, client, reindex, true).await;
+    refresh_documents(module_graph, documents, client, republish, false).await;
 }
 
 /// Open documents, other than `except`, with an import that does not resolve.
