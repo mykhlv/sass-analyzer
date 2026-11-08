@@ -82,6 +82,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Parser: `@include m using $a { ... }`, missing the parentheses around `$a`, is one
   error, a missing `(` as in Dart Sass, and the content block still parses as the
   rule's. It was taken for a declaration, with up to nine errors
+- Parser: a `@use ... as` or `@forward ... as` clause with no identifier, as
+  `@forward "a" as 1-*`, is one error, and the clauses after it still parse. The rest of
+  the clause was left to the next statement, with up to three more errors
 
 ## 0.4.0 — 2026-11-08
 

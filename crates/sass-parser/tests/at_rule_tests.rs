@@ -7655,3 +7655,88 @@ fn include_using_without_parens_is_one_error_and_keeps_the_block() {
         "#]],
     );
 }
+
+#[test]
+fn forward_as_without_a_prefix_is_one_error_up_to_the_next_clause() {
+    // Dart Sass: `Expected identifier.`
+    check(
+        "@forward \"a\" as 1-* show b;\n$c: d;\n",
+        expect![[r#"
+        SOURCE_FILE@0..35
+          FORWARD_RULE@0..27
+            AT@0..1 "@"
+            IDENT@1..8 "forward"
+            WHITESPACE@8..9 " "
+            QUOTED_STRING@9..12 "\"a\""
+            WHITESPACE@12..13 " "
+            IDENT@13..15 "as"
+            ERROR@15..19
+              WHITESPACE@15..16 " "
+              NUMBER@16..17 "1"
+              MINUS@17..18 "-"
+              STAR@18..19 "*"
+            WHITESPACE@19..20 " "
+            IDENT@20..24 "show"
+            WHITESPACE@24..25 " "
+            IDENT@25..26 "b"
+            SEMICOLON@26..27 ";"
+          VARIABLE_DECL@27..34
+            WHITESPACE@27..28 "\n"
+            DOLLAR@28..29 "$"
+            IDENT@29..30 "c"
+            COLON@30..31 ":"
+            VALUE@31..33
+              WHITESPACE@31..32 " "
+              IDENT@32..33 "d"
+            SEMICOLON@33..34 ";"
+          WHITESPACE@34..35 "\n"
+        errors:
+          16..17: expected IDENT
+    "#]],
+    );
+}
+
+#[test]
+fn use_as_without_a_namespace_is_one_error() {
+    // Dart Sass: `Expected identifier.`
+    check(
+        "@use \"a\" as 1 with ($b: c);\n$d: e;\n",
+        expect![[r#"
+        SOURCE_FILE@0..35
+          USE_RULE@0..27
+            AT@0..1 "@"
+            IDENT@1..4 "use"
+            WHITESPACE@4..5 " "
+            QUOTED_STRING@5..8 "\"a\""
+            WHITESPACE@8..9 " "
+            IDENT@9..11 "as"
+            ERROR@11..13
+              WHITESPACE@11..12 " "
+              NUMBER@12..13 "1"
+            WHITESPACE@13..14 " "
+            IDENT@14..18 "with"
+            WHITESPACE@18..19 " "
+            LPAREN@19..20 "("
+            DOLLAR@20..21 "$"
+            IDENT@21..22 "b"
+            COLON@22..23 ":"
+            VALUE@23..25
+              WHITESPACE@23..24 " "
+              IDENT@24..25 "c"
+            RPAREN@25..26 ")"
+            SEMICOLON@26..27 ";"
+          VARIABLE_DECL@27..34
+            WHITESPACE@27..28 "\n"
+            DOLLAR@28..29 "$"
+            IDENT@29..30 "d"
+            COLON@30..31 ":"
+            VALUE@31..33
+              WHITESPACE@31..32 " "
+              IDENT@32..33 "e"
+            SEMICOLON@33..34 ";"
+          WHITESPACE@34..35 "\n"
+        errors:
+          12..13: expected IDENT
+    "#]],
+    );
+}

@@ -24,10 +24,10 @@ pub fn use_rule(p: &mut Parser<'_>) {
     // Optional `as name` or `as *`
     if p.at(IDENT) && p.current_text() == "as" {
         p.bump(); // as
-        if p.at(STAR) {
+        if p.at(STAR) || p.at(IDENT) {
             p.bump();
         } else {
-            p.expect(IDENT);
+            skip_rest_of_clause(p, "expected IDENT");
         }
     }
 
@@ -69,14 +69,20 @@ pub fn forward_rule(p: &mut Parser<'_>) {
                     p.bump();
                 } else {
                     // Consume prefix tokens: `prefix-*` is IDENT MINUS STAR or IDENT STAR
-                    if p.at(IDENT) {
+                    let prefix = p.at(IDENT);
+                    if prefix {
                         p.bump();
                     }
                     p.eat(MINUS);
                     if p.at(STAR) {
                         p.bump();
                     } else {
-                        p.error("expected `*`");
+                        let message = if prefix {
+                            "expected `*`"
+                        } else {
+                            "expected IDENT"
+                        };
+                        skip_rest_of_clause(p, message);
                     }
                 }
             }
@@ -104,6 +110,26 @@ pub fn forward_rule(p: &mut Parser<'_>) {
 
     super::lines::end_without_block(p, errors, "`@forward`");
     let _ = m.complete(p, FORWARD_RULE);
+}
+
+/// Report `message` at the cursor, in a clause of `@use` or `@forward` it cannot read, and
+/// skip the rest of the clause with it, up to the next clause or the end of the rule.
+fn skip_rest_of_clause(p: &mut Parser<'_>, message: &str) {
+    let m = p.start();
+    p.error(message);
+    let mut skipped = false;
+    while !p.at(SEMICOLON) && !p.at(LBRACE) && !p.at(RBRACE) && !p.at_end() {
+        if p.at(IDENT) && matches!(p.current_text(), "show" | "hide" | "with") {
+            break;
+        }
+        super::lines::bump_in_run(p);
+        skipped = true;
+    }
+    if skipped {
+        let _ = m.complete(p, ERROR);
+    } else {
+        m.abandon(p);
+    }
 }
 
 /// Parse a member in `hide`/`show` list: `name` or `$variable`

@@ -5959,3 +5959,38 @@ fn include_using_without_parens_keeps_the_lines_beneath() {
     "#]],
     );
 }
+
+#[test]
+fn forward_as_without_a_prefix_is_one_error_in_the_indented_syntax() {
+    check_tree(
+        "@forward \"a\" as 1-*\n$c: d\n",
+        expect![[r#"
+        SOURCE_FILE@0..26
+          FORWARD_RULE@0..19
+            AT@0..1 "@"
+            IDENT@1..8 "forward"
+            WHITESPACE@8..9 " "
+            QUOTED_STRING@9..12 "\"a\""
+            WHITESPACE@12..13 " "
+            IDENT@13..15 "as"
+            ERROR@15..19
+              WHITESPACE@15..16 " "
+              NUMBER@16..17 "1"
+              MINUS@17..18 "-"
+              STAR@18..19 "*"
+            SEMICOLON@19..19 ""
+          VARIABLE_DECL@19..25
+            WHITESPACE@19..20 "\n"
+            DOLLAR@20..21 "$"
+            IDENT@21..22 "c"
+            COLON@22..23 ":"
+            VALUE@23..25
+              WHITESPACE@23..24 " "
+              IDENT@24..25 "d"
+            SEMICOLON@25..25 ""
+          WHITESPACE@25..26 "\n"
+        errors:
+          16..17: expected IDENT
+    "#]],
+    );
+}
