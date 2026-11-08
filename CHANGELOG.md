@@ -305,7 +305,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `color:#fff`, still makes a declaration. Since the empty rule compiles to nothing, the
   language server warns that a space is likely missing after the `:`
 - Dependencies refreshed: 47 transitive Rust crates within semver, `rowan` 0.16 → 0.17,
-  TypeScript 6 → 7, `@types/node` 25 → 26, esbuild 0.27 → 0.28
+  TypeScript 6 → 7, `@types/node` 25 → 26, esbuild 0.27 → 0.28, and `tokio` to 1.54 for
+  RUSTSEC-2026-0386
 - `@types/vscode` is now pinned with a tilde (`~1.82.0`) so it tracks the supported
   `engines.vscode` floor instead of drifting above it on every dependency update
 
