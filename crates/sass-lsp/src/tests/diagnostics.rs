@@ -632,3 +632,51 @@ async fn semantic_colon_rule_not_reported_where_it_is_meant() {
         assert!(warnings.is_empty(), "{text:?}: {warnings:?}");
     }
 }
+
+/// An empty rule whose part after `:` is a CSS pseudo-class or pseudo-element is a
+/// selector written as one, not a declaration missing its space.
+#[tokio::test]
+async fn semantic_colon_rule_not_reported_for_pseudo_selectors() {
+    for (i, line) in [
+        "a:hover",
+        "li:first-child",
+        "a:not(.b)",
+        "li:nth-child(2n + 1)",
+        "p::before",
+        "p:before",
+        "input:-webkit-autofill",
+        "a:HOVER",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let uri = format!("file:///colon_pseudo{i}.sass");
+        let text = format!(".a\n  {line}\n");
+        let warnings = colon_selector_warnings(&uri, &text).await;
+        assert!(warnings.is_empty(), "{text:?}: {warnings:?}");
+    }
+}
+
+/// A `name:value` whose value is not a pseudo selector still warns, a function
+/// call or a vendor-prefixed value after a property name included, and so does an
+/// interpolated property name.
+#[tokio::test]
+async fn semantic_colon_rule_reported_for_values() {
+    for (i, line) in [
+        "color:red",
+        "width:calc(100% - 1px)",
+        "display:-webkit-box",
+        "margin-#{$s}:red",
+        "#{$p}-top:red",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let uri = format!("file:///colon_value{i}.sass");
+        let text = format!(".a\n  {line}\n");
+        let warnings = colon_selector_warnings(&uri, &text).await;
+        assert_eq!(warnings.len(), 1, "{text:?}: {warnings:?}");
+        let message = warnings[0]["message"].as_str().unwrap();
+        assert!(message.contains(&format!("`{line}`")), "{message}");
+    }
+}

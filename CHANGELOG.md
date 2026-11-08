@@ -53,6 +53,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not continue the first selected line's, as tabs below a line indented with spaces. It
   moved such a line flush with the mixin's body, which could take a nested declaration
   out of its rule
+- Indented Sass: the warning that a nested `name:value` rule is likely a declaration
+  missing its space after `:` is no longer given for a pseudo selector, as an empty
+  `a:hover`, `li:first-child`, `a:not(.b)` or `input:-webkit-autofill`. It is now given
+  for an interpolated name, as `margin-#{$side}:auto`
 
 ## 0.4.0 — 2026-11-08
 
