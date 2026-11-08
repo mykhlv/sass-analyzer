@@ -24,6 +24,7 @@ countme = { version = "3.0", features = ["enable"] }
 dhat = "0.3"
 divan = "0.1"
 mimalloc = "0.1"
+unicode-normalization = "0.1"
 ungrammar = "1.16"
 quote = "1"
 proc-macro2 = "1"

@@ -9585,7 +9585,7 @@ scss	libsass-todo-issues/issue_2235/not-empty	0	1	1	2	081c903706f3c668
 scss	libsass-todo-issues/issue_2818	0	1	1	1	cc91fc8eef6d02d6
 scss	libsass-todo-tests/errors/import/url/mixin/control-else/inside	0	1	0	4	de244055a967ea33
 scss	libsass-todo-tests/errors/import/url/mixin/control-if/inside	0	1	0	3	166183bcd0fef11e
-scss	libsass/Sáss-UŢF8	0	1	1	1	cca30da1e64b42da
+scss	libsass/Sáss-UŢF8	0	1	1	1	cca30da1e64b42da
 scss	libsass/arg-eval	0	1	7	3	4c56e92aab08df85
 scss	libsass/at-error/feature-test	0	1	1	2	7d8a958b93618bec
 scss	libsass/at-root/135_test_simple_at_root	0	2	1	3	6e7a8ce21e29fe4a

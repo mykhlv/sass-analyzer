@@ -38,7 +38,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      # The cargo-deny action builds a Docker image on every run, and that build
+      # fails; the prebuilt binary needs no image.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      - run: cargo deny check
 
   version-sync:
     runs-on: ubuntu-latest

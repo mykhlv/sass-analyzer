@@ -137,6 +137,17 @@ fn spec_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test-corpus/sass-spec/spec")
 }
 
+/// A case's path relative to the spec root, in NFC. macOS hands out some sass-spec file names
+/// decomposed and Linux composed, and the baselines must read the same on both.
+fn case_path(path: &Path, spec_dir: &Path) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    path.strip_prefix(spec_dir)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .nfc()
+        .collect()
+}
+
 fn collect_hrx_files(dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     collect_hrx_recursive(dir, &mut files);
@@ -196,11 +207,7 @@ fn collect_standalone_recursive(dir: &Path, spec_dir: &Path, out: &mut Vec<TestC
             let has_output = parent.join("output.css").exists();
             let has_error = parent.join("error").exists();
 
-            let rel = parent
-                .strip_prefix(spec_dir)
-                .unwrap_or(parent)
-                .to_string_lossy()
-                .to_string();
+            let rel = case_path(parent, spec_dir);
 
             out.push(TestCase {
                 display_path: rel,
@@ -399,12 +406,7 @@ fn collect_all_cases() -> Vec<TestCase> {
         let content = std::fs::read_to_string(hrx_path)
             .unwrap_or_else(|e| panic!("cannot read {}: {e}", hrx_path.display()));
 
-        let rel = hrx_path
-            .strip_prefix(&spec_dir)
-            .unwrap_or(hrx_path)
-            .with_extension("")
-            .to_string_lossy()
-            .to_string();
+        let rel = case_path(&hrx_path.with_extension(""), &spec_dir);
 
         let cases = parse_hrx(&content, &rel);
         all_cases.extend(cases);
