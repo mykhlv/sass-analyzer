@@ -4942,6 +4942,221 @@ fn page_rule() {
     );
 }
 
+#[test]
+fn page_rule_selector_list() {
+    check(
+        "@page toc, index:blank { margin: 1in; }",
+        expect![[r#"
+        SOURCE_FILE@0..39
+          PAGE_RULE@0..39
+            AT@0..1 "@"
+            IDENT@1..5 "page"
+            WHITESPACE@5..6 " "
+            IDENT@6..9 "toc"
+            COMMA@9..10 ","
+            WHITESPACE@10..11 " "
+            IDENT@11..16 "index"
+            COLON@16..17 ":"
+            IDENT@17..22 "blank"
+            BLOCK@22..39
+              WHITESPACE@22..23 " "
+              LBRACE@23..24 "{"
+              DECLARATION@24..37
+                PROPERTY@24..31
+                  WHITESPACE@24..25 " "
+                  IDENT@25..31 "margin"
+                COLON@31..32 ":"
+                VALUE@32..36
+                  DIMENSION@32..36
+                    WHITESPACE@32..33 " "
+                    NUMBER@33..34 "1"
+                    IDENT@34..36 "in"
+                SEMICOLON@36..37 ";"
+              WHITESPACE@37..38 " "
+              RBRACE@38..39 "}"
+    "#]],
+    );
+}
+
+#[test]
+fn page_rule_pseudo_page_list() {
+    check(
+        "@page :left, :right { }",
+        expect![[r#"
+        SOURCE_FILE@0..23
+          PAGE_RULE@0..23
+            AT@0..1 "@"
+            IDENT@1..5 "page"
+            WHITESPACE@5..6 " "
+            COLON@6..7 ":"
+            IDENT@7..11 "left"
+            COMMA@11..12 ","
+            WHITESPACE@12..13 " "
+            COLON@13..14 ":"
+            IDENT@14..19 "right"
+            BLOCK@19..23
+              WHITESPACE@19..20 " "
+              LBRACE@20..21 "{"
+              WHITESPACE@21..22 " "
+              RBRACE@22..23 "}"
+    "#]],
+    );
+}
+
+#[test]
+fn page_rule_chained_pseudo_pages() {
+    check(
+        "@page a:first:blank { }",
+        expect![[r#"
+        SOURCE_FILE@0..23
+          PAGE_RULE@0..23
+            AT@0..1 "@"
+            IDENT@1..5 "page"
+            WHITESPACE@5..6 " "
+            IDENT@6..7 "a"
+            COLON@7..8 ":"
+            IDENT@8..13 "first"
+            COLON@13..14 ":"
+            IDENT@14..19 "blank"
+            BLOCK@19..23
+              WHITESPACE@19..20 " "
+              LBRACE@20..21 "{"
+              WHITESPACE@21..22 " "
+              RBRACE@22..23 "}"
+    "#]],
+    );
+}
+
+#[test]
+fn page_rule_interpolated_name() {
+    check(
+        "@page #{$n}:first, x-y { }",
+        expect![[r##"
+        SOURCE_FILE@0..26
+          PAGE_RULE@0..26
+            AT@0..1 "@"
+            IDENT@1..5 "page"
+            INTERPOLATION@5..11
+              WHITESPACE@5..6 " "
+              HASH_LBRACE@6..8 "#{"
+              VARIABLE_REF@8..10
+                DOLLAR@8..9 "$"
+                IDENT@9..10 "n"
+              RBRACE@10..11 "}"
+            COLON@11..12 ":"
+            IDENT@12..17 "first"
+            COMMA@17..18 ","
+            WHITESPACE@18..19 " "
+            IDENT@19..22 "x-y"
+            BLOCK@22..26
+              WHITESPACE@22..23 " "
+              LBRACE@23..24 "{"
+              WHITESPACE@24..25 " "
+              RBRACE@25..26 "}"
+    "##]],
+    );
+}
+
+#[test]
+fn page_rule_any_prelude_tokens() {
+    check(
+        "@page a + b { }",
+        expect![[r#"
+        SOURCE_FILE@0..15
+          PAGE_RULE@0..15
+            AT@0..1 "@"
+            IDENT@1..5 "page"
+            WHITESPACE@5..6 " "
+            IDENT@6..7 "a"
+            WHITESPACE@7..8 " "
+            PLUS@8..9 "+"
+            WHITESPACE@9..10 " "
+            IDENT@10..11 "b"
+            BLOCK@11..15
+              WHITESPACE@11..12 " "
+              LBRACE@12..13 "{"
+              WHITESPACE@13..14 " "
+              RBRACE@14..15 "}"
+    "#]],
+    );
+}
+
+#[test]
+fn page_rule_statement_form() {
+    check(
+        "@page a; .c { }",
+        expect![[r#"
+        SOURCE_FILE@0..15
+          PAGE_RULE@0..8
+            AT@0..1 "@"
+            IDENT@1..5 "page"
+            WHITESPACE@5..6 " "
+            IDENT@6..7 "a"
+            SEMICOLON@7..8 ";"
+          RULE_SET@8..15
+            SELECTOR_LIST@8..11
+              SELECTOR@8..11
+                SIMPLE_SELECTOR@8..11
+                  WHITESPACE@8..9 " "
+                  DOT@9..10 "."
+                  IDENT@10..11 "c"
+            BLOCK@11..15
+              WHITESPACE@11..12 " "
+              LBRACE@12..13 "{"
+              WHITESPACE@13..14 " "
+              RBRACE@14..15 "}"
+    "#]],
+    );
+}
+
+#[test]
+fn page_rule_unclosed_block_stays_local() {
+    check(
+        "@page a { b: c\n.d { e: f }",
+        expect![[r#"
+        SOURCE_FILE@0..26
+          PAGE_RULE@0..26
+            AT@0..1 "@"
+            IDENT@1..5 "page"
+            WHITESPACE@5..6 " "
+            IDENT@6..7 "a"
+            BLOCK@7..26
+              WHITESPACE@7..8 " "
+              LBRACE@8..9 "{"
+              NESTED_PROPERTY@9..26
+                PROPERTY@9..11
+                  WHITESPACE@9..10 " "
+                  IDENT@10..11 "b"
+                COLON@11..12 ":"
+                VALUE@12..17
+                  VALUE@12..14
+                    WHITESPACE@12..13 " "
+                    IDENT@13..14 "c"
+                  ERROR@14..17
+                    WHITESPACE@14..15 "\n"
+                    DOT@15..16 "."
+                    IDENT@16..17 "d"
+                BLOCK@17..26
+                  WHITESPACE@17..18 " "
+                  LBRACE@18..19 "{"
+                  DECLARATION@19..24
+                    PROPERTY@19..21
+                      WHITESPACE@19..20 " "
+                      IDENT@20..21 "e"
+                    COLON@21..22 ":"
+                    VALUE@22..24
+                      VALUE@22..24
+                        WHITESPACE@22..23 " "
+                        IDENT@23..24 "f"
+                  WHITESPACE@24..25 " "
+                  RBRACE@25..26 "}"
+        errors:
+          15..16: expected digit
+          26..26: expected RBRACE
+    "#]],
+    );
+}
+
 // ── @namespace ──────────────────────────────────────────────────────────
 
 #[test]

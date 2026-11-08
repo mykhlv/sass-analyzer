@@ -109,6 +109,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   linear in its size. Each line searched on to the end of the file for the next line
   start, and each erroring bracket for the next line at its column, so the time grew with
   the square of the file's length
+- Parser: an `@page` selector list, as `@page toc, index:blank` or `@page :left, :right`,
+  is no longer an error. Only the first selector was read, and the rest was a rule missing
+  its selector; a prelude such as `@page a + b` was read as a rule after the at-rule, with
+  no error
 
 ## 0.4.0 — 2026-11-08
 

@@ -3114,6 +3114,41 @@ fn value_context_is_cleared_when_a_block_opens() {
 }
 
 #[test]
+fn page_rule_selector_list() {
+    check_tree(
+        "@page toc, index:blank\n  margin: 1in\n",
+        expect![[r#"
+        SOURCE_FILE@0..37
+          PAGE_RULE@0..36
+            AT@0..1 "@"
+            IDENT@1..5 "page"
+            WHITESPACE@5..6 " "
+            IDENT@6..9 "toc"
+            COMMA@9..10 ","
+            WHITESPACE@10..11 " "
+            IDENT@11..16 "index"
+            COLON@16..17 ":"
+            IDENT@17..22 "blank"
+            BLOCK@22..36
+              LBRACE@22..22 ""
+              DECLARATION@22..36
+                PROPERTY@22..31
+                  WHITESPACE@22..25 "\n  "
+                  IDENT@25..31 "margin"
+                COLON@31..32 ":"
+                VALUE@32..36
+                  DIMENSION@32..36
+                    WHITESPACE@32..33 " "
+                    NUMBER@33..34 "1"
+                    IDENT@34..36 "in"
+                SEMICOLON@36..36 ""
+              RBRACE@36..36 ""
+          WHITESPACE@36..37 "\n"
+    "#]],
+    );
+}
+
+#[test]
 fn value_context_is_cleared_when_a_deferred_block_opens() {
     // Same reset, third path: an at-rule header defers its LBRACE, so the flush site
     // inside the main loop clears the flag rather than `process_newline`. The header's
