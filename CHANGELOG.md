@@ -85,6 +85,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Parser: a `@use ... as` or `@forward ... as` clause with no identifier, as
   `@forward "a" as 1-*`, is one error, and the clauses after it still parse. The rest of
   the clause was left to the next statement, with up to three more errors
+- Parser: a map entry missing its `:`, as `two` in `(a: 1, two, b: 2)`, is one error,
+  not a second one for a value it never had
 
 ## 0.4.0 — 2026-11-08
 

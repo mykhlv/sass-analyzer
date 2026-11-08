@@ -311,8 +311,10 @@ fn finish_map(
                 break;
             }
         }
-        p.expect(COLON);
-        sass_value(p, ParseContext::SassScript);
+        // An entry missing its `:` is reported once: no value follows it either.
+        if p.expect(COLON) {
+            sass_value(p, ParseContext::SassScript);
+        }
         let _ = em.complete(p, MAP_ENTRY);
     }
 

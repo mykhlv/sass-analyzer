@@ -7,5 +7,4 @@
 # Columns: syntax, case, parse errors, first error message. A new offender,
 # a changed count and a case that drops out all fail, so every change to this
 # list is a reviewed one.
-scss	libsass-closed-issues/issue_1537	4	expected COLON
 scss	values/strings/new-line/scss/ff	4	unterminated string

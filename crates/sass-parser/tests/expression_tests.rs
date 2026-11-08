@@ -4383,3 +4383,64 @@ fn nesting_too_deep_closes_the_brackets_written_after_it() {
     assert_eq!(declarations.len(), 2, "{declarations:?}");
     assert_eq!(declarations[1], "c: d;");
 }
+
+#[test]
+fn map_entries_missing_their_colon_are_one_error_each() {
+    // Dart Sass: `expected ":"` after `two`, where it stops.
+    check(
+        "$map: (\n  a: 1, two, 3,\n  foo: 'bar'\n);\n$b: c;\n",
+        expect![[r#"
+            SOURCE_FILE@0..47
+              VARIABLE_DECL@0..39
+                DOLLAR@0..1 "$"
+                IDENT@1..4 "map"
+                COLON@4..5 ":"
+                MAP_EXPR@5..38
+                  WHITESPACE@5..6 " "
+                  LPAREN@6..7 "("
+                  MAP_ENTRY@7..14
+                    VALUE@7..11
+                      WHITESPACE@7..10 "\n  "
+                      IDENT@10..11 "a"
+                    COLON@11..12 ":"
+                    NUMBER_LITERAL@12..14
+                      WHITESPACE@12..13 " "
+                      NUMBER@13..14 "1"
+                  COMMA@14..15 ","
+                  MAP_ENTRY@15..19
+                    VALUE@15..19
+                      WHITESPACE@15..16 " "
+                      IDENT@16..19 "two"
+                  COMMA@19..20 ","
+                  MAP_ENTRY@20..22
+                    NUMBER_LITERAL@20..22
+                      WHITESPACE@20..21 " "
+                      NUMBER@21..22 "3"
+                  COMMA@22..23 ","
+                  MAP_ENTRY@23..36
+                    VALUE@23..29
+                      WHITESPACE@23..26 "\n  "
+                      IDENT@26..29 "foo"
+                    COLON@29..30 ":"
+                    STRING_LITERAL@30..36
+                      WHITESPACE@30..31 " "
+                      QUOTED_STRING@31..36 "'bar'"
+                  WHITESPACE@36..37 "\n"
+                  RPAREN@37..38 ")"
+                SEMICOLON@38..39 ";"
+              VARIABLE_DECL@39..46
+                WHITESPACE@39..40 "\n"
+                DOLLAR@40..41 "$"
+                IDENT@41..42 "b"
+                COLON@42..43 ":"
+                VALUE@43..45
+                  WHITESPACE@43..44 " "
+                  IDENT@44..45 "c"
+                SEMICOLON@45..46 ";"
+              WHITESPACE@46..47 "\n"
+            errors:
+              19..20: expected COLON
+              22..23: expected COLON
+        "#]],
+    );
+}
