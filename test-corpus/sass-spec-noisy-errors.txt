@@ -9,5 +9,4 @@
 # list is a reviewed one.
 scss	directives/forward/error/syntax/as/invalid	4	expected `*`
 scss	libsass-closed-issues/issue_1537	4	expected COLON
-scss	non_conformant/mixin/content/arguments/error/syntax/arglist/missing_parens	5	expected SEMICOLON
 scss	values/strings/new-line/scss/ff	4	unterminated string

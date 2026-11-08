@@ -5903,3 +5903,59 @@ fn bad_token_in_parens_spanning_lines_is_one_error() {
     "#]],
     );
 }
+
+#[test]
+fn include_using_without_parens_keeps_the_lines_beneath() {
+    check_tree(
+        "+m using $a\n  b: $a\nc\n  d: e\n",
+        expect![[r#"
+        SOURCE_FILE@0..29
+          INCLUDE_RULE@0..19
+            AT@0..0 ""
+            IDENT@0..1 "+"
+            IDENT@1..2 "m"
+            WHITESPACE@2..3 " "
+            IDENT@3..8 "using"
+            ERROR@8..11
+              WHITESPACE@8..9 " "
+              DOLLAR@9..10 "$"
+              IDENT@10..11 "a"
+            BLOCK@11..19
+              LBRACE@11..11 ""
+              DECLARATION@11..19
+                PROPERTY@11..15
+                  WHITESPACE@11..14 "\n  "
+                  IDENT@14..15 "b"
+                COLON@15..16 ":"
+                VALUE@16..19
+                  VARIABLE_REF@16..19
+                    WHITESPACE@16..17 " "
+                    DOLLAR@17..18 "$"
+                    IDENT@18..19 "a"
+                SEMICOLON@19..19 ""
+              RBRACE@19..19 ""
+          RULE_SET@19..28
+            SELECTOR_LIST@19..21
+              SELECTOR@19..21
+                SIMPLE_SELECTOR@19..21
+                  WHITESPACE@19..20 "\n"
+                  IDENT@20..21 "c"
+            BLOCK@21..28
+              LBRACE@21..21 ""
+              DECLARATION@21..28
+                PROPERTY@21..25
+                  WHITESPACE@21..24 "\n  "
+                  IDENT@24..25 "d"
+                COLON@25..26 ":"
+                VALUE@26..28
+                  VALUE@26..28
+                    WHITESPACE@26..27 " "
+                    IDENT@27..28 "e"
+                SEMICOLON@28..28 ""
+              RBRACE@28..28 ""
+          WHITESPACE@28..29 "\n"
+        errors:
+          9..10: expected `(`
+    "#]],
+    );
+}

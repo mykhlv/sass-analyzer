@@ -79,6 +79,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Parser: an expression nested too deep is one error, "nesting too deep". The rest of
   the operand that went too deep is skipped with it, and the brackets left open around
   it end there without errors of their own: 1000 unclosed `[` gave over 1700 errors
+- Parser: `@include m using $a { ... }`, missing the parentheses around `$a`, is one
+  error, a missing `(` as in Dart Sass, and the content block still parses as the
+  rule's. It was taken for a declaration, with up to nine errors
 
 ## 0.4.0 — 2026-11-08
 

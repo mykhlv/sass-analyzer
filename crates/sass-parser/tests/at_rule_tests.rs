@@ -7594,3 +7594,64 @@ fn param_without_dollar_is_one_error_and_keeps_the_body() {
     "#]],
     );
 }
+
+#[test]
+fn include_using_without_parens_is_one_error_and_keeps_the_block() {
+    // Dart Sass: `expected "("`.
+    check(
+        "@include m using $a { b: $a; }\nc { d: e }\n",
+        expect![[r#"
+            SOURCE_FILE@0..42
+              INCLUDE_RULE@0..30
+                AT@0..1 "@"
+                IDENT@1..8 "include"
+                WHITESPACE@8..9 " "
+                IDENT@9..10 "m"
+                WHITESPACE@10..11 " "
+                IDENT@11..16 "using"
+                ERROR@16..19
+                  WHITESPACE@16..17 " "
+                  DOLLAR@17..18 "$"
+                  IDENT@18..19 "a"
+                BLOCK@19..30
+                  WHITESPACE@19..20 " "
+                  LBRACE@20..21 "{"
+                  DECLARATION@21..28
+                    PROPERTY@21..23
+                      WHITESPACE@21..22 " "
+                      IDENT@22..23 "b"
+                    COLON@23..24 ":"
+                    VALUE@24..27
+                      VARIABLE_REF@24..27
+                        WHITESPACE@24..25 " "
+                        DOLLAR@25..26 "$"
+                        IDENT@26..27 "a"
+                    SEMICOLON@27..28 ";"
+                  WHITESPACE@28..29 " "
+                  RBRACE@29..30 "}"
+              RULE_SET@30..41
+                SELECTOR_LIST@30..32
+                  SELECTOR@30..32
+                    SIMPLE_SELECTOR@30..32
+                      WHITESPACE@30..31 "\n"
+                      IDENT@31..32 "c"
+                BLOCK@32..41
+                  WHITESPACE@32..33 " "
+                  LBRACE@33..34 "{"
+                  DECLARATION@34..39
+                    PROPERTY@34..36
+                      WHITESPACE@34..35 " "
+                      IDENT@35..36 "d"
+                    COLON@36..37 ":"
+                    VALUE@37..39
+                      VALUE@37..39
+                        WHITESPACE@37..38 " "
+                        IDENT@38..39 "e"
+                  WHITESPACE@39..40 " "
+                  RBRACE@40..41 "}"
+              WHITESPACE@41..42 "\n"
+            errors:
+              17..18: expected `(`
+        "#]],
+    );
+}
