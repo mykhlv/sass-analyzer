@@ -49,6 +49,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   their lines with the document's own line breaks. In a file with `\r\n` line endings
   they inserted bare `\n` breaks, and auto-import added a stray empty line after an
   existing `@use`
+- Indented Sass: extract to mixin is no longer offered for lines whose indentation does
+  not continue the first selected line's, as tabs below a line indented with spaces. It
+  moved such a line flush with the mixin's body, which could take a nested declaration
+  out of its rule
 
 ## 0.4.0 — 2026-11-08
 

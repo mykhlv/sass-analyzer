@@ -817,10 +817,13 @@ fn extract_mixin_action(
     };
 
     let rule_indent = node_indentation(text, &rule_set);
-    let body = mixin_body(text, &block, moved, rule_indent);
+    let indented = crate::worker::is_sass_file(uri);
+    let Some(body) = mixin_body(text, &block, moved, rule_indent, indented) else {
+        return;
+    };
 
     let eol = line_ending(text);
-    let (mixin_text, include_text) = if crate::worker::is_sass_file(uri) {
+    let (mixin_text, include_text) = if indented {
         indented_mixin_texts(root, &block, &body, rule_indent, eol)
     } else {
         (
@@ -897,7 +900,19 @@ fn mixin_insertion_anchor(block: &SyntaxNode) -> Option<SyntaxNode> {
 /// indentation relative to the first one, which keeps nested blocks and
 /// continuation lines attached to the line that owns them — and in indented
 /// Sass, where indentation alone opens a block, keeps the meaning intact.
-fn mixin_body(text: &str, block: &SyntaxNode, moved: TextRange, rule_indent: &str) -> String {
+///
+/// A line whose indentation does not start with the first line's (tabs below
+/// spaces, or a continuation line outdented past it) has no relative indentation
+/// to keep. In SCSS it is re-indented flush with the body, which braces make
+/// harmless; in indented Sass (`indented`) there is no body at all, since any
+/// guess at its depth could nest it differently than the original does.
+fn mixin_body(
+    text: &str,
+    block: &SyntaxNode,
+    moved: TextRange,
+    rule_indent: &str,
+    indented: bool,
+) -> Option<String> {
     let start = usize::from(moved.start());
     let first_indent = indentation_at(text, start);
     // The unit is the step from the block's header to its body. The rule the
@@ -914,18 +929,21 @@ fn mixin_body(text: &str, block: &SyntaxNode, moved: TextRange, rule_indent: &st
         .enumerate()
         .map(|(i, line)| {
             if line.trim().is_empty() {
-                return String::new();
+                return Some(String::new());
             }
             let relative = if i == 0 {
                 line
+            } else if let Some(relative) = line.strip_prefix(first_indent) {
+                relative
+            } else if indented {
+                return None;
             } else {
-                line.strip_prefix(first_indent)
-                    .unwrap_or_else(|| line.trim_start())
+                line.trim_start()
             };
-            format!("{body_indent}{relative}")
+            Some(format!("{body_indent}{relative}"))
         })
-        .collect::<Vec<_>>()
-        .join(line_ending(text))
+        .collect::<Option<Vec<_>>>()
+        .map(|lines| lines.join(line_ending(text)))
 }
 
 /// The mixin definition and the `@include` that replaces the selection, for
@@ -2234,6 +2252,55 @@ mod tests {
             apply_in_sass(extract_mixin_action, src, "color: red\n  .b"),
             None
         );
+    }
+
+    /// Run extract-to-mixin on `src` as `uri` without requiring a clean parse.
+    fn extract_mixin_texts(uri: &str, src: &str, selected: &str) -> Vec<String> {
+        let uri: Uri = uri.parse().unwrap();
+        let parse = if crate::worker::is_sass_file(&uri) {
+            sass_parser::parse_sass
+        } else {
+            sass_parser::parse_scss
+        };
+        let root = SyntaxNode::new_root(parse(src).0);
+        let li = sass_parser::line_index::LineIndex::new(src);
+        let start = src.find(selected).expect("selection not found in source");
+        #[allow(clippy::cast_possible_truncation)]
+        let sel = TextRange::at(
+            TextSize::from(start as u32),
+            TextSize::from(selected.len() as u32),
+        );
+        let mut actions = Vec::new();
+        let range = text_range_to_lsp(sel, &li, src);
+        extract_mixin_action(&uri, &root, src, &li, range, &mut actions);
+        actions
+            .into_iter()
+            .flat_map(|a| a.edit.unwrap().changes.unwrap().into_values().flatten())
+            .map(|e| e.new_text)
+            .collect()
+    }
+
+    /// In indented Sass the indentation is the structure. A moved line whose
+    /// indentation does not extend the first line's (tabs where the first line
+    /// has spaces) has no faithful re-indentation, so nothing is offered rather
+    /// than a mixin whose nesting differs from the original.
+    #[test]
+    fn sass_extract_mixin_inconsistent_indentation_no_action() {
+        let src = ".a\n\t.b\n\t\tmargin: 0\n\t\t.c\n    color: red\n";
+        let texts = extract_mixin_texts("file:///t.sass", src, "margin: 0\n\t\t.c\n    color: red");
+        assert_eq!(texts, Vec::<String>::new());
+    }
+
+    /// Braces carry SCSS's structure, so the same lines are still extracted there.
+    #[test]
+    fn scss_extract_mixin_inconsistent_indentation_still_offered() {
+        let src = ".a {\n\t.b {\n\t\tmargin: 0;\n\t\t.c {\n    color: red; }\n\t}\n}\n";
+        let texts = extract_mixin_texts(
+            "file:///t.scss",
+            src,
+            "margin: 0;\n\t\t.c {\n    color: red; }",
+        );
+        assert_eq!(texts.len(), 2, "{texts:?}");
     }
 
     #[test]
