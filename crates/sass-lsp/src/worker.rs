@@ -254,21 +254,30 @@ pub(crate) async fn run_worker(
                         client.publish_diagnostics(uri, vec![], None).await;
                     }
                     Task::ExternalChange { uri, path } => {
+                        let is_new = !module_graph.contains(&uri);
                         if apply_external_change(
                             &documents, &module_graph, &runtime_config, &uri, &path,
                         ) {
-                            // Re-publish diagnostics for open files that import
-                            // the changed file, since their cross-file references
-                            // may now resolve differently.
-                            refresh_dependents(
-                                &module_graph, &documents, &client, &uri,
+                            // Importers of the changed file may now resolve its
+                            // members differently. A new file may also be the one an
+                            // unresolved import looked for; a change to a known one
+                            // cannot make an import resolve.
+                            let mut targets = module_graph.dependents_of(&uri);
+                            if is_new {
+                                targets.extend(documents_with_unresolved_imports(
+                                    &documents, &module_graph, &[uri],
+                                ));
+                            }
+                            refresh_documents(
+                                &module_graph, &documents, &client, targets, is_new,
                             ).await;
                         }
                     }
                     Task::ExternalDelete { uri } => {
+                        let targets = module_graph.dependents_of(&uri);
                         if apply_external_delete(&documents, &module_graph, &uri) {
-                            refresh_dependents(
-                                &module_graph, &documents, &client, &uri,
+                            refresh_documents(
+                                &module_graph, &documents, &client, targets, true,
                             ).await;
                         }
                     }
@@ -281,14 +290,27 @@ pub(crate) async fn run_worker(
                 }
             }
             () = &mut sleep, if has_pending => {
+                let mut new_uris = Vec::new();
                 for (uri, (version, text, incremental)) in pending.drain() {
+                    let is_new = !module_graph.contains(&uri);
                     if let Some(diagnostics) = apply_parse(
                         &documents, &module_graph, &uri, version, text, incremental,
                     ) {
+                        if is_new {
+                            new_uris.push(uri.clone());
+                        }
                         client
                             .publish_diagnostics(uri, diagnostics, Some(version))
                             .await;
                     }
+                }
+                // A file opened in the editor before the watcher reports it never
+                // reaches ExternalChange, so a new one is checked against the
+                // unresolved imports here.
+                if !new_uris.is_empty() {
+                    let targets =
+                        documents_with_unresolved_imports(&documents, &module_graph, &new_uris);
+                    refresh_documents(&module_graph, &documents, &client, targets, true).await;
                 }
                 // Tell VS Code to re-request semantic tokens for all open editors.
                 // Without this, tokens requested before parsing finishes get a null
@@ -304,52 +326,77 @@ pub(crate) async fn run_worker(
     }
 }
 
-/// Re-check the open files a changed, created or deleted file may affect: those that
-/// import it, and those with an import that does not resolve, which a new file may
-/// satisfy. Each is re-indexed so its imports resolve again against the disk.
-async fn refresh_dependents(
+/// Open documents, other than `except`, with an import that does not resolve.
+fn documents_with_unresolved_imports(
+    documents: &DashMap<Uri, DocumentState>,
+    module_graph: &workspace::ModuleGraph,
+    except: &[Uri],
+) -> Vec<Uri> {
+    documents
+        .iter()
+        .map(|entry| entry.key().clone())
+        .filter(|uri| !except.contains(uri) && module_graph.has_unresolved_paths(uri))
+        .collect()
+}
+
+/// Re-publish the diagnostics of the open documents among `targets`. With
+/// `reindex`, each is indexed again first, so its imports resolve again against
+/// the disk.
+async fn refresh_documents(
     module_graph: &workspace::ModuleGraph,
     documents: &DashMap<Uri, DocumentState>,
     client: &Client,
-    changed_uri: &Uri,
+    mut targets: Vec<Uri>,
+    reindex: bool,
 ) {
-    let dependents = module_graph.dependents_of(changed_uri);
-    let affected: Vec<Uri> = documents
-        .iter()
-        .map(|entry| entry.key().clone())
-        .filter(|uri| dependents.contains(uri) || module_graph.has_unresolved_paths(uri))
-        .collect();
-    for uri in affected {
+    targets.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+    targets.dedup();
+    let mut published = false;
+    for uri in targets {
         // Computed with the document guard released before publishing.
         let Some((all_diags, version)) = documents.get(&uri).map(|doc| {
-            module_graph.index_file(
-                &uri,
-                doc.green.clone(),
-                doc.symbols.clone(),
-                doc.line_index.clone(),
-                doc.text.clone(),
-            );
-            let mut all_diags = errors_to_diagnostics(&doc.errors, &doc.line_index, &doc.text);
-            let semantic = diagnostics::check_file(
-                &uri,
-                &doc.symbols,
-                module_graph,
-                &doc.green,
-                !doc.errors.is_empty(),
-            );
-            all_diags.extend(semantic_to_lsp(semantic, &doc.line_index, &doc.text));
-            (all_diags, doc.version)
+            if reindex {
+                module_graph.index_file(
+                    &uri,
+                    doc.green.clone(),
+                    doc.symbols.clone(),
+                    doc.line_index.clone(),
+                    doc.text.clone(),
+                );
+            }
+            (document_diagnostics(&uri, &doc, module_graph), doc.version)
         }) else {
             continue;
         };
         client
             .publish_diagnostics(uri, all_diags, Some(version))
             .await;
+        published = true;
     }
-    let c = client.clone();
-    tokio::spawn(async move {
-        let _ = c.semantic_tokens_refresh().await;
-    });
+    if published {
+        let c = client.clone();
+        tokio::spawn(async move {
+            let _ = c.semantic_tokens_refresh().await;
+        });
+    }
+}
+
+/// Parse errors and semantic diagnostics of an open document.
+fn document_diagnostics(
+    uri: &Uri,
+    doc: &DocumentState,
+    module_graph: &workspace::ModuleGraph,
+) -> Vec<Diagnostic> {
+    let mut all_diags = errors_to_diagnostics(&doc.errors, &doc.line_index, &doc.text);
+    let semantic = diagnostics::check_file(
+        uri,
+        &doc.symbols,
+        module_graph,
+        &doc.green,
+        !doc.errors.is_empty(),
+    );
+    all_diags.extend(semantic_to_lsp(semantic, &doc.line_index, &doc.text));
+    all_diags
 }
 
 // ── Check Workspace ─────────────────────────────────────────────────
@@ -481,24 +528,22 @@ async fn check_workspace(
     }
 
     // Phase 3: re-check open files (they may now resolve more imports)
-    for entry in documents {
-        let uri = entry.key().clone();
-        let doc = entry.value();
-        let mut all_diagnostics = errors_to_diagnostics(&doc.errors, &doc.line_index, &doc.text);
-        let semantic = diagnostics::check_file(
-            &uri,
-            &doc.symbols,
-            module_graph,
-            &doc.green,
-            !doc.errors.is_empty(),
-        );
-        all_diagnostics.extend(semantic_to_lsp(semantic, &doc.line_index, &doc.text));
+    // Collected first: a shard guard held across the publish below would block a
+    // handler writing to that shard, which can keep the client channel from draining.
+    let open_uris: Vec<Uri> = documents.iter().map(|entry| entry.key().clone()).collect();
+    for uri in open_uris {
+        let Some((all_diagnostics, version)) = documents
+            .get(&uri)
+            .map(|doc| (document_diagnostics(&uri, &doc, module_graph), doc.version))
+        else {
+            continue;
+        };
         if !all_diagnostics.is_empty() {
             total_diags += all_diagnostics.len() as u64;
             files_with_diags += 1;
         }
         client
-            .publish_diagnostics(uri, all_diagnostics, Some(doc.version))
+            .publish_diagnostics(uri, all_diagnostics, Some(version))
             .await;
     }
 

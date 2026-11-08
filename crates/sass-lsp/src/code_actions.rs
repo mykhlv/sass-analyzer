@@ -42,7 +42,7 @@ pub(crate) fn handle_code_action(
     let existing_use_uris: HashSet<Uri> = existing_imports
         .iter()
         .filter(|i| i.kind == ImportKind::Use)
-        .filter_map(|i| module_graph.resolve_import(&uri, &i.path))
+        .filter_map(|i| module_graph.resolve_import(&uri, &i.path, i.kind))
         .collect();
 
     // Lazily initialized: only fetch when we encounter a relevant diagnostic.
@@ -238,7 +238,7 @@ fn compute_use_path(
     let spec = normalize_sass_path(&rel);
 
     // Round-trip validation: check that the spec resolves back to target
-    if let Some(resolved_uri) = module_graph.resolve_import(from_uri, &spec)
+    if let Some(resolved_uri) = module_graph.resolve_import(from_uri, &spec, ImportKind::Use)
         && resolved_uri == *target_uri
     {
         return Some(spec);
@@ -247,7 +247,7 @@ fn compute_use_path(
     // Fallback: try without stripping _ (non-partial files)
     let spec2 = normalize_extension_only(&rel);
     if spec2 != spec
-        && let Some(resolved_uri) = module_graph.resolve_import(from_uri, &spec2)
+        && let Some(resolved_uri) = module_graph.resolve_import(from_uri, &spec2, ImportKind::Use)
         && resolved_uri == *target_uri
     {
         return Some(spec2);

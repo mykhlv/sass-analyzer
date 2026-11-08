@@ -285,6 +285,11 @@ impl ModuleGraph {
         green
     }
 
+    /// Whether the file is indexed.
+    pub fn contains(&self, uri: &Uri) -> bool {
+        self.files.contains_key(uri)
+    }
+
     /// Total number of indexed files.
     pub fn file_count(&self) -> usize {
         self.files.len()
@@ -343,13 +348,7 @@ impl ModuleGraph {
             // Scope the guard to the resolve call: index_dependency below recurses
             // into index_file, and a recursive read lock can deadlock against
             // set_resolver waiting to write.
-            let resolved = {
-                let resolver = self
-                    .resolver
-                    .read()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                resolver.resolve(&import_ref.path, base)
-            };
+            let resolved = self.resolve_url(&import_ref.path, base, import_ref.kind);
 
             if let Ok(ResolvedModule::File(target_path)) = resolved {
                 let target_uri = path_to_uri(&target_path);
@@ -388,7 +387,9 @@ impl ModuleGraph {
                 let missing = match resolved {
                     Err(ResolveError::UnknownBuiltin(_)) => true,
                     Err(ResolveError::NotFound(_)) => {
-                        !import_ref.plain_css && is_resolvable_url(&import_ref.path)
+                        !import_ref.plain_css
+                            && is_resolvable_url(&import_ref.path)
+                            && self.lookup_package(&import_ref.path, base) == PackageLookup::Absent
                     }
                     Ok(_) => false,
                 };
@@ -812,16 +813,98 @@ impl ModuleGraph {
 
     /// Resolve an import specifier from a given file URI.
     /// Returns the target file URI if resolution succeeds.
-    pub fn resolve_import(&self, from: &Uri, spec: &str) -> Option<Uri> {
+    pub fn resolve_import(&self, from: &Uri, spec: &str, kind: ImportKind) -> Option<Uri> {
         let base = uri_to_path(from)?;
-        let resolver = self
-            .resolver
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        match resolver.resolve(spec, &base) {
+        match self.resolve_url(spec, &base, kind) {
             Ok(ResolvedModule::File(path)) => Some(path_to_uri(&path)),
             _ => None,
         }
+    }
+
+    /// Resolve the URL of an import of `kind` in the file at `base`. Beyond what the
+    /// resolver finds, a bare package name loads the stylesheet its `package.json`
+    /// names, as bundlers do.
+    fn resolve_url(
+        &self,
+        url: &str,
+        base: &Path,
+        kind: ImportKind,
+    ) -> Result<ResolvedModule, ResolveError> {
+        // Scoped: index_dependency recurses into index_file, and a recursive read
+        // lock can deadlock against set_resolver waiting to write.
+        let resolved = {
+            let resolver = self
+                .resolver
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if kind == ImportKind::Import {
+                resolver.resolve_for_import(url, base)
+            } else {
+                resolver.resolve(url, base)
+            }
+        };
+        if matches!(resolved, Err(ResolveError::NotFound(_)))
+            && let PackageLookup::Entry(path) = self.lookup_package(url, base)
+        {
+            return Ok(ResolvedModule::File(path));
+        }
+        resolved
+    }
+
+    /// Look `url` up as a package in the nearest `node_modules` holding its first
+    /// segment (two for a scoped `@scope/name`). For the bare name, the entry is the
+    /// `sass` or `style` condition of `exports`, else the `sass` or `style` field.
+    fn lookup_package(&self, url: &str, base: &Path) -> PackageLookup {
+        let Some((name, subpath)) = package_name(url) else {
+            return PackageLookup::Absent;
+        };
+        let mut dir = base.parent();
+        while let Some(current) = dir {
+            let package_dir = current.join("node_modules").join(name);
+            if package_dir.is_dir() {
+                if !subpath.is_empty() || !self.is_path_allowed(&package_dir) {
+                    return PackageLookup::Installed;
+                }
+                return self
+                    .package_entry(&package_dir, base)
+                    .map_or(PackageLookup::Installed, PackageLookup::Entry);
+            }
+            dir = current.parent();
+        }
+        PackageLookup::Absent
+    }
+
+    fn package_entry(&self, package_dir: &Path, base: &Path) -> Option<PathBuf> {
+        let manifest = std::fs::read_to_string(package_dir.join("package.json")).ok()?;
+        let manifest: serde_json::Value = serde_json::from_str(&manifest).ok()?;
+        let exports = manifest.get("exports");
+        let exports = exports.and_then(|e| e.get(".")).or(exports);
+        let entries = ["sass", "style"]
+            .into_iter()
+            .filter_map(|c| exports.and_then(|e| e.get(c)))
+            .chain(
+                ["sass", "style"]
+                    .into_iter()
+                    .filter_map(|f| manifest.get(f)),
+            )
+            .filter_map(serde_json::Value::as_str);
+        for entry in entries {
+            let path = package_dir.join(entry.trim_start_matches("./"));
+            if path.is_file() {
+                return Some(path);
+            }
+            let resolved = {
+                let resolver = self
+                    .resolver
+                    .read()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                resolver.resolve(path.to_str()?, base)
+            };
+            if let Ok(ResolvedModule::File(found)) = resolved {
+                return Some(found);
+            }
+        }
+        None
     }
 
     /// Provide completion items for `@use "` / `@forward "` import paths.
@@ -1469,6 +1552,32 @@ fn find_name_in_forward_clauses(
     }
 
     results
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum PackageLookup {
+    /// The stylesheet the package's manifest names.
+    Entry(PathBuf),
+    /// The package is installed, but the server cannot tell what loads from it.
+    Installed,
+    Absent,
+}
+
+/// Split a bare package URL into its package name and the rest of the path.
+fn package_name(url: &str) -> Option<(&str, &str)> {
+    if url.is_empty() || url.starts_with(['.', '/', '\\']) {
+        return None;
+    }
+    let segments = if url.starts_with('@') { 2 } else { 1 };
+    let end = url
+        .match_indices('/')
+        .nth(segments - 1)
+        .map_or(url.len(), |(i, _)| i);
+    let (name, rest) = url.split_at(end);
+    if segments == 2 && !name.contains('/') {
+        return None;
+    }
+    Some((name, rest.trim_start_matches('/')))
 }
 
 /// Whether `url` is one the resolver looks up on disk: not a URL with a scheme, as

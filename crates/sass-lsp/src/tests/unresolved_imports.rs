@@ -240,3 +240,173 @@ async fn deleting_an_imported_file_reports_the_error() {
     assert_eq!(diags.len(), 1, "{diags:#?}");
     assert_eq!(diags[0]["code"], "unresolved-import");
 }
+
+// ── Files Dart Sass and bundlers load ───────────────────────────────
+
+async fn definition_of(
+    reader: &mut (impl AsyncReadExt + Unpin),
+    writer: &mut (impl AsyncWriteExt + Unpin),
+    uri: &str,
+    line: u32,
+    character: u32,
+) -> Value {
+    send_msg(
+        writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0", "id": 900, "method": "textDocument/definition",
+            "params": {
+                "textDocument": { "uri": uri },
+                "position": { "line": line, "character": character }
+            }
+        }),
+    )
+    .await;
+    recv_response(reader, writer, 900).await["result"].clone()
+}
+
+#[tokio::test]
+async fn css_files_and_encoded_urls_resolve() {
+    let dir = TempDir::new("css_files");
+    dir.write(
+        "node_modules/normalize.css/normalize.css",
+        "html { margin: 0; }\n",
+    );
+    dir.write("vendor.css", "a { b: c; }\n");
+    dir.write("theme/_index.css", "a { b: c; }\n");
+    dir.write("my file.scss", "$x: 1;\n");
+    let text = concat!(
+        "@import \"normalize.css/normalize\";\n",
+        "@use \"vendor\";\n",
+        "@use \"theme\";\n",
+        "@use \"my%20file\" as m;\n",
+    );
+    let (_r, _w, _uri, diags) = open_in(&dir, "main.scss", text).await;
+    assert!(diags.is_empty(), "{diags:#?}");
+}
+
+#[tokio::test]
+async fn import_only_file_resolves_for_import() {
+    let dir = TempDir::new("import_only");
+    let target = dir.write("_bar.import.scss", "$x: 1;\n");
+    dir.write("_bar.scss", "$y: 1;\n");
+    let text = "@import \"bar\";\n";
+    let (mut reader, mut writer, uri, diags) = open_in(&dir, "main.scss", text).await;
+    assert!(diags.is_empty(), "{diags:#?}");
+    let def = definition_of(&mut reader, &mut writer, &uri, 0, 10).await;
+    assert_eq!(def["uri"], file_uri(&target), "{def}");
+}
+
+#[tokio::test]
+async fn import_only_file_does_not_resolve_for_use() {
+    let dir = TempDir::new("import_only_use");
+    dir.write("_bar.import.scss", "$x: 1;\n");
+    let (_r, _w, _uri, diags) = open_in(&dir, "main.scss", "@use \"bar\";\n").await;
+    assert_eq!(not_found(&diags).len(), 1, "{diags:#?}");
+}
+
+#[tokio::test]
+async fn package_entry_from_package_json() {
+    let dir = TempDir::new("package_json");
+    dir.write(
+        "node_modules/bootstrap/package.json",
+        r#"{ "sass": "scss/bootstrap.scss" }"#,
+    );
+    let target = dir.write("node_modules/bootstrap/scss/bootstrap.scss", "$x: 1;\n");
+    dir.write(
+        "node_modules/@acme/ui/package.json",
+        r#"{ "exports": { ".": { "sass": "./src/_ui.scss", "default": "./index.js" } } }"#,
+    );
+    dir.write("node_modules/@acme/ui/src/_ui.scss", "$y: 1;\n");
+    dir.write(
+        "node_modules/plain/package.json",
+        r#"{ "style": "dist/plain.css" }"#,
+    );
+    dir.write("node_modules/plain/dist/plain.css", "a { b: c; }\n");
+    let text = "@use \"bootstrap\";\n@use \"@acme/ui\";\n@use \"plain\";\n";
+    let (mut reader, mut writer, uri, diags) = open_in(&dir, "main.scss", text).await;
+    assert!(diags.is_empty(), "{diags:#?}");
+    let def = definition_of(&mut reader, &mut writer, &uri, 0, 7).await;
+    assert_eq!(def["uri"], file_uri(&target), "{def}");
+}
+
+#[tokio::test]
+async fn installed_package_is_not_reported_missing() {
+    // A bundler may resolve what the server cannot, as a subpath in `exports`.
+    let dir = TempDir::new("installed_package");
+    dir.write(
+        "node_modules/widgets/package.json",
+        r#"{ "main": "index.js" }"#,
+    );
+    dir.write("node_modules/@scope/kit/README.md", "kit\n");
+    let text = "@use \"widgets\";\n@use \"widgets/theme\";\n@use \"@scope/kit/x\";\n";
+    let (_r, _w, _uri, diags) = open_in(&dir, "main.scss", text).await;
+    assert!(diags.is_empty(), "{diags:#?}");
+}
+
+#[tokio::test]
+async fn opening_a_new_file_clears_the_error() {
+    // An editor's "New File" opens the file before the watcher reports it, and the
+    // watcher event of an open file is skipped.
+    let dir = TempDir::new("opened_new");
+    let text = "@use \"later\";\na { b: later.$x; }\n";
+    let (mut reader, mut writer, uri, diags) = open_in(&dir, "main.scss", text).await;
+    assert_eq!(not_found(&diags).len(), 1, "{diags:#?}");
+
+    let created = file_uri(&dir.write("_later.scss", ""));
+    open_document(&mut writer, &created, "").await;
+    let diags = next_diagnostics(&mut reader, &mut writer, &uri).await;
+    assert!(diags.is_empty(), "{diags:#?}");
+}
+
+#[tokio::test]
+async fn change_of_a_known_file_does_not_recheck_unrelated_documents() {
+    let dir = TempDir::new("known_change");
+    let other = dir.write("_other.scss", "$x: 1;\n");
+    let other_uri = file_uri(&other);
+    let (mut reader, mut writer) = spawn_server();
+    do_initialize_with_root(&mut reader, &mut writer, &file_uri(&dir.0)).await;
+    // Opened first, so that opening it re-checks nothing.
+    let probe = file_uri(&dir.write("probe.scss", "$p: 1;\n"));
+    open_document(&mut writer, &probe, "$p: 1;\n").await;
+    next_diagnostics(&mut reader, &mut writer, &probe).await;
+    let main = "@use \"pkg:theme\";\n";
+    let uri = file_uri(&dir.write("main.scss", main));
+    open_document(&mut writer, &uri, main).await;
+    next_diagnostics(&mut reader, &mut writer, &uri).await;
+
+    // The first event brings `_other.scss` into the module graph; a later one
+    // changes a file already known, which cannot make an import resolve.
+    send_watched(&mut writer, &other_uri, 2).await;
+    next_diagnostics(&mut reader, &mut writer, &uri).await;
+    std::fs::write(&other, "$x: 2;\n").unwrap();
+    send_watched(&mut writer, &other_uri, 2).await;
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didChange",
+            "params": {
+                "textDocument": { "uri": probe, "version": 2 },
+                "contentChanges": [{ "text": "$p: 2;\n" }]
+            }
+        }),
+    )
+    .await;
+    // The worker handles the watcher event before the debounced parse.
+    let republished = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let msg = recv_msg(&mut reader, &mut writer).await;
+            if msg["method"] == "textDocument/publishDiagnostics" {
+                if msg["params"]["uri"] == uri {
+                    return true;
+                }
+                if msg["params"]["uri"] == probe {
+                    return false;
+                }
+            }
+        }
+    })
+    .await
+    .expect("the probe's diagnostics");
+    assert!(!republished, "an unrelated document was re-checked");
+}
