@@ -30,6 +30,31 @@ Existing SCSS extensions for VS Code struggle in monorepos: slow startup, high m
 - Selection range, document highlight, folding
 - File watcher — automatically re-indexes on external file changes
 
+### Mirroring bundler settings
+
+The server resolves imports the way Dart Sass does on its own. What a bundler adds on top
+of that has to be repeated in the editor's settings, or its imports do not resolve:
+
+| Bundler setting | sass-analyzer setting |
+|-----------------|-----------------------|
+| Vite `css.preprocessorOptions.scss.additionalData`, webpack `sass-loader` `additionalData` | `sass-analyzer.prependImports`: the modules it `@use`s, by a URL that resolves from any file, through an alias or a load path |
+| An `@/` alias (Vite or webpack `resolve.alias`) | `sass-analyzer.importAliases`, keyed by the prefix without its `/`: `{ "@": "src" }` |
+| Vite `loadPaths`, Angular `stylePreprocessorOptions.includePaths`, `sass-loader` `includePaths` | `sass-analyzer.loadPaths` |
+
+```jsonc
+// .vscode/settings.json, for a Vite project
+{
+  "sass-analyzer.prependImports": ["@/styles/variables"],
+  "sass-analyzer.importAliases": { "@": "src" },
+  "sass-analyzer.loadPaths": ["src/styles"]
+}
+```
+
+A bare package URL, as `@use "bootstrap/scss/functions"`, is looked up in `node_modules`.
+Where there is none, as with Yarn Plug'n'Play or before `npm install`, the import is
+reported as unresolved. If the project's own importer loads such URLs, turn the report off
+with `"sass-analyzer.reportUnresolvedImports": false`.
+
 ## Performance
 
 Benchmarked on Angular Material (~1.6 MB SCSS, 279 files concatenated):
