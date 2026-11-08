@@ -418,3 +418,146 @@ fn resolve_explicit_sass_extension() {
         Ok(ResolvedModule::File("/project/src/colors.sass".into())),
     );
 }
+
+// ── Dart Sass candidate order ───────────────────────────────────────
+
+fn resolves(r: &ModuleResolver<MemoryFs>, spec: &str) -> Result<ResolvedModule, ResolveError> {
+    r.resolve(spec, Path::new("/p/main.scss"))
+}
+
+fn resolves_for_import(
+    r: &ModuleResolver<MemoryFs>,
+    spec: &str,
+) -> Result<ResolvedModule, ResolveError> {
+    r.resolve_for_import(spec, Path::new("/p/main.scss"))
+}
+
+// Compared against `resolve`'s result, so it has its type.
+#[allow(clippy::unnecessary_wraps)]
+fn file(path: &str) -> Result<ResolvedModule, ResolveError> {
+    Ok(ResolvedModule::File(PathBuf::from(path)))
+}
+
+#[test]
+fn resolve_css_file_without_extension() {
+    assert_eq!(
+        resolves(&resolver_with(&["/p/foo.css"]), "foo"),
+        file("/p/foo.css")
+    );
+    assert_eq!(
+        resolves(&resolver_with(&["/p/_foo.css"]), "foo"),
+        file("/p/_foo.css")
+    );
+    assert_eq!(
+        resolves_for_import(&resolver_with(&["/p/foo.css"]), "foo"),
+        file("/p/foo.css")
+    );
+}
+
+#[test]
+fn resolve_stylesheet_before_css() {
+    let r = resolver_with(&["/p/foo.css", "/p/_foo.sass"]);
+    assert_eq!(resolves(&r, "foo"), file("/p/_foo.sass"));
+}
+
+#[test]
+fn resolve_css_file_before_directory_index() {
+    let r = resolver_with(&["/p/foo.css", "/p/foo/_index.scss"]);
+    assert_eq!(resolves(&r, "foo"), file("/p/foo.css"));
+}
+
+#[test]
+fn resolve_css_index() {
+    assert_eq!(
+        resolves(&resolver_with(&["/p/foo/index.css"]), "foo"),
+        file("/p/foo/index.css")
+    );
+    assert_eq!(
+        resolves(&resolver_with(&["/p/foo/_index.css"]), "foo"),
+        file("/p/foo/_index.css")
+    );
+}
+
+#[test]
+fn resolve_css_in_a_dotted_package_directory() {
+    // `@import "normalize.css/normalize"` with `node_modules` as a load path.
+    let mut r = resolver_with(&["/p/node_modules/normalize.css/normalize.css"]);
+    r.add_load_path("/p/node_modules");
+    assert_eq!(
+        resolves_for_import(&r, "normalize.css/normalize"),
+        file("/p/node_modules/normalize.css/normalize.css")
+    );
+}
+
+#[test]
+fn import_only_file_is_preferred_by_import() {
+    let r = resolver_with(&["/p/_bar.import.scss", "/p/_bar.scss"]);
+    assert_eq!(resolves_for_import(&r, "bar"), file("/p/_bar.import.scss"));
+    assert_eq!(resolves(&r, "bar"), file("/p/_bar.scss"));
+}
+
+#[test]
+fn import_only_file_is_invisible_to_use() {
+    let r = resolver_with(&["/p/_bar.import.scss", "/p/bar/_index.import.scss"]);
+    assert_eq!(
+        resolves(&r, "bar"),
+        Err(ResolveError::NotFound("bar".into()))
+    );
+}
+
+#[test]
+fn import_only_file_with_explicit_extension() {
+    let r = resolver_with(&["/p/_bar.import.scss", "/p/_bar.scss"]);
+    assert_eq!(
+        resolves_for_import(&r, "bar.scss"),
+        file("/p/_bar.import.scss")
+    );
+}
+
+#[test]
+fn import_only_file_before_directory_index() {
+    let r = resolver_with(&["/p/bar.import.sass", "/p/bar/_index.scss"]);
+    assert_eq!(resolves_for_import(&r, "bar"), file("/p/bar.import.sass"));
+}
+
+#[test]
+fn import_only_index() {
+    let r = resolver_with(&["/p/bar/_index.import.scss", "/p/bar/_index.scss"]);
+    assert_eq!(
+        resolves_for_import(&r, "bar"),
+        file("/p/bar/_index.import.scss")
+    );
+    assert_eq!(resolves(&r, "bar"), file("/p/bar/_index.scss"));
+}
+
+#[test]
+fn resolve_percent_encoded_url() {
+    let r = resolver_with(&["/p/my file.scss", "/p/my dir/_a.scss"]);
+    assert_eq!(resolves(&r, "my%20file"), file("/p/my file.scss"));
+    assert_eq!(resolves(&r, "my%20dir/a"), file("/p/my dir/_a.scss"));
+}
+
+#[test]
+fn invalid_percent_escape_is_kept() {
+    let r = resolver_with(&["/p/100%.scss", "/p/a%zz.scss"]);
+    assert_eq!(resolves(&r, "100%"), file("/p/100%.scss"));
+    assert_eq!(resolves(&r, "a%zz"), file("/p/a%zz.scss"));
+}
+
+#[test]
+fn ambiguous_candidates_still_resolve() {
+    // Dart Sass reports these as ambiguous; picking one keeps them from
+    // looking missing.
+    let r = resolver_with(&["/p/_a.scss", "/p/a.sass"]);
+    assert_eq!(resolves(&r, "a"), file("/p/_a.scss"));
+    let r = resolver_with(&["/p/a/_index.scss", "/p/a/index.scss"]);
+    assert_eq!(resolves(&r, "a"), file("/p/a/index.scss"));
+    let r = resolver_with(&["/p/foo.css", "/p/_foo.css"]);
+    assert_eq!(resolves(&r, "foo"), file("/p/foo.css"));
+}
+
+#[test]
+fn file_before_directory_index() {
+    let r = resolver_with(&["/p/a.scss", "/p/a/_index.scss"]);
+    assert_eq!(resolves(&r, "a"), file("/p/a.scss"));
+}
