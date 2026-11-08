@@ -53,7 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - LSP: a `.css` file created or deleted on disk re-checks the open files as a new or
   deleted stylesheet does, so creating `theme.css` clears the error of `@use "theme"`
   without editing the importer. A watcher event alone does not index a CSS file as a Sass
-  module; only an import that resolves to it does
+  module, whatever the case of its extension: a change to `Foo.CSS` was read as SCSS
 - LSP: "Check Workspace" no longer holds a lock on the open documents while it
   publishes their diagnostics, which could hang the server if a file was opened at
   that moment
@@ -67,8 +67,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   out of its rule
 - Indented Sass: the warning that a nested `name:value` rule is likely a declaration
   missing its space after `:` is no longer given for a pseudo selector, as an empty
-  `a:hover`, `li:first-child`, `a:not(.b)` or `input:-webkit-autofill`. It is now given
-  for an interpolated name, as `margin-#{$side}:auto`
+  `a:hover`, `li:first-child`, `a:not(.b)` or `input:-webkit-autofill`, nor for those of
+  CSS Modules and Vue, as `:export` or `div:deep(.x)`, `:active-view-transition`,
+  `:heading` or `:xr-overlay`. It is now given for an interpolated name, as
+  `margin-#{$side}:auto`, and for a CSS property's name before a pseudo-class's, as
+  `cursor:default`, while `input:default` stays silent
 - Parser: a mistake inside a bracket — an argument list, a parameter list, the
   configuration of `@use` or `@forward ... with (...)`, a parenthesized list or map, a
   bracketed list or an interpolation — is one error, and what could not be read up to
@@ -104,11 +107,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SCSS: a variable's value that reports an error, as a map missing its commas and
   left unclosed, `$m: (` / `a: 1` / `b: 2` / `.c { ... }`, takes the rest of its line
   with that one error. The rest was left to the next statement, with up to three more
-  errors, and the rule on the next line was read into it
+  errors, and the rule on the next line was read into it. The indented syntax does the
+  same, `$m: (` / `a: 1` / `b: 2` / `.c`, which reported the line's end missing as well
 - Indented Sass: a file with many brackets left unclosed, line after line, parses in time
   linear in its size. Each line searched on to the end of the file for the next line
   start, and each erroring bracket for the next line at its column, so the time grew with
   the square of the file's length
+- Parser: an `@page` selector list, as `@page toc, index:blank` or `@page :left, :right`,
+  is no longer an error. Only the first selector was read, and the rest was a rule missing
+  its selector; a prelude such as `@page a + b` was read as a rule after the at-rule, with
+  no error
+- Parser: `!important` inside brackets, as in `(a: 1 !important)`, `(1, 2 !important)`,
+  `[a !important b]` or `f(a !important b)`, is an item of the value, as in Dart Sass, not
+  an error. Only a positional argument ending with it was accepted
+- Parser: a function named `URL` or `Url`, which Dart Sass accepts with a deprecation
+  warning, is no longer an error: its name was read as the start of `url(...)`, and its
+  parameters as the URL. `@function url(...)`, as well as `and`, `or`, `not`,
+  `expression` and `element`, is one error on the name, "invalid function name", as in
+  Dart Sass, and `@function type(...)` reports that the name is reserved for the
+  plain-CSS function. `url(...)` in values is read as before
+- Parser: `and` and `or` where an operand starts are identifiers, as in Dart Sass:
+  `$a: and;`, `f(and, or)`, `$a: and and and` and `@if not and` are no longer errors.
+  After an operand they stay operators, and one missing its right operand, as
+  `$a: 1 and;`, is still reported. In the indented syntax, an `@if` or `@while` line ending
+  with such an operand, `@if and`, no longer reads the lines beneath it as more of its
+  condition
+- Parser: a variable's value may end with `!important`, as `$a: 1 !important;` or
+  `$a: 1 ! important;`, which Dart Sass accepts; that was three errors. `!important` is
+  matched in any case, `!IMPORTANT`. A `!` followed by a space and another word, as
+  `$a: 1 ! default` or `b: c ! d`, is one error, "expected `important`", as in Dart Sass;
+  it was accepted
+- Indented Sass: `b: c !` / blank line / `important` is the declaration's `!important`,
+  as in Dart Sass; it read `important` as a rule of its own. A `!` ending a line before a
+  line that is not `important`, as `$a: 1 !` / `default`, is one error after the `!`
+- LSP: a `.css` file that an import loads, as `@use "theme"` finding `theme.css`, is
+  plain CSS, as in Dart Sass, which rejects Sass variables, mixins and functions there.
+  It was read as SCSS, so a `$v` defined in it was a member of the module, with a
+  definition and a workspace symbol. It now exports no members and adds no symbols; go to
+  definition and document links on the import still reach the file
+- Parser: `@extend .b ! optional`, or `!` and `optional` on lines of their own, is one
+  error after the `!`, as in Dart Sass, which takes the flag only when it is joined to its
+  `!`. The braced syntax accepted it
+- Parser: an `@for` missing a part where its header ends, as `@for $i from {` or, in the
+  indented syntax, `@for $i from` / blank line / `.z`, is one error, as in Dart Sass; the
+  parts after it were reported missing too, three errors at one place. In the indented
+  syntax, `@for $i` goes on across blank lines only to a word, its `from`, so a rule
+  below stays a rule
+- Indented Sass: a written `;` that ends no statement is one error per line, as in Dart
+  Sass: after a selector, `.x;` or `b:c;`, "expected newline", and the lines beneath it
+  are still the rule's block; a second `;`, `b: c;;`, or a second statement after one,
+  `b: c; d: e`, reports that multiple statements on one line are not supported in the
+  indented syntax, Dart Sass's message. Such `;` were accepted. A `;` that ends a
+  statement, or sits in a string or `url()`, stays valid
 
 ## 0.4.0 — 2026-11-08
 

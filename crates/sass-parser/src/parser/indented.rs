@@ -38,6 +38,17 @@ pub struct HeaderLines {
     pub name_continues: bool,
 }
 
+/// Tokens after which a header's next token starts an operand.
+#[rustfmt::skip]
+const OPERAND_STARTS_AFTER: TokenSet = {
+    #[allow(clippy::enum_glob_use)]
+    use SyntaxKind::*;
+    TokenSet::new(&[
+        LPAREN, LBRACKET, HASH_LBRACE, COMMA, COLON, BANG, PLUS, MINUS, STAR, SLASH, PERCENT,
+        EQ_EQ, BANG_EQ, GT_EQ, LT_EQ, GT, LT,
+    ])
+};
+
 /// How many lines [`Parser::bracket_left_unclosed`] reads at most: far beyond any
 /// selector argument or at-rule prelude laid out over lines. Every line counts, those of
 /// the block below the bracket's line included.
@@ -295,8 +306,10 @@ impl<'src> Parser<'src> {
             } else {
                 self.input.line_break_range(line)
             };
+            // After a comma, and a `!` that `important` may follow, blank lines too.
             while next < end
-                && (last == SyntaxKind::COMMA || !self.input.line_break(next).is_blank_line())
+                && (matches!(last, SyntaxKind::COMMA | SyntaxKind::BANG)
+                    || !self.input.line_break(next).is_blank_line())
             {
                 next += 1;
             }
@@ -709,12 +722,41 @@ impl<'src> Parser<'src> {
             return false;
         };
         let last = index - 1;
-        let variable = self.input.kind(last.wrapping_sub(1)) == SyntaxKind::DOLLAR
-            && self.input.trivia_before(last).is_empty();
         (last == name && header.name_continues)
             || (self.input.kind(last) == SyntaxKind::IDENT
-                && !variable
-                && header.end_words.contains(&self.token_text(last)))
+                && !self.is_variable_name(last)
+                && header.end_words.contains(&self.token_text(last))
+                && (!matches!(self.token_text(last), "and" | "or")
+                    || self.operand_before(header, last, name)))
+    }
+
+    /// Whether an operand ends right before the header token `index`, so that an `and` or
+    /// `or` there is an operator, not an operand of its own: `@if $a and` goes on below,
+    /// `@if and` and `@if not and` end with their operand.
+    fn operand_before(&self, header: &HeaderLines, index: usize, name: usize) -> bool {
+        let before = index - 1;
+        if before <= name {
+            return false;
+        }
+        match self.input.kind(before) {
+            SyntaxKind::IDENT => {
+                self.is_variable_name(before)
+                    || !header.end_words.contains(&self.token_text(before))
+            }
+            // A unit: `10%`.
+            SyntaxKind::PERCENT
+                if self.input.kind(before - 1) == SyntaxKind::NUMBER
+                    && self.input.trivia_before(before).is_empty() =>
+            {
+                true
+            }
+            kind => !OPERAND_STARTS_AFTER.contains(kind),
+        }
+    }
+
+    fn is_variable_name(&self, index: usize) -> bool {
+        self.input.kind(index.wrapping_sub(1)) == SyntaxKind::DOLLAR
+            && self.input.trivia_before(index).is_empty()
     }
 
     fn token_text(&self, index: usize) -> &'src str {

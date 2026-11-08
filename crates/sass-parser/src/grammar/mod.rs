@@ -47,7 +47,7 @@ fn top_level_item(p: &mut Parser<'_>) {
     } else if p.at_ts(selectors::SELECTOR_START) || p.at_ts(selectors::COMBINATOR_TOKEN) {
         rule_set(p);
     } else if p.at(SEMICOLON) {
-        p.bump();
+        lines::stray_semicolon(p);
     } else {
         let m = p.start();
         p.error("expected rule");
@@ -361,9 +361,10 @@ fn rule_set(p: &mut Parser<'_>) {
     let m = g.start();
     let errors = g.error_count();
     selectors::selector_list(&mut g);
+    let semicolon = lines::semicolon_after_selector(&mut g);
     if g.at(LBRACE) {
         block(&mut g);
-    } else if g.braced() {
+    } else if g.braced() && !semicolon {
         let selector_reported = g.error_count() > errors;
         missing_rule_block(&mut g, selector_reported);
     }
@@ -679,7 +680,7 @@ pub(crate) fn block_after(p: &mut Parser<'_>, header_failed: bool) {
     let mut quiet = header_failed;
     while !g.at(RBRACE) && !g.at_end() {
         if g.at(SEMICOLON) {
-            g.bump();
+            lines::stray_semicolon(&mut g);
         } else if g.at(AT)
             || g.at(DOLLAR)
             || g.at(MINUS)
@@ -718,7 +719,7 @@ pub(crate) fn property_block(p: &mut Parser<'_>) {
     g.bump(); // {
     while !g.at(RBRACE) && !g.at_end() {
         if g.at(SEMICOLON) {
-            g.bump();
+            lines::stray_semicolon(&mut g);
         } else if g.at(AT) || g.at(DOLLAR) || g.at_shorthand() || at_namespace_var_assignment(&g) {
             let errors = g.error_count();
             block_item(&mut g);
@@ -749,7 +750,7 @@ pub(crate) fn generic_at_rule_block(p: &mut Parser<'_>) {
     g.bump(); // {
     while !g.at(RBRACE) && !g.at_end() {
         if g.at(SEMICOLON) {
-            g.bump();
+            lines::stray_semicolon(&mut g);
         } else if g.at(AT)
             || g.at(DOLLAR)
             || g.at(MINUS)
@@ -817,7 +818,7 @@ pub(crate) fn css_function_block(p: &mut Parser<'_>) {
     g.bump(); // {
     while !g.at(RBRACE) && !g.at_end() {
         if g.at(SEMICOLON) {
-            g.bump();
+            lines::stray_semicolon(&mut g);
         } else if g.at(AT) || g.at_shorthand() {
             at_rules::at_rule(&mut g);
         } else if g.at(IDENT) || g.at(HASH_LBRACE) || g.at(MINUS) || g.at(STAR) {

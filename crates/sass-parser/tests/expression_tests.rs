@@ -3132,6 +3132,490 @@ fn calc_space_separated_values_past_nesting_limit() {
 }
 
 #[test]
+fn and_operand_is_an_identifier() {
+    check(
+        "$a: and;",
+        expect![[r#"
+        SOURCE_FILE@0..8
+          VARIABLE_DECL@0..8
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "a"
+            COLON@2..3 ":"
+            VALUE@3..7
+              WHITESPACE@3..4 " "
+              IDENT@4..7 "and"
+            SEMICOLON@7..8 ";"
+    "#]],
+    );
+}
+
+#[test]
+fn or_operand_is_an_identifier() {
+    check(
+        "$a: or 1;",
+        expect![[r#"
+        SOURCE_FILE@0..9
+          VARIABLE_DECL@0..9
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "a"
+            COLON@2..3 ":"
+            VALUE@3..6
+              WHITESPACE@3..4 " "
+              IDENT@4..6 "or"
+            NUMBER_LITERAL@6..8
+              WHITESPACE@6..7 " "
+              NUMBER@7..8 "1"
+            SEMICOLON@8..9 ";"
+    "#]],
+    );
+}
+
+#[test]
+fn and_between_and_operands() {
+    check(
+        "$a: and and and;",
+        expect![[r#"
+        SOURCE_FILE@0..16
+          VARIABLE_DECL@0..16
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "a"
+            COLON@2..3 ":"
+            BINARY_EXPR@3..15
+              VALUE@3..7
+                WHITESPACE@3..4 " "
+                IDENT@4..7 "and"
+              WHITESPACE@7..8 " "
+              IDENT@8..11 "and"
+              VALUE@11..15
+                WHITESPACE@11..12 " "
+                IDENT@12..15 "and"
+            SEMICOLON@15..16 ";"
+    "#]],
+    );
+}
+
+#[test]
+fn and_or_as_arguments_and_in_parens() {
+    check(
+        "$a: f(and, or) (and);",
+        expect![[r#"
+        SOURCE_FILE@0..21
+          VARIABLE_DECL@0..21
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "a"
+            COLON@2..3 ":"
+            FUNCTION_CALL@3..14
+              WHITESPACE@3..4 " "
+              IDENT@4..5 "f"
+              ARG_LIST@5..14
+                LPAREN@5..6 "("
+                ARG@6..9
+                  VALUE@6..9
+                    IDENT@6..9 "and"
+                COMMA@9..10 ","
+                ARG@10..13
+                  VALUE@10..13
+                    WHITESPACE@10..11 " "
+                    IDENT@11..13 "or"
+                RPAREN@13..14 ")"
+            PAREN_EXPR@14..20
+              WHITESPACE@14..15 " "
+              LPAREN@15..16 "("
+              VALUE@16..19
+                IDENT@16..19 "and"
+              RPAREN@19..20 ")"
+            SEMICOLON@20..21 ";"
+    "#]],
+    );
+}
+
+#[test]
+fn not_applies_to_an_and_operand() {
+    check(
+        "@if not and { }",
+        expect![[r#"
+        SOURCE_FILE@0..15
+          IF_RULE@0..15
+            AT@0..1 "@"
+            IDENT@1..3 "if"
+            UNARY_EXPR@3..11
+              WHITESPACE@3..4 " "
+              IDENT@4..7 "not"
+              VALUE@7..11
+                WHITESPACE@7..8 " "
+                IDENT@8..11 "and"
+            BLOCK@11..15
+              WHITESPACE@11..12 " "
+              LBRACE@12..13 "{"
+              WHITESPACE@13..14 " "
+              RBRACE@14..15 "}"
+    "#]],
+    );
+}
+
+#[test]
+fn if_condition_and_is_an_identifier() {
+    check(
+        "@if and { }",
+        expect![[r#"
+        SOURCE_FILE@0..11
+          IF_RULE@0..11
+            AT@0..1 "@"
+            IDENT@1..3 "if"
+            VALUE@3..7
+              WHITESPACE@3..4 " "
+              IDENT@4..7 "and"
+            BLOCK@7..11
+              WHITESPACE@7..8 " "
+              LBRACE@8..9 "{"
+              WHITESPACE@9..10 " "
+              RBRACE@10..11 "}"
+    "#]],
+    );
+}
+
+#[test]
+fn and_missing_its_right_operand_is_one_error() {
+    check(
+        "$a: 1 and; $b: c;",
+        expect![[r#"
+        SOURCE_FILE@0..17
+          VARIABLE_DECL@0..10
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "a"
+            COLON@2..3 ":"
+            BINARY_EXPR@3..9
+              NUMBER_LITERAL@3..5
+                WHITESPACE@3..4 " "
+                NUMBER@4..5 "1"
+              WHITESPACE@5..6 " "
+              IDENT@6..9 "and"
+            SEMICOLON@9..10 ";"
+          VARIABLE_DECL@10..17
+            WHITESPACE@10..11 " "
+            DOLLAR@11..12 "$"
+            IDENT@12..13 "b"
+            COLON@13..14 ":"
+            VALUE@14..16
+              WHITESPACE@14..15 " "
+              IDENT@15..16 "c"
+            SEMICOLON@16..17 ";"
+        errors:
+          9..10: expected expression
+    "#]],
+    );
+}
+
+#[test]
+fn or_missing_its_right_operand_in_brackets_is_one_error() {
+    check(
+        "$a: [and or]; $b: c;",
+        expect![[r#"
+        SOURCE_FILE@0..20
+          VARIABLE_DECL@0..13
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "a"
+            COLON@2..3 ":"
+            BRACKETED_LIST@3..12
+              WHITESPACE@3..4 " "
+              LBRACKET@4..5 "["
+              BINARY_EXPR@5..11
+                VALUE@5..8
+                  IDENT@5..8 "and"
+                WHITESPACE@8..9 " "
+                IDENT@9..11 "or"
+              RBRACKET@11..12 "]"
+            SEMICOLON@12..13 ";"
+          VARIABLE_DECL@13..20
+            WHITESPACE@13..14 " "
+            DOLLAR@14..15 "$"
+            IDENT@15..16 "b"
+            COLON@16..17 ":"
+            VALUE@17..19
+              WHITESPACE@17..18 " "
+              IDENT@18..19 "c"
+            SEMICOLON@19..20 ";"
+        errors:
+          11..12: expected expression
+    "#]],
+    );
+}
+
+#[test]
+fn not_missing_its_operand_is_one_error() {
+    check(
+        "$a: not; $b: c;",
+        expect![[r#"
+        SOURCE_FILE@0..15
+          VARIABLE_DECL@0..8
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "a"
+            COLON@2..3 ":"
+            UNARY_EXPR@3..7
+              WHITESPACE@3..4 " "
+              IDENT@4..7 "not"
+            SEMICOLON@7..8 ";"
+          VARIABLE_DECL@8..15
+            WHITESPACE@8..9 " "
+            DOLLAR@9..10 "$"
+            IDENT@10..11 "b"
+            COLON@11..12 ":"
+            VALUE@12..14
+              WHITESPACE@12..13 " "
+              IDENT@13..14 "c"
+            SEMICOLON@14..15 ";"
+        errors:
+          7..8: expected expression
+    "#]],
+    );
+}
+
+#[test]
+fn variable_value_ends_with_important() {
+    check(
+        "$a: 1 !important;",
+        expect![[r#"
+        SOURCE_FILE@0..17
+          VARIABLE_DECL@0..17
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "a"
+            COLON@2..3 ":"
+            NUMBER_LITERAL@3..5
+              WHITESPACE@3..4 " "
+              NUMBER@4..5 "1"
+            IMPORTANT@5..16
+              WHITESPACE@5..6 " "
+              BANG@6..7 "!"
+              IDENT@7..16 "important"
+            SEMICOLON@16..17 ";"
+    "#]],
+    );
+}
+
+#[test]
+fn variable_value_important_in_another_case() {
+    check(
+        "$a: 1 !IMPORTANT;",
+        expect![[r#"
+        SOURCE_FILE@0..17
+          VARIABLE_DECL@0..17
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "a"
+            COLON@2..3 ":"
+            NUMBER_LITERAL@3..5
+              WHITESPACE@3..4 " "
+              NUMBER@4..5 "1"
+            IMPORTANT@5..16
+              WHITESPACE@5..6 " "
+              BANG@6..7 "!"
+              IDENT@7..16 "IMPORTANT"
+            SEMICOLON@16..17 ";"
+    "#]],
+    );
+}
+
+#[test]
+fn variable_value_important_before_a_flag() {
+    check(
+        "$a: 1 !important !default;",
+        expect![[r#"
+        SOURCE_FILE@0..26
+          VARIABLE_DECL@0..26
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "a"
+            COLON@2..3 ":"
+            NUMBER_LITERAL@3..5
+              WHITESPACE@3..4 " "
+              NUMBER@4..5 "1"
+            IMPORTANT@5..16
+              WHITESPACE@5..6 " "
+              BANG@6..7 "!"
+              IDENT@7..16 "important"
+            SASS_FLAG@16..25
+              WHITESPACE@16..17 " "
+              BANG@17..18 "!"
+              IDENT@18..25 "default"
+            SEMICOLON@25..26 ";"
+    "#]],
+    );
+}
+
+#[test]
+fn variable_value_spaced_important() {
+    check(
+        "$a: 1 ! important;",
+        expect![[r#"
+        SOURCE_FILE@0..18
+          VARIABLE_DECL@0..18
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "a"
+            COLON@2..3 ":"
+            NUMBER_LITERAL@3..5
+              WHITESPACE@3..4 " "
+              NUMBER@4..5 "1"
+            IMPORTANT@5..17
+              WHITESPACE@5..6 " "
+              BANG@6..7 "!"
+              WHITESPACE@7..8 " "
+              IDENT@8..17 "important"
+            SEMICOLON@17..18 ";"
+    "#]],
+    );
+}
+
+#[test]
+fn spaced_default_flag_is_one_error() {
+    check(
+        "$a: 1 ! default; $b: c;",
+        expect![[r#"
+        SOURCE_FILE@0..23
+          VARIABLE_DECL@0..16
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "a"
+            COLON@2..3 ":"
+            NUMBER_LITERAL@3..5
+              WHITESPACE@3..4 " "
+              NUMBER@4..5 "1"
+            ERROR@5..7
+              WHITESPACE@5..6 " "
+              BANG@6..7 "!"
+            VALUE@7..15
+              WHITESPACE@7..8 " "
+              IDENT@8..15 "default"
+            SEMICOLON@15..16 ";"
+          VARIABLE_DECL@16..23
+            WHITESPACE@16..17 " "
+            DOLLAR@17..18 "$"
+            IDENT@18..19 "b"
+            COLON@19..20 ":"
+            VALUE@20..22
+              WHITESPACE@20..21 " "
+              IDENT@21..22 "c"
+            SEMICOLON@22..23 ";"
+        errors:
+          8..15: expected `important`
+    "#]],
+    );
+}
+
+#[test]
+fn default_flag_on_the_next_line_is_one_error() {
+    check(
+        "$a: 1 !\ndefault; $b: c;",
+        expect![[r#"
+        SOURCE_FILE@0..23
+          VARIABLE_DECL@0..16
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "a"
+            COLON@2..3 ":"
+            NUMBER_LITERAL@3..5
+              WHITESPACE@3..4 " "
+              NUMBER@4..5 "1"
+            ERROR@5..7
+              WHITESPACE@5..6 " "
+              BANG@6..7 "!"
+            VALUE@7..15
+              WHITESPACE@7..8 "\n"
+              IDENT@8..15 "default"
+            SEMICOLON@15..16 ";"
+          VARIABLE_DECL@16..23
+            WHITESPACE@16..17 " "
+            DOLLAR@17..18 "$"
+            IDENT@18..19 "b"
+            COLON@19..20 ":"
+            VALUE@20..22
+              WHITESPACE@20..21 " "
+              IDENT@21..22 "c"
+            SEMICOLON@22..23 ";"
+        errors:
+          8..15: expected `important`
+    "#]],
+    );
+}
+
+#[test]
+fn declaration_spaced_bang_before_a_word_is_one_error() {
+    check(
+        "a { b: c ! d; e: f; }",
+        expect![[r#"
+        SOURCE_FILE@0..21
+          RULE_SET@0..21
+            SELECTOR_LIST@0..1
+              SELECTOR@0..1
+                SIMPLE_SELECTOR@0..1
+                  IDENT@0..1 "a"
+            BLOCK@1..21
+              WHITESPACE@1..2 " "
+              LBRACE@2..3 "{"
+              DECLARATION@3..13
+                PROPERTY@3..5
+                  WHITESPACE@3..4 " "
+                  IDENT@4..5 "b"
+                COLON@5..6 ":"
+                VALUE@6..12
+                  VALUE@6..8
+                    WHITESPACE@6..7 " "
+                    IDENT@7..8 "c"
+                  ERROR@8..10
+                    WHITESPACE@8..9 " "
+                    BANG@9..10 "!"
+                  VALUE@10..12
+                    WHITESPACE@10..11 " "
+                    IDENT@11..12 "d"
+                SEMICOLON@12..13 ";"
+              DECLARATION@13..19
+                PROPERTY@13..15
+                  WHITESPACE@13..14 " "
+                  IDENT@14..15 "e"
+                COLON@15..16 ":"
+                VALUE@16..18
+                  VALUE@16..18
+                    WHITESPACE@16..17 " "
+                    IDENT@17..18 "f"
+                SEMICOLON@18..19 ";"
+              WHITESPACE@19..20 " "
+              RBRACE@20..21 "}"
+        errors:
+          11..12: expected `important`
+    "#]],
+    );
+}
+
+#[test]
+fn declaration_important_in_another_case() {
+    check(
+        "a { b: c !IMPORTANT; }",
+        expect![[r#"
+        SOURCE_FILE@0..22
+          RULE_SET@0..22
+            SELECTOR_LIST@0..1
+              SELECTOR@0..1
+                SIMPLE_SELECTOR@0..1
+                  IDENT@0..1 "a"
+            BLOCK@1..22
+              WHITESPACE@1..2 " "
+              LBRACE@2..3 "{"
+              DECLARATION@3..20
+                PROPERTY@3..5
+                  WHITESPACE@3..4 " "
+                  IDENT@4..5 "b"
+                COLON@5..6 ":"
+                VALUE@6..8
+                  VALUE@6..8
+                    WHITESPACE@6..7 " "
+                    IDENT@7..8 "c"
+                IMPORTANT@8..19
+                  WHITESPACE@8..9 " "
+                  BANG@9..10 "!"
+                  IDENT@10..19 "IMPORTANT"
+                SEMICOLON@19..20 ";"
+              WHITESPACE@20..21 " "
+              RBRACE@21..22 "}"
+    "#]],
+    );
+}
+
+#[test]
 fn css_value_not_is_plain_ident() {
     // Regression: `not` was always parsed as unary prefix, even in CssValue context
     check(
@@ -3623,6 +4107,277 @@ fn interpolation_in_selector_property_value() {
 }
 
 // ── sass-spec false negative regression tests ────────────────────────────
+
+#[test]
+fn important_in_map_value() {
+    check(
+        "$m: (a: 1 !important);",
+        expect![[r#"
+        SOURCE_FILE@0..22
+          VARIABLE_DECL@0..22
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "m"
+            COLON@2..3 ":"
+            MAP_EXPR@3..21
+              WHITESPACE@3..4 " "
+              LPAREN@4..5 "("
+              MAP_ENTRY@5..20
+                VALUE@5..6
+                  IDENT@5..6 "a"
+                COLON@6..7 ":"
+                NUMBER_LITERAL@7..9
+                  WHITESPACE@7..8 " "
+                  NUMBER@8..9 "1"
+                IMPORTANT@9..20
+                  WHITESPACE@9..10 " "
+                  BANG@10..11 "!"
+                  IDENT@11..20 "important"
+              RPAREN@20..21 ")"
+            SEMICOLON@21..22 ";"
+    "#]],
+    );
+}
+
+#[test]
+fn important_in_map_value_before_more_items() {
+    check(
+        "$m: (a: 1 !important b, c: 2);",
+        expect![[r#"
+        SOURCE_FILE@0..30
+          VARIABLE_DECL@0..30
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "m"
+            COLON@2..3 ":"
+            MAP_EXPR@3..29
+              WHITESPACE@3..4 " "
+              LPAREN@4..5 "("
+              MAP_ENTRY@5..22
+                VALUE@5..6
+                  IDENT@5..6 "a"
+                COLON@6..7 ":"
+                NUMBER_LITERAL@7..9
+                  WHITESPACE@7..8 " "
+                  NUMBER@8..9 "1"
+                IMPORTANT@9..20
+                  WHITESPACE@9..10 " "
+                  BANG@10..11 "!"
+                  IDENT@11..20 "important"
+                VALUE@20..22
+                  WHITESPACE@20..21 " "
+                  IDENT@21..22 "b"
+              COMMA@22..23 ","
+              MAP_ENTRY@23..28
+                VALUE@23..25
+                  WHITESPACE@23..24 " "
+                  IDENT@24..25 "c"
+                COLON@25..26 ":"
+                NUMBER_LITERAL@26..28
+                  WHITESPACE@26..27 " "
+                  NUMBER@27..28 "2"
+              RPAREN@28..29 ")"
+            SEMICOLON@29..30 ";"
+    "#]],
+    );
+}
+
+#[test]
+fn important_in_comma_list_item() {
+    check(
+        "$l: (1, 2 !important);",
+        expect![[r#"
+        SOURCE_FILE@0..22
+          VARIABLE_DECL@0..22
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "l"
+            COLON@2..3 ":"
+            LIST_EXPR@3..21
+              WHITESPACE@3..4 " "
+              LPAREN@4..5 "("
+              NUMBER_LITERAL@5..6
+                NUMBER@5..6 "1"
+              COMMA@6..7 ","
+              NUMBER_LITERAL@7..9
+                WHITESPACE@7..8 " "
+                NUMBER@8..9 "2"
+              IMPORTANT@9..20
+                WHITESPACE@9..10 " "
+                BANG@10..11 "!"
+                IDENT@11..20 "important"
+              RPAREN@20..21 ")"
+            SEMICOLON@21..22 ";"
+    "#]],
+    );
+}
+
+#[test]
+fn important_in_bracketed_list() {
+    check(
+        "$l: [a !important b];",
+        expect![[r#"
+        SOURCE_FILE@0..21
+          VARIABLE_DECL@0..21
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "l"
+            COLON@2..3 ":"
+            BRACKETED_LIST@3..20
+              WHITESPACE@3..4 " "
+              LBRACKET@4..5 "["
+              VALUE@5..6
+                IDENT@5..6 "a"
+              IMPORTANT@6..17
+                WHITESPACE@6..7 " "
+                BANG@7..8 "!"
+                IDENT@8..17 "important"
+              VALUE@17..19
+                WHITESPACE@17..18 " "
+                IDENT@18..19 "b"
+              RBRACKET@19..20 "]"
+            SEMICOLON@20..21 ";"
+    "#]],
+    );
+}
+
+#[test]
+fn important_alone_in_bracketed_list() {
+    check(
+        "$l: [!important];",
+        expect![[r#"
+        SOURCE_FILE@0..17
+          VARIABLE_DECL@0..17
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "l"
+            COLON@2..3 ":"
+            BRACKETED_LIST@3..16
+              WHITESPACE@3..4 " "
+              LBRACKET@4..5 "["
+              IMPORTANT@5..15
+                BANG@5..6 "!"
+                IDENT@6..15 "important"
+              RBRACKET@15..16 "]"
+            SEMICOLON@16..17 ";"
+    "#]],
+    );
+}
+
+#[test]
+fn important_mid_argument() {
+    check(
+        "a { b: f(a !important b); }",
+        expect![[r#"
+        SOURCE_FILE@0..27
+          RULE_SET@0..27
+            SELECTOR_LIST@0..1
+              SELECTOR@0..1
+                SIMPLE_SELECTOR@0..1
+                  IDENT@0..1 "a"
+            BLOCK@1..27
+              WHITESPACE@1..2 " "
+              LBRACE@2..3 "{"
+              DECLARATION@3..25
+                PROPERTY@3..5
+                  WHITESPACE@3..4 " "
+                  IDENT@4..5 "b"
+                COLON@5..6 ":"
+                VALUE@6..24
+                  FUNCTION_CALL@6..24
+                    WHITESPACE@6..7 " "
+                    IDENT@7..8 "f"
+                    ARG_LIST@8..24
+                      LPAREN@8..9 "("
+                      ARG@9..23
+                        VALUE@9..10
+                          IDENT@9..10 "a"
+                        IMPORTANT@10..21
+                          WHITESPACE@10..11 " "
+                          BANG@11..12 "!"
+                          IDENT@12..21 "important"
+                        VALUE@21..23
+                          WHITESPACE@21..22 " "
+                          IDENT@22..23 "b"
+                      RPAREN@23..24 ")"
+                SEMICOLON@24..25 ";"
+              WHITESPACE@25..26 " "
+              RBRACE@26..27 "}"
+    "#]],
+    );
+}
+
+#[test]
+fn important_in_keyword_argument() {
+    check(
+        "a { @include m($a: 1 !important); }",
+        expect![[r#"
+        SOURCE_FILE@0..35
+          RULE_SET@0..35
+            SELECTOR_LIST@0..1
+              SELECTOR@0..1
+                SIMPLE_SELECTOR@0..1
+                  IDENT@0..1 "a"
+            BLOCK@1..35
+              WHITESPACE@1..2 " "
+              LBRACE@2..3 "{"
+              INCLUDE_RULE@3..33
+                WHITESPACE@3..4 " "
+                AT@4..5 "@"
+                IDENT@5..12 "include"
+                WHITESPACE@12..13 " "
+                IDENT@13..14 "m"
+                ARG_LIST@14..32
+                  LPAREN@14..15 "("
+                  ARG@15..31
+                    DOLLAR@15..16 "$"
+                    IDENT@16..17 "a"
+                    COLON@17..18 ":"
+                    NUMBER_LITERAL@18..20
+                      WHITESPACE@18..19 " "
+                      NUMBER@19..20 "1"
+                    IMPORTANT@20..31
+                      WHITESPACE@20..21 " "
+                      BANG@21..22 "!"
+                      IDENT@22..31 "important"
+                  RPAREN@31..32 ")"
+                SEMICOLON@32..33 ";"
+              WHITESPACE@33..34 " "
+              RBRACE@34..35 "}"
+    "#]],
+    );
+}
+
+#[test]
+fn default_flag_in_bracketed_list_is_an_error() {
+    check(
+        "$l: [a !default]; $b: c;",
+        expect![[r#"
+        SOURCE_FILE@0..24
+          VARIABLE_DECL@0..17
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "l"
+            COLON@2..3 ":"
+            BRACKETED_LIST@3..16
+              WHITESPACE@3..4 " "
+              LBRACKET@4..5 "["
+              VALUE@5..6
+                IDENT@5..6 "a"
+              ERROR@6..15
+                WHITESPACE@6..7 " "
+                BANG@7..8 "!"
+                IDENT@8..15 "default"
+              RBRACKET@15..16 "]"
+            SEMICOLON@16..17 ";"
+          VARIABLE_DECL@17..24
+            WHITESPACE@17..18 " "
+            DOLLAR@18..19 "$"
+            IDENT@19..20 "b"
+            COLON@20..21 ":"
+            VALUE@21..23
+              WHITESPACE@21..22 " "
+              IDENT@22..23 "c"
+            SEMICOLON@23..24 ";"
+        errors:
+          7..8: expected RBRACKET
+    "#]],
+    );
+}
 
 #[test]
 fn important_in_mixin_arg() {

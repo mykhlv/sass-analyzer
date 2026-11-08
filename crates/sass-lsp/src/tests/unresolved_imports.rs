@@ -592,6 +592,43 @@ async fn watched_globs(
         .expect("no file watcher registered")
 }
 
+/// A `.css` file an import loads is plain CSS to Dart Sass, which rejects Sass members
+/// there: it exports none, though the import still reaches the file.
+#[tokio::test]
+async fn css_file_an_import_loads_exports_no_members() {
+    let dir = TempDir::new("css_members");
+    let css = dir.write(
+        "s.css",
+        "$v: 1;\n@mixin m { a: b; }\n@function f() { @return 1; }\n",
+    );
+    let text = "@use \"s\";\n.a { b: s.$v; c: s.f(); @include s.m; }\n";
+    let (mut reader, mut writer, uri, _diags) = open_in(&dir, "main.scss", text).await;
+
+    let def = definition_of(&mut reader, &mut writer, &uri, 0, 6).await;
+    assert_eq!(def["uri"], file_uri(&css), "{def}");
+    for character in [11, 19, 35] {
+        let def = definition_of(&mut reader, &mut writer, &uri, 1, character).await;
+        assert!(
+            def.is_null() || def.as_array().is_some_and(Vec::is_empty),
+            "{character}: {def}"
+        );
+    }
+
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0", "id": 902, "method": "workspace/symbol",
+            "params": { "query": "v" }
+        }),
+    )
+    .await;
+    let symbols = recv_response(&mut reader, &mut writer, 902).await;
+    assert!(
+        symbols["result"].as_array().is_none_or(Vec::is_empty),
+        "{symbols}"
+    );
+}
+
 /// A `.css` file can be what an import loads, so its creation and deletion are
 /// watched like a stylesheet's.
 #[tokio::test]
@@ -637,6 +674,47 @@ async fn creating_a_css_file_clears_the_error() {
     )
     .await;
     let symbols = recv_response(&mut reader, &mut writer, 901).await;
+    assert!(
+        symbols["result"].as_array().is_none_or(Vec::is_empty),
+        "{symbols}"
+    );
+}
+
+/// A watcher may match `**/*.css` regardless of case, as on macOS and Windows: a change
+/// to `Foo.CSS` is a CSS file's too, and is not read as a Sass module.
+#[tokio::test]
+async fn changed_css_file_in_upper_case_is_not_indexed() {
+    let dir = TempDir::new("css_upper");
+    let text = "@use \"later\";\n";
+    let (mut reader, mut writer, uri, diags) = open_in(&dir, "main.scss", text).await;
+    assert_eq!(not_found(&diags).len(), 1, "{diags:#?}");
+    let css = file_uri(&dir.write("Foo.CSS", "$leak: 1;\n"));
+    let later = file_uri(&dir.write("_later.scss", "a { b: c; }\n"));
+    // Handled in order: once the error clears, the change to `Foo.CSS` has been too.
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "workspace/didChangeWatchedFiles",
+            "params": { "changes": [
+                { "uri": css, "type": 2 },
+                { "uri": later, "type": 1 },
+            ] }
+        }),
+    )
+    .await;
+    let diags = next_diagnostics(&mut reader, &mut writer, &uri).await;
+    assert!(diags.is_empty(), "{diags:#?}");
+
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0", "id": 903, "method": "workspace/symbol",
+            "params": { "query": "leak" }
+        }),
+    )
+    .await;
+    let symbols = recv_response(&mut reader, &mut writer, 903).await;
     assert!(
         symbols["result"].as_array().is_none_or(Vec::is_empty),
         "{symbols}"
