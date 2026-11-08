@@ -600,3 +600,24 @@ fn file_before_directory_index() {
     let r = resolver_with(&["/p/a.scss", "/p/a/_index.scss"]);
     assert_eq!(resolves(&r, "a"), file("/p/a.scss"));
 }
+
+/// A URL ending in `/` names a directory, as in Dart Sass, which appends the
+/// extension to the URL as written: `d/` is `d/.scss`, then `d/index.scss`, never
+/// `d.scss`.
+#[test]
+fn trailing_slash_names_a_directory() {
+    let r = resolver_with(&["/p/d.scss", "/p/d/index.scss", "/p/e/_index.sass"]);
+    assert_eq!(resolves(&r, "d/"), file("/p/d/index.scss"));
+    assert_eq!(resolves(&r, "./d/"), file("/p/d/index.scss"));
+    assert_eq!(resolves(&r, "d//"), file("/p/d/index.scss"));
+    assert_eq!(resolves(&r, "e/"), file("/p/e/_index.sass"));
+    assert_eq!(resolves_for_import(&r, "d/"), file("/p/d/index.scss"));
+
+    let r = resolver_with(&["/p/q.scss", "/p/x.css", "/p/w/.scss"]);
+    assert_eq!(resolves(&r, "q/"), Err(ResolveError::NotFound("q/".into())));
+    assert_eq!(
+        resolves(&r, "x.css/"),
+        Err(ResolveError::NotFound("x.css/".into()))
+    );
+    assert_eq!(resolves(&r, "w/"), file("/p/w/.scss"));
+}

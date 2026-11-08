@@ -482,3 +482,17 @@ async fn missing_css_file_is_an_error_for_use_and_forward_only() {
         "{diags:#?}"
     );
 }
+
+#[tokio::test]
+async fn url_with_trailing_slash_loads_the_directory_index() {
+    let dir = TempDir::new("trailing_slash");
+    dir.write("d.scss", "$x: 1;\n");
+    let index = dir.write("d/_index.scss", "$x: 2;\n");
+    dir.write("q.scss", "$x: 3;\n");
+    let text = "@use \"d/\" as d;\n@use \"q/\" as q;\n";
+    let (mut reader, mut writer, uri, diags) = open_in(&dir, "main.scss", text).await;
+    let ranges: Vec<_> = not_found(&diags).into_iter().map(range_of).collect();
+    assert_eq!(ranges, [(1, 5, 1, 9)], "{diags:#?}");
+    let def = definition_of(&mut reader, &mut writer, &uri, 0, 7).await;
+    assert_eq!(def["uri"], file_uri(&index), "{def}");
+}

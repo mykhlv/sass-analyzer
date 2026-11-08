@@ -222,33 +222,38 @@ impl<V: Vfs> ModuleResolver<V> {
     /// are compared case-sensitively, as Dart Sass compares them.
     fn resolve_in_dir(&self, dir: &Path, spec: &str, for_import: bool) -> Option<PathBuf> {
         let path = dir.join(spec);
-        let name = path.file_name()?.to_str()?;
+        // A URL ending in `/` names a directory: Dart Sass appends the extension to
+        // the URL as written, so `d/` is `d/.scss` and then `d/index.scss`. A
+        // `Path` drops the trailing slash, which would make it `d.scss`.
+        let (parent, name) = if spec.ends_with('/') {
+            (path.as_path(), "")
+        } else {
+            (path.parent()?, path.file_name()?.to_str()?)
+        };
 
         if let Some((stem, ext)) = name.rsplit_once('.')
             && ["scss", "sass", "css"].contains(&ext)
         {
             if for_import
                 && let Some(found) =
-                    self.existing_file(&path.with_file_name(format!("{stem}.import.{ext}")))
+                    self.existing_file(&parent.join(format!("{stem}.import.{ext}")))
             {
                 return Some(found);
             }
             return self.existing_file(&path);
         }
 
-        if for_import
-            && let Some(found) =
-                self.with_extensions(&path.with_file_name(format!("{name}.import")))
-        {
+        if for_import && let Some(found) = self.with_extensions(parent, &format!("{name}.import")) {
             return Some(found);
         }
-        if let Some(found) = self.with_extensions(&path) {
+        if let Some(found) = self.with_extensions(parent, name) {
             return Some(found);
         }
-        if for_import && let Some(found) = self.with_extensions(&path.join("index.import")) {
+        let dir = parent.join(name);
+        if for_import && let Some(found) = self.with_extensions(&dir, "index.import") {
             return Some(found);
         }
-        self.with_extensions(&path.join("index"))
+        self.with_extensions(&dir, "index")
     }
 
     /// `path` itself or its partial (`_name`).
@@ -259,12 +264,12 @@ impl<V: Vfs> ModuleResolver<V> {
             .find(|candidate| self.vfs.file_exists(candidate))
     }
 
-    /// `path` with a stylesheet extension, `.scss` before `.sass`, then with `.css`.
-    fn with_extensions(&self, path: &Path) -> Option<PathBuf> {
-        let name = path.file_name()?.to_str()?;
+    /// `name` in `dir` with a stylesheet extension, `.scss` before `.sass`, then
+    /// with `.css`.
+    fn with_extensions(&self, dir: &Path, name: &str) -> Option<PathBuf> {
         ["scss", "sass", "css"]
             .iter()
-            .find_map(|ext| self.existing_file(&path.with_file_name(format!("{name}.{ext}"))))
+            .find_map(|ext| self.existing_file(&dir.join(format!("{name}.{ext}"))))
     }
 
     fn resolve_alias(&self, spec: &str, base: &Path, for_import: bool) -> Option<PathBuf> {

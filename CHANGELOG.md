@@ -42,6 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `_reset.css`, so go to definition and document links reach it. As in Dart Sass, the
   extension is matched case-sensitively: `@import "a.CSS"` is not plain CSS, and
   `@use "a.SCSS"` does not load `a.scss`
+- LSP: a URL ending in `/`, as `@use "theme/" as t`, loads the directory's `index`
+  file, as in Dart Sass; it loaded `theme.scss` beside the directory, and reported
+  nothing when only that existed
 - LSP: a file that appears, created on disk or opened in the editor, re-checks the open
   files whose imports did not resolve, and deleting a file re-resolves the imports of
   the open files that use it. A new file was not seen by its importers until they were
