@@ -86,7 +86,7 @@ pub(crate) struct IncrementalEdit {
 ///
 /// Two maps hold per-file state at different stages of the pipeline:
 ///
-/// - **`source_texts`** — tracks which URIs are open in the editor. Updated
+/// - **`source_texts`** — the latest version and text of each open URI. Updated
 ///   synchronously in `did_open`/`did_change`/`did_close`. Used by
 ///   `did_change_watched_files` to skip external changes for open files.
 ///
@@ -99,9 +99,10 @@ struct Backend {
     client: Client,
     /// Parsed state per file, updated asynchronously by the worker after debounce.
     documents: Arc<DashMap<Uri, DocumentState>>,
-    /// Tracks open files. Updated synchronously in `did_open`/`did_change`/`did_close`.
-    /// Used by `did_change_watched_files` to skip external changes for open files.
-    source_texts: Arc<DashMap<Uri, String>>,
+    /// Latest version and text of each open file, updated synchronously in
+    /// `did_open`/`did_change`/`did_close`. Used by `did_change_watched_files` to skip
+    /// external changes for open files, and to re-parse open files on a settings change.
+    source_texts: Arc<DashMap<Uri, (i32, String)>>,
     module_graph: Arc<workspace::ModuleGraph>,
     runtime_config: Arc<config::RuntimeConfig>,
     task_tx: mpsc::UnboundedSender<Task>,
@@ -394,7 +395,8 @@ impl LanguageServer for Backend {
             );
             return;
         }
-        self.source_texts.insert(doc.uri.clone(), doc.text.clone());
+        self.source_texts
+            .insert(doc.uri.clone(), (doc.version, doc.text.clone()));
 
         // Eagerly parse and insert into `documents` so that goto-definition,
         // hover, etc. work immediately — before the debounced worker fires.
@@ -458,7 +460,8 @@ impl LanguageServer for Backend {
             return;
         }
 
-        self.source_texts.insert(uri.clone(), text.clone());
+        self.source_texts
+            .insert(uri.clone(), (version, text.clone()));
         if self
             .task_tx
             .send(Task::Parse {
@@ -502,12 +505,11 @@ impl LanguageServer for Backend {
             .set_allowed_roots(compute_allowed_roots(&workspace_folders, &new_config));
 
         // Re-parse open files so their imports re-resolve with the new resolver.
-        // The version must match what is already stored: the worker drops a parse
-        // whose version is older than the current DocumentState.
+        // The text goes with its own version: `documents` may still hold an older
+        // one, whose version would label this text's diagnostics wrongly.
         for entry in self.source_texts.iter() {
             let uri = entry.key().clone();
-            let text = entry.value().clone();
-            let version = self.documents.get(&uri).map_or(0, |d| d.version);
+            let (version, text) = entry.value().clone();
             if self
                 .task_tx
                 .send(Task::Parse {

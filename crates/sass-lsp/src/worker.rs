@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use dashmap::DashMap;
+use dashmap::mapref::entry::Entry;
 use sass_parser::line_index::LineIndex;
 use sass_parser::syntax::{GreenNode, SyntaxNode};
 use sass_parser::text_range::TextRange;
@@ -107,6 +108,112 @@ fn semantic_to_lsp(
         .collect()
 }
 
+/// Parse `text` as `version` of `uri`, index it and store it as the document's
+/// state. Returns the diagnostics to publish, or `None` when the parse failed or
+/// a newer version of the document is already stored.
+fn apply_parse(
+    documents: &DashMap<Uri, DocumentState>,
+    module_graph: &workspace::ModuleGraph,
+    uri: &Uri,
+    version: i32,
+    text: String,
+    incremental: Option<IncrementalEdit>,
+) -> Option<Vec<Diagnostic>> {
+    if documents.get(uri).is_some_and(|s| s.version > version) {
+        return None;
+    }
+    let (green, errors) = try_incremental_or_full(incremental, &text, uri)?;
+    let line_index = LineIndex::new(&text);
+    let mut all_diagnostics = errors_to_diagnostics(&errors, &line_index, &text);
+    let file_symbols = {
+        let root = SyntaxNode::new_root(green.clone());
+        Arc::new(symbols::collect_symbols(&root))
+    };
+
+    module_graph.index_file(
+        uri,
+        green.clone(),
+        file_symbols.clone(),
+        line_index.clone(),
+        text.clone(),
+    );
+
+    let semantic =
+        diagnostics::check_file(uri, &file_symbols, module_graph, &green, !errors.is_empty());
+    all_diagnostics.extend(semantic_to_lsp(semantic, &line_index, &text));
+
+    let state = DocumentState {
+        version,
+        text,
+        green,
+        errors,
+        line_index,
+        symbols: file_symbols,
+    };
+    // Re-checked under the entry guard: only the worker indexes, but `did_open`
+    // stores a document state of its own.
+    let entry = documents.entry(uri.clone());
+    if let Entry::Occupied(stored) = &entry
+        && stored.get().version > version
+    {
+        return None;
+    }
+    entry.insert(state);
+    Some(all_diagnostics)
+}
+
+/// Index the on-disk text of `uri` after a file-watcher event. Returns whether
+/// the module graph changed.
+///
+/// The handler skips open files, but the file may have been opened since: the
+/// editor's text then wins over the disk's.
+fn apply_external_change(
+    documents: &DashMap<Uri, DocumentState>,
+    module_graph: &workspace::ModuleGraph,
+    runtime_config: &RuntimeConfig,
+    uri: &Uri,
+    path: &Path,
+) -> bool {
+    if documents.contains_key(uri) {
+        return false;
+    }
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::warn!("failed to read {}: {e}", path.display());
+            return false;
+        }
+    };
+    if text.len() > runtime_config.max_file_size() {
+        return false;
+    }
+    let Some((green, _errors)) = parse_document(&text, is_sass_file(uri)) else {
+        return false;
+    };
+    let line_index = LineIndex::new(&text);
+    let file_symbols = {
+        let root = SyntaxNode::new_root(green.clone());
+        Arc::new(symbols::collect_symbols(&root))
+    };
+    module_graph.index_file(uri, green, file_symbols, line_index, text);
+    true
+}
+
+/// Drop `uri` from the module graph after a file-watcher delete event, unless it
+/// has been opened since the handler checked. Returns whether the module graph
+/// changed.
+fn apply_external_delete(
+    documents: &DashMap<Uri, DocumentState>,
+    module_graph: &workspace::ModuleGraph,
+    uri: &Uri,
+) -> bool {
+    if documents.contains_key(uri) {
+        return false;
+    }
+    module_graph.remove_file(uri);
+    true
+}
+
 pub(crate) async fn run_worker(
     mut rx: mpsc::UnboundedReceiver<Task>,
     client: Client,
@@ -147,48 +254,23 @@ pub(crate) async fn run_worker(
                         client.publish_diagnostics(uri, vec![], None).await;
                     }
                     Task::ExternalChange { uri, path } => {
-                        let text = match std::fs::read_to_string(&path) {
-                            Ok(t) => t,
-                            Err(e) => {
-                                tracing::warn!(
-                                    "failed to read {}: {e}",
-                                    path.display(),
-                                );
-                                continue;
-                            }
-                        };
-                        if text.len() > runtime_config.max_file_size() {
-                            continue;
+                        if apply_external_change(
+                            &documents, &module_graph, &runtime_config, &uri, &path,
+                        ) {
+                            // Re-publish diagnostics for open files that import
+                            // the changed file, since their cross-file references
+                            // may now resolve differently.
+                            refresh_dependents(
+                                &module_graph, &documents, &client, &uri,
+                            ).await;
                         }
-                        let Some((green, _errors)) = parse_document(&text, is_sass_file(&uri)) else {
-                            continue;
-                        };
-                        let line_index = LineIndex::new(&text);
-                        let file_symbols = {
-                            let root = SyntaxNode::new_root(green.clone());
-                            Arc::new(symbols::collect_symbols(&root))
-                        };
-
-                        module_graph.index_file(
-                            &uri,
-                            green,
-                            file_symbols,
-                            line_index,
-                            text,
-                        );
-
-                        // Re-publish diagnostics for open files that import
-                        // the changed file, since their cross-file references
-                        // may now resolve differently.
-                        refresh_dependents(
-                            &module_graph, &documents, &client, &uri,
-                        ).await;
                     }
                     Task::ExternalDelete { uri } => {
-                        module_graph.remove_file(&uri);
-                        refresh_dependents(
-                            &module_graph, &documents, &client, &uri,
-                        ).await;
+                        if apply_external_delete(&documents, &module_graph, &uri) {
+                            refresh_dependents(
+                                &module_graph, &documents, &client, &uri,
+                            ).await;
+                        }
                     }
                     Task::CheckWorkspace { root } => {
                         check_workspace(
@@ -200,53 +282,11 @@ pub(crate) async fn run_worker(
             }
             () = &mut sleep, if has_pending => {
                 for (uri, (version, text, incremental)) in pending.drain() {
-                    let Some((green, errors)) = try_incremental_or_full(
-                        incremental, &text, &uri,
-                    ) else {
-                        continue;
-                    };
-                    let line_index = LineIndex::new(&text);
-                    let mut all_diagnostics =
-                        errors_to_diagnostics(&errors, &line_index, &text);
-                    let file_symbols = {
-                        let root = SyntaxNode::new_root(green.clone());
-                        Arc::new(symbols::collect_symbols(&root))
-                    };
-
-                    let is_current = documents
-                        .get(&uri)
-                        .is_none_or(|state| state.version <= version);
-
-                    module_graph.index_file(
-                        &uri,
-                        green.clone(),
-                        file_symbols.clone(),
-                        line_index.clone(),
-                        text.clone(),
-                    );
-
-                    let semantic = diagnostics::check_file(
-                        &uri, &file_symbols, &module_graph, &green,
-                        !errors.is_empty(),
-                    );
-                    all_diagnostics.extend(semantic_to_lsp(
-                        semantic, &line_index, &text,
-                    ));
-
-                    if is_current {
-                        documents.insert(
-                            uri.clone(),
-                            DocumentState {
-                                version,
-                                text,
-                                green,
-                                errors,
-                                line_index,
-                                symbols: file_symbols,
-                            },
-                        );
+                    if let Some(diagnostics) = apply_parse(
+                        &documents, &module_graph, &uri, version, text, incremental,
+                    ) {
                         client
-                            .publish_diagnostics(uri, all_diagnostics, Some(version))
+                            .publish_diagnostics(uri, diagnostics, Some(version))
                             .await;
                     }
                 }
@@ -606,6 +646,139 @@ mod tests {
         assert_eq!(diags.len(), 2);
         assert_eq!(diags[0].message, "error one");
         assert_eq!(diags[1].message, "error two");
+    }
+
+    // ── apply_parse ─────────────────────────────────────────────────
+
+    fn defines(graph: &workspace::ModuleGraph, uri: &Uri, name: &str) -> bool {
+        graph
+            .get_symbols(uri)
+            .is_some_and(|s| s.definitions.iter().any(|d| d.name == name))
+    }
+
+    #[test]
+    fn stale_parse_changes_no_state() {
+        let documents = DashMap::new();
+        let graph = workspace::ModuleGraph::new(Arc::new(RuntimeConfig::default()));
+        let uri: Uri = "file:///a.scss".parse().unwrap();
+
+        let published = apply_parse(&documents, &graph, &uri, 5, "$new: 1;\n".to_owned(), None);
+        assert!(published.is_some());
+
+        let published = apply_parse(&documents, &graph, &uri, 3, "$old: 1;\n".to_owned(), None);
+        assert!(published.is_none(), "a stale parse must not be published");
+        assert_eq!(documents.get(&uri).unwrap().text, "$new: 1;\n");
+        assert!(
+            defines(&graph, &uri, "new"),
+            "the module graph lost the newer version"
+        );
+        assert!(
+            !defines(&graph, &uri, "old"),
+            "the module graph indexed a stale parse"
+        );
+    }
+
+    #[test]
+    fn same_version_parse_is_applied() {
+        let documents = DashMap::new();
+        let graph = workspace::ModuleGraph::new(Arc::new(RuntimeConfig::default()));
+        let uri: Uri = "file:///a.scss".parse().unwrap();
+
+        apply_parse(&documents, &graph, &uri, 2, "$a: 1;\n".to_owned(), None);
+        let published = apply_parse(&documents, &graph, &uri, 2, "$b: 1;\n".to_owned(), None);
+        assert!(published.is_some());
+        assert_eq!(documents.get(&uri).unwrap().text, "$b: 1;\n");
+        assert!(defines(&graph, &uri, "b"));
+    }
+
+    // ── external changes ────────────────────────────────────────────
+
+    #[test]
+    fn external_change_of_an_open_document_keeps_the_editor_text() {
+        let dir = std::env::temp_dir().join(format!("sass_ext_open_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("a.scss");
+        std::fs::write(&path, "$disk: 1;\n").unwrap();
+        let uri = workspace::path_to_uri(&path);
+        let documents = DashMap::new();
+        let config = RuntimeConfig::default();
+        let graph = workspace::ModuleGraph::new(Arc::new(RuntimeConfig::default()));
+
+        // The watcher event was checked against the open files before the file
+        // was opened, and reaches the worker after the editor's text was indexed.
+        apply_parse(
+            &documents,
+            &graph,
+            &uri,
+            1,
+            "$editor: 1;\n".to_owned(),
+            None,
+        );
+        let changed = apply_external_change(&documents, &graph, &config, &uri, &path);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(!changed);
+        assert!(
+            defines(&graph, &uri, "editor"),
+            "disk text replaced the editor's"
+        );
+    }
+
+    #[test]
+    fn external_change_of_a_closed_file_is_indexed() {
+        let dir = std::env::temp_dir().join(format!("sass_ext_closed_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("a.scss");
+        std::fs::write(&path, "$disk: 1;\n").unwrap();
+        let uri = workspace::path_to_uri(&path);
+        let graph = workspace::ModuleGraph::new(Arc::new(RuntimeConfig::default()));
+
+        let changed = apply_external_change(
+            &DashMap::new(),
+            &graph,
+            &RuntimeConfig::default(),
+            &uri,
+            &path,
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(changed);
+        assert!(defines(&graph, &uri, "disk"));
+    }
+
+    #[test]
+    fn external_delete_of_an_open_document_keeps_it_indexed() {
+        let documents = DashMap::new();
+        let graph = workspace::ModuleGraph::new(Arc::new(RuntimeConfig::default()));
+        let uri: Uri = "file:///a.scss".parse().unwrap();
+        apply_parse(
+            &documents,
+            &graph,
+            &uri,
+            1,
+            "$editor: 1;\n".to_owned(),
+            None,
+        );
+
+        assert!(!apply_external_delete(&documents, &graph, &uri));
+        assert!(defines(&graph, &uri, "editor"));
+    }
+
+    #[test]
+    fn external_delete_of_a_closed_file_drops_it() {
+        let graph = workspace::ModuleGraph::new(Arc::new(RuntimeConfig::default()));
+        let uri: Uri = "file:///a.scss".parse().unwrap();
+        apply_parse(
+            &DashMap::new(),
+            &graph,
+            &uri,
+            1,
+            "$a: 1;\n".to_owned(),
+            None,
+        );
+
+        assert!(apply_external_delete(&DashMap::new(), &graph, &uri));
+        assert!(!defines(&graph, &uri, "a"));
     }
 
     // ── try_incremental_or_full ─────────────────────────────────────

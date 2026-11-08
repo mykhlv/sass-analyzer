@@ -5,6 +5,18 @@ All notable changes to sass-analyzer will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Fixed
+- LSP: an open document's state, its diagnostics and the cross-file index now always come
+  from the same version of its text. A parse of an older version than the one stored no
+  longer updates the cross-file index; after a settings change, the re-parse of an edit
+  still waiting to be parsed publishes its diagnostics under its own version, not the
+  previous one's, and is no longer dropped when the edit was parsed meanwhile; a file
+  watcher event for a file opened meanwhile no longer replaces the editor's text with the
+  disk's; and a tree re-parsed after being evicted from the cache is no longer stored over
+  a newer version of the file
+
 ## 0.4.0 — 2026-11-08
 
 ### Fixed
