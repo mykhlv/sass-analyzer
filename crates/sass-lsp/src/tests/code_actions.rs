@@ -180,12 +180,20 @@ async fn sass_extract_variable_through_the_server() {
     assert_parses_as_sass(&result);
 }
 
-/// Assert that every line break in `text` is `\r\n`.
-fn assert_only_crlf(text: &str) {
+/// The line breaks other than `\n` that the code actions keep: `\r\n` and a lone `\r`.
+const LINE_BREAKS: [&str; 2] = ["\r\n", "\r"];
+
+/// Assert that every line break in `text` is `eol`.
+fn assert_only_line_break(text: &str, eol: &str) {
     let lf = text.matches('\n').count();
     let crlf = text.matches("\r\n").count();
     let cr = text.matches('\r').count();
-    assert!(lf == crlf && cr == crlf, "mixed line endings in {text:?}");
+    let ok = if eol == "\r\n" {
+        lf == crlf && cr == crlf
+    } else {
+        lf == 0
+    };
+    assert!(ok, "line breaks other than {eol:?} in {text:?}");
 }
 
 /// The edits of the `title_prefix` action on `source` (a file named `name` in a
@@ -243,177 +251,196 @@ fn undefined_primary(range: &Value) -> Value {
     }])
 }
 
-/// Auto-import writes the `@use` with the document's own line ending, both after
-/// an existing import and at the top of a file with none.
+/// Auto-import writes the `@use` with the document's own line ending, `\r\n` or a lone
+/// `\r`, both after an existing import and at the top of a file with none.
 #[tokio::test]
-async fn auto_import_keeps_crlf_line_endings() {
+async fn auto_import_keeps_crlf_and_cr_line_endings() {
     let cases = [
         (
             "after_use.scss",
-            "@use \"sass:math\";\r\n.a {\r\n  color: $primary;\r\n}\r\n",
+            "@use \"sass:math\";\n.a {\n  color: $primary;\n}\n",
             "_colors.scss",
-            "$primary: red;\r\n",
+            "$primary: red;\n",
             2,
         ),
         (
             "no_use.scss",
-            ".a {\r\n  color: $primary;\r\n}\r\n",
+            ".a {\n  color: $primary;\n}\n",
             "_colors.scss",
-            "$primary: red;\r\n",
+            "$primary: red;\n",
             1,
         ),
         (
             "after_use.sass",
-            "@use \"sass:math\"\r\n.a\r\n  color: $primary\r\n",
+            "@use \"sass:math\"\n.a\n  color: $primary\n",
             "_colors.sass",
-            "$primary: red\r\n",
+            "$primary: red\n",
             2,
         ),
+        (
+            "no_use.sass",
+            ".a\n  color: $primary\n",
+            "_colors.sass",
+            "$primary: red\n",
+            1,
+        ),
     ];
-    let mut results = String::new();
-    for (name, source, other, other_text, line) in cases {
-        let range = serde_json::json!({
-            "start": { "line": line, "character": 9 },
-            "end": { "line": line, "character": 17 }
-        });
-        let result = apply_action_on_disk(
-            name,
-            source,
-            &[(other, other_text)],
-            &range,
-            &undefined_primary(&range),
-            "Add `@use",
-        )
-        .await;
-        assert_only_crlf(&result);
-        let _ = writeln!(results, "{name}:\n{}", result.replace("\r\n", "\n"));
+    for eol in LINE_BREAKS {
+        let mut results = String::new();
+        for (name, source, other, other_text, line) in cases {
+            let range = serde_json::json!({
+                "start": { "line": line, "character": 9 },
+                "end": { "line": line, "character": 17 }
+            });
+            let other_text = other_text.replace('\n', eol);
+            let result = apply_action_on_disk(
+                name,
+                &source.replace('\n', eol),
+                &[(other, &other_text)],
+                &range,
+                &undefined_primary(&range),
+                "Add `@use",
+            )
+            .await;
+            assert_only_line_break(&result, eol);
+            let _ = writeln!(results, "{name}:\n{}", result.replace(eol, "\n"));
+        }
+        expect![[r#"
+            after_use.scss:
+            @use "sass:math";
+            @use "colors";
+            .a {
+              color: colors.$primary;
+            }
+
+            no_use.scss:
+            @use "colors";
+            .a {
+              color: colors.$primary;
+            }
+
+            after_use.sass:
+            @use "sass:math"
+            @use "colors"
+            .a
+              color: colors.$primary
+
+            no_use.sass:
+            @use "colors"
+            .a
+              color: colors.$primary
+
+        "#]]
+        .assert_eq(&results);
     }
-    expect![[r#"
-        after_use.scss:
-        @use "sass:math";
-        @use "colors";
-        .a {
-          color: colors.$primary;
-        }
-
-        no_use.scss:
-        @use "colors";
-        .a {
-          color: colors.$primary;
-        }
-
-        after_use.sass:
-        @use "sass:math"
-        @use "colors"
-        .a
-          color: colors.$primary
-
-    "#]]
-    .assert_eq(&results);
 }
 
 /// Extract to variable writes the declaration with the document's own line
-/// ending, in both syntaxes.
+/// ending, `\r\n` or a lone `\r`, in both syntaxes.
 #[tokio::test]
-async fn extract_variable_keeps_crlf_line_endings() {
+async fn extract_variable_keeps_crlf_and_cr_line_endings() {
     let range = serde_json::json!({
         "start": { "line": 2, "character": 12 },
         "end": { "line": 2, "character": 19 }
     });
-    let mut results = String::new();
-    for (name, source) in [
-        (
-            "var.scss",
-            ".card {\r\n  .title {\r\n    margin: 4px * 2;\r\n  }\r\n}\r\n",
-        ),
-        ("var.sass", ".card\r\n  .title\r\n    margin: 4px * 2\r\n"),
-    ] {
-        let result = apply_action_on_disk(
-            name,
-            source,
-            &[],
-            &range,
-            &serde_json::json!([]),
-            "Extract to variable",
-        )
-        .await;
-        assert_only_crlf(&result);
-        let _ = writeln!(results, "{name}:\n{}", result.replace("\r\n", "\n"));
-    }
-    expect![[r#"
-        var.scss:
-        .card {
-          $new-variable: 4px * 2;
-          .title {
-            margin: $new-variable;
-          }
+    for eol in LINE_BREAKS {
+        let mut results = String::new();
+        for (name, source) in [
+            (
+                "var.scss",
+                ".card {\n  .title {\n    margin: 4px * 2;\n  }\n}\n",
+            ),
+            ("var.sass", ".card\n  .title\n    margin: 4px * 2\n"),
+        ] {
+            let result = apply_action_on_disk(
+                name,
+                &source.replace('\n', eol),
+                &[],
+                &range,
+                &serde_json::json!([]),
+                "Extract to variable",
+            )
+            .await;
+            assert_only_line_break(&result, eol);
+            let _ = writeln!(results, "{name}:\n{}", result.replace(eol, "\n"));
         }
+        expect![[r#"
+            var.scss:
+            .card {
+              $new-variable: 4px * 2;
+              .title {
+                margin: $new-variable;
+              }
+            }
 
-        var.sass:
-        .card
-          $new-variable: 4px * 2
-          .title
-            margin: $new-variable
+            var.sass:
+            .card
+              $new-variable: 4px * 2
+              .title
+                margin: $new-variable
 
-    "#]]
-    .assert_eq(&results);
+        "#]]
+        .assert_eq(&results);
+    }
 }
 
 /// Extract to mixin writes the mixin, its body lines and the blank line after it
-/// with the document's own line ending, in both syntaxes.
+/// with the document's own line ending, `\r\n` or a lone `\r`, in both syntaxes.
 #[tokio::test]
-async fn extract_mixin_keeps_crlf_line_endings() {
-    let mut results = String::new();
-    for (name, source, end) in [
-        (
-            "mixin.scss",
-            ".card {\r\n  .title {\r\n    margin: 0;\r\n    color: red;\r\n  }\r\n}\r\n",
-            15,
-        ),
-        (
-            "mixin.sass",
-            ".card\r\n  .title\r\n    margin: 0\r\n    color: red\r\n",
-            14,
-        ),
-    ] {
-        let range = serde_json::json!({
-            "start": { "line": 2, "character": 4 },
-            "end": { "line": 3, "character": end }
-        });
-        let result = apply_action_on_disk(
-            name,
-            source,
-            &[],
-            &range,
-            &serde_json::json!([]),
-            "Extract to mixin",
-        )
-        .await;
-        assert_only_crlf(&result);
-        let _ = writeln!(results, "{name}:\n{}", result.replace("\r\n", "\n"));
-    }
-    expect![[r#"
-        mixin.scss:
-        .card {
-          @mixin new-mixin {
-            margin: 0;
-            color: red;
-          }
-
-          .title {
-            @include new-mixin;
-          }
+async fn extract_mixin_keeps_crlf_and_cr_line_endings() {
+    for eol in LINE_BREAKS {
+        let mut results = String::new();
+        for (name, source, end) in [
+            (
+                "mixin.scss",
+                ".card {\n  .title {\n    margin: 0;\n    color: red;\n  }\n}\n",
+                15,
+            ),
+            (
+                "mixin.sass",
+                ".card\n  .title\n    margin: 0\n    color: red\n",
+                14,
+            ),
+        ] {
+            let range = serde_json::json!({
+                "start": { "line": 2, "character": 4 },
+                "end": { "line": 3, "character": end }
+            });
+            let result = apply_action_on_disk(
+                name,
+                &source.replace('\n', eol),
+                &[],
+                &range,
+                &serde_json::json!([]),
+                "Extract to mixin",
+            )
+            .await;
+            assert_only_line_break(&result, eol);
+            let _ = writeln!(results, "{name}:\n{}", result.replace(eol, "\n"));
         }
+        expect![[r#"
+            mixin.scss:
+            .card {
+              @mixin new-mixin {
+                margin: 0;
+                color: red;
+              }
 
-        mixin.sass:
-        .card
-          @mixin new-mixin
-            margin: 0
-            color: red
+              .title {
+                @include new-mixin;
+              }
+            }
 
-          .title
-            @include new-mixin
+            mixin.sass:
+            .card
+              @mixin new-mixin
+                margin: 0
+                color: red
 
-    "#]]
-    .assert_eq(&results);
+              .title
+                @include new-mixin
+
+        "#]]
+        .assert_eq(&results);
+    }
 }
