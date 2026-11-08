@@ -26,7 +26,7 @@ if want bootstrap; then
     else
         echo "downloading bootstrap $BOOTSTRAP_VERSION..."
         TMPDIR=$(mktemp -d)
-        curl -sL "https://github.com/twbs/bootstrap/archive/refs/tags/${BOOTSTRAP_VERSION}.tar.gz" \
+        curl -fsSL --retry 5 --retry-all-errors "https://github.com/twbs/bootstrap/archive/refs/tags/${BOOTSTRAP_VERSION}.tar.gz" \
             | tar xz -C "$TMPDIR"
         mkdir -p "$BOOTSTRAP_DIR"
         mv "$TMPDIR/bootstrap-${BOOTSTRAP_VERSION#v}/scss" "$BOOTSTRAP_DIR/scss"
@@ -45,7 +45,7 @@ if want foundation; then
     else
         echo "downloading foundation $FOUNDATION_VERSION..."
         TMPDIR=$(mktemp -d)
-        curl -sL "https://github.com/foundation/yeti/archive/refs/tags/${FOUNDATION_VERSION}.tar.gz" \
+        curl -fsSL --retry 5 --retry-all-errors "https://github.com/foundation/yeti/archive/refs/tags/${FOUNDATION_VERSION}.tar.gz" \
             | tar xz -C "$TMPDIR"
         mkdir -p "$FOUNDATION_DIR"
         mv "$TMPDIR/yeti-${FOUNDATION_VERSION#v}/scss" "$FOUNDATION_DIR/scss"
@@ -64,7 +64,7 @@ if want primer; then
     else
         echo "downloading primer $PRIMER_VERSION..."
         TMPDIR=$(mktemp -d)
-        curl -sL "https://github.com/primer/css/archive/refs/tags/${PRIMER_VERSION}.tar.gz" \
+        curl -fsSL --retry 5 --retry-all-errors "https://github.com/primer/css/archive/refs/tags/${PRIMER_VERSION}.tar.gz" \
             | tar xz -C "$TMPDIR"
         mkdir -p "$PRIMER_DIR"
         mv "$TMPDIR/css-${PRIMER_VERSION#v}/src" "$PRIMER_DIR/src"
@@ -83,7 +83,7 @@ if want bulma; then
     else
         echo "downloading bulma $BULMA_VERSION..."
         TMPDIR=$(mktemp -d)
-        curl -sL "https://github.com/jgthms/bulma/archive/refs/tags/${BULMA_VERSION}.tar.gz" \
+        curl -fsSL --retry 5 --retry-all-errors "https://github.com/jgthms/bulma/archive/refs/tags/${BULMA_VERSION}.tar.gz" \
             | tar xz -C "$TMPDIR"
         mkdir -p "$BULMA_DIR"
         mv "$TMPDIR/bulma-${BULMA_VERSION}/sass" "$BULMA_DIR/sass"
@@ -102,7 +102,7 @@ if want angular-material; then
     else
         echo "downloading angular material $ANGULAR_VERSION..."
         TMPDIR=$(mktemp -d)
-        curl -sL "https://github.com/angular/components/archive/refs/tags/${ANGULAR_VERSION}.tar.gz" \
+        curl -fsSL --retry 5 --retry-all-errors "https://github.com/angular/components/archive/refs/tags/${ANGULAR_VERSION}.tar.gz" \
             | tar xz -C "$TMPDIR"
         mkdir -p "$ANGULAR_DIR/scss"
         # Extract only .scss files from src/material/
@@ -128,7 +128,7 @@ if want bulma-sass; then
     else
         echo "downloading bulma $BULMA_SASS_VERSION (indented Sass)..."
         TMPDIR=$(mktemp -d)
-        curl -sL "https://github.com/jgthms/bulma/archive/refs/tags/${BULMA_SASS_VERSION}.tar.gz" \
+        curl -fsSL --retry 5 --retry-all-errors "https://github.com/jgthms/bulma/archive/refs/tags/${BULMA_SASS_VERSION}.tar.gz" \
             | tar xz -C "$TMPDIR"
         mkdir -p "$BULMA_SASS_DIR"
         mv "$TMPDIR/bulma-${BULMA_SASS_VERSION}/sass" "$BULMA_SASS_DIR/sass"
@@ -147,7 +147,7 @@ if want vuetify; then
     else
         echo "downloading vuetify (commit ${VUETIFY_COMMIT:0:8})..."
         TMPDIR=$(mktemp -d)
-        curl -sL "https://github.com/vuetifyjs/vuetify/archive/${VUETIFY_COMMIT}.tar.gz" \
+        curl -fsSL --retry 5 --retry-all-errors "https://github.com/vuetifyjs/vuetify/archive/${VUETIFY_COMMIT}.tar.gz" \
             | tar xz -C "$TMPDIR"
         mkdir -p "$VUETIFY_DIR"
         mv "$TMPDIR/vuetify-${VUETIFY_COMMIT}/packages/vuetify/src" "$VUETIFY_DIR/src"
@@ -166,7 +166,7 @@ if want quasar; then
     else
         echo "downloading quasar (commit ${QUASAR_COMMIT:0:8})..."
         TMPDIR=$(mktemp -d)
-        curl -sL "https://github.com/quasarframework/quasar/archive/${QUASAR_COMMIT}.tar.gz" \
+        curl -fsSL --retry 5 --retry-all-errors "https://github.com/quasarframework/quasar/archive/${QUASAR_COMMIT}.tar.gz" \
             | tar xz -C "$TMPDIR"
         mkdir -p "$QUASAR_DIR"
         mv "$TMPDIR/quasar-${QUASAR_COMMIT}/ui/src" "$QUASAR_DIR/src"
@@ -185,7 +185,7 @@ if want sass-spec; then
     else
         echo "downloading sass-spec (commit ${SASS_SPEC_COMMIT:0:8})..."
         TMPDIR=$(mktemp -d)
-        curl -sL "https://github.com/sass/sass-spec/archive/${SASS_SPEC_COMMIT}.tar.gz" \
+        curl -fsSL --retry 5 --retry-all-errors "https://github.com/sass/sass-spec/archive/${SASS_SPEC_COMMIT}.tar.gz" \
             | tar xz -C "$TMPDIR"
         mkdir -p "$SASS_SPEC_DIR"
         mv "$TMPDIR/sass-spec-${SASS_SPEC_COMMIT}/spec" "$SASS_SPEC_DIR/spec"
