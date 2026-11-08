@@ -8,7 +8,7 @@ A hand-written recursive descent SCSS/Sass parser and language server in Rust, b
 
 ## Requirements
 
-- VS Code 1.110 or newer
+- VS Code 1.82 or newer
 
 ## Why
 
