@@ -764,7 +764,7 @@ dependencies = [
 
 [[package]]
 name = "sass-cli"
-version = "0.3.4"
+version = "0.4.0"
 dependencies = [
  "clap",
  "miette",
@@ -773,7 +773,7 @@ dependencies = [
 
 [[package]]
 name = "sass-lsp"
-version = "0.3.4"
+version = "0.4.0"
 dependencies = [
  "dashmap 6.2.1",
  "expect-test",
@@ -788,7 +788,7 @@ dependencies = [
 
 [[package]]
 name = "sass-parser"
-version = "0.3.4"
+version = "0.4.0"
 dependencies = [
  "countme",
  "dhat",
@@ -1205,7 +1205,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.3.4"
+version = "0.4.0"
 dependencies = [
  "proc-macro2",
  "quote",
