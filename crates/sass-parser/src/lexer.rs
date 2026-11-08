@@ -1,5 +1,28 @@
 use crate::syntax_kind::SyntaxKind;
 
+mod indented;
+
+pub use indented::IndentedLexer;
+
+/// A stream of tokens ending in `EOF`, as [`Lexer`] and [`IndentedLexer`] produce.
+pub trait TokenSource<'src> {
+    fn next_token(&mut self) -> (SyntaxKind, &'src str);
+}
+
+impl<'src> TokenSource<'src> for Lexer<'src> {
+    #[inline]
+    fn next_token(&mut self) -> (SyntaxKind, &'src str) {
+        Lexer::next_token(self)
+    }
+}
+
+impl<'src> TokenSource<'src> for IndentedLexer<'src> {
+    #[inline]
+    fn next_token(&mut self) -> (SyntaxKind, &'src str) {
+        IndentedLexer::next_token(self)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LexContext {
     Interpolation { brace_depth: u32 },
@@ -7,11 +30,47 @@ enum LexContext {
     Url { paren_depth: u32 },
 }
 
+/// The prelude of a document rule, where Dart Sass reads more functions than `url(` with
+/// an unquoted argument as URL contents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DocumentPrelude {
+    /// `@document` in any case, vendor-prefixed or not, but for the exact `@-moz-document`:
+    /// `url-prefix(`.
+    Document,
+    /// `@-moz-document`: `url-prefix(` and `domain(`.
+    MozDocument,
+}
+
+impl DocumentPrelude {
+    fn of_rule(name: &str) -> Option<Self> {
+        if name == "-moz-document" {
+            return Some(Self::MozDocument);
+        }
+        let unprefixed = name
+            .strip_prefix('-')
+            .and_then(|rest| rest.split_once('-'))
+            .map_or(name, |(_, rest)| rest);
+        unprefixed
+            .eq_ignore_ascii_case("document")
+            .then_some(Self::Document)
+    }
+
+    fn takes_url(self, function: &str) -> bool {
+        function == "url-prefix" || (self == Self::MozDocument && function == "domain")
+    }
+}
+
 pub struct Lexer<'src> {
     input: &'src str,
     pos: usize,
     context_stack: Vec<LexContext>,
     pending_url_context: bool,
+    /// The last token was an `@`, so an identifier now names an at-rule.
+    after_at: bool,
+    document_prelude: Option<DocumentPrelude>,
+    /// A string left unclosed has just ended the strings, interpolations and `url(` it
+    /// was nested in; see [`Lexer::take_unwound`].
+    unwound: bool,
 }
 
 impl<'src> Lexer<'src> {
@@ -21,6 +80,9 @@ impl<'src> Lexer<'src> {
             pos: 0,
             context_stack: Vec::new(),
             pending_url_context: false,
+            after_at: false,
+            document_prelude: None,
+            unwound: false,
         }
     }
 
@@ -53,6 +115,7 @@ impl<'src> Lexer<'src> {
 
         let start = self.pos;
         let b = self.bump();
+        let after_at = std::mem::take(&mut self.after_at);
 
         let kind = match b {
             // ── Whitespace ─────────────────────────────────────────
@@ -64,7 +127,7 @@ impl<'src> Lexer<'src> {
             // ── Comments & slash ───────────────────────────────────
             b'/' => match self.peek() {
                 Some(b'/') => {
-                    self.eat_while(|b| b != b'\n');
+                    self.eat_while(|b| !matches!(b, b'\n' | b'\r' | b'\x0C'));
                     SyntaxKind::SINGLE_LINE_COMMENT
                 }
                 Some(b'*') => {
@@ -81,6 +144,9 @@ impl<'src> Lexer<'src> {
             // ── Identifiers ────────────────────────────────────────
             b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
                 self.lex_ident();
+                if after_at {
+                    self.document_prelude = DocumentPrelude::of_rule(&self.input[start..self.pos]);
+                }
                 if self.is_unicode_range_start(start) {
                     self.lex_unicode_range()
                 } else if self.is_url_start(start) {
@@ -90,7 +156,13 @@ impl<'src> Lexer<'src> {
                     SyntaxKind::IDENT
                 }
             }
-            b'-' if self.is_ident_start_after_hyphen() => self.lex_ident(),
+            b'-' if self.is_ident_start_after_hyphen() => {
+                self.lex_ident();
+                if after_at {
+                    self.document_prelude = DocumentPrelude::of_rule(&self.input[start..self.pos]);
+                }
+                SyntaxKind::IDENT
+            }
 
             // ── Strings ──────────────────────────────────────────────
             b'"' | b'\'' => return self.lex_string(start, b),
@@ -149,13 +221,17 @@ impl<'src> Lexer<'src> {
             }
 
             // ── Single-char punctuation ────────────────────────────
-            b';' => SyntaxKind::SEMICOLON,
+            b';' => {
+                self.end_prelude_outside_contexts();
+                SyntaxKind::SEMICOLON
+            }
             b':' => SyntaxKind::COLON,
             b',' => SyntaxKind::COMMA,
             b'.' => SyntaxKind::DOT,
             b'(' => SyntaxKind::LPAREN,
             b')' => SyntaxKind::RPAREN,
             b'{' => {
+                self.end_prelude_outside_contexts();
                 if let Some(LexContext::Interpolation { brace_depth }) =
                     self.context_stack.last_mut()
                 {
@@ -164,6 +240,7 @@ impl<'src> Lexer<'src> {
                 SyntaxKind::LBRACE
             }
             b'}' => {
+                self.end_prelude_outside_contexts();
                 let pop = matches!(
                     self.context_stack.last(),
                     Some(LexContext::Interpolation { brace_depth: 1 })
@@ -190,7 +267,10 @@ impl<'src> Lexer<'src> {
             b'&' => SyntaxKind::AMP,
             b'~' => SyntaxKind::TILDE,
             b'|' => SyntaxKind::PIPE,
-            b'@' => SyntaxKind::AT,
+            b'@' => {
+                self.after_at = true;
+                SyntaxKind::AT
+            }
             b'$' => SyntaxKind::DOLLAR,
             b'#' => SyntaxKind::HASH,
 
@@ -220,6 +300,40 @@ impl<'src> Lexer<'src> {
         (kind, &self.input[start..self.pos])
     }
 
+    /// Forget any string, interpolation or `url(` being lexed, so that lexing resumes as
+    /// at the start of a line.
+    fn reset_context(&mut self) {
+        self.context_stack.clear();
+        self.pending_url_context = false;
+        self.document_prelude = None;
+    }
+
+    /// End the prelude of a document rule, which `;`, `{` and `}` outside interpolation do,
+    /// and in the indented syntax a line break outside brackets.
+    pub(crate) fn end_prelude(&mut self) {
+        self.document_prelude = None;
+    }
+
+    fn end_prelude_outside_contexts(&mut self) {
+        if self.context_stack.is_empty() {
+            self.end_prelude();
+        }
+    }
+
+    /// A string ends unclosed at a newline or the end of input, and with it everything it
+    /// is nested in, so that the next line is not lexed as the inside of an interpolation
+    /// that will never be closed.
+    fn end_unclosed_string(&mut self) {
+        self.unwound |= !self.context_stack.is_empty();
+        self.reset_context();
+    }
+
+    /// Whether the token just lexed ended a string left unclosed inside an interpolation,
+    /// an interpolated string or `url(`, which ended with it. Clears the flag.
+    pub(crate) fn take_unwound(&mut self) -> bool {
+        std::mem::take(&mut self.unwound)
+    }
+
     // ── Token-specific helpers ────────────────────────────────────────
 
     fn lex_block_comment(&mut self) -> SyntaxKind {
@@ -238,10 +352,17 @@ impl<'src> Lexer<'src> {
         }
     }
 
+    /// A quoted string, up to its closing quote or, as CSS reads a bad string, up to the
+    /// unescaped newline or end of input that ends it unclosed. An unclosed string is still a
+    /// `QUOTED_STRING` (or `STRING_END`), just without the closing quote; the parser reports
+    /// it.
     fn lex_string(&mut self, start: usize, quote: u8) -> (SyntaxKind, &'src str) {
         loop {
             match self.peek() {
-                None => return (SyntaxKind::ERROR, &self.input[start..self.pos]),
+                None | Some(b'\n' | b'\r' | b'\x0C') => {
+                    self.end_unclosed_string();
+                    return (SyntaxKind::QUOTED_STRING, &self.input[start..self.pos]);
+                }
                 Some(b) if b == quote => {
                     self.pos += 1;
                     return (SyntaxKind::QUOTED_STRING, &self.input[start..self.pos]);
@@ -252,7 +373,7 @@ impl<'src> Lexer<'src> {
                 }
                 Some(b'\\') => {
                     self.pos += 1;
-                    self.skip_escape_char();
+                    self.skip_string_escape();
                 }
                 _ => {
                     self.pos += 1;
@@ -273,9 +394,13 @@ impl<'src> Lexer<'src> {
         let start = self.pos;
         loop {
             match self.peek() {
-                None => {
-                    self.context_stack.pop();
-                    return (SyntaxKind::ERROR, &self.input[start..self.pos]);
+                None | Some(b'\n' | b'\r' | b'\x0C') => {
+                    self.end_unclosed_string();
+                    if self.pos == start {
+                        // Nothing is left of the string to make a token of.
+                        return self.next_token();
+                    }
+                    return (SyntaxKind::STRING_END, &self.input[start..self.pos]);
                 }
                 Some(b) if b == quote => {
                     self.pos += 1;
@@ -287,12 +412,22 @@ impl<'src> Lexer<'src> {
                 }
                 Some(b'\\') => {
                     self.pos += 1;
-                    self.skip_escape_char();
+                    self.skip_string_escape();
                 }
                 _ => {
                     self.pos += 1;
                 }
             }
+        }
+    }
+
+    /// The escape after a `\` in a string. An escaped newline continues the string on the
+    /// next line, as in CSS and Dart Sass; `\r\n` is one newline.
+    fn skip_string_escape(&mut self) {
+        match self.peek() {
+            Some(b'\r') if self.peek_at(1) == Some(b'\n') => self.pos += 2,
+            Some(b'\n' | b'\r' | b'\x0C') => self.pos += 1,
+            _ => self.skip_escape_char(),
         }
     }
 
@@ -371,8 +506,11 @@ impl<'src> Lexer<'src> {
     }
 
     fn is_url_start(&self, start: usize) -> bool {
-        self.pos - start == 3
-            && self.input[start..self.pos].eq_ignore_ascii_case("url")
+        let name = &self.input[start..self.pos];
+        (name.eq_ignore_ascii_case("url")
+            || self
+                .document_prelude
+                .is_some_and(|prelude| prelude.takes_url(name)))
             && self.peek() == Some(b'(')
             && self.should_enter_url_context()
     }
@@ -542,6 +680,16 @@ fn is_ident_start_char(ch: char) -> bool {
 #[inline]
 fn is_ident_continue_char(ch: char) -> bool {
     ch >= '\u{80}' || ch.is_alphanumeric() || ch == '_' || ch == '-'
+}
+
+/// Whether `text`, the end of a string opened with `quote`, ends with its closing quote:
+/// that is, a `quote` not escaped by an odd run of backslashes before it. A string the lexer
+/// ended at a newline or at the end of input does not.
+pub(crate) fn closes_string(text: &str, quote: u8) -> bool {
+    let Some((&last, body)) = text.as_bytes().split_last() else {
+        return false;
+    };
+    last == quote && body.iter().rev().take_while(|&&b| b == b'\\').count() % 2 == 0
 }
 
 /// Collect all tokens from `input`, excluding the final `EOF`.

@@ -67,9 +67,6 @@ pub mod token_set;
 mod bridge;
 pub use bridge::build_tree;
 
-#[doc(hidden)]
-pub mod sass_lexer;
-
 use text_range::TextRange;
 
 /// Parse SCSS source into a rowan green tree + diagnostics.
@@ -83,13 +80,13 @@ pub fn parse_scss(source: &str) -> (rowan::GreenNode, Vec<(String, TextRange)>) 
 
 /// Parse indented Sass (`.sass`) source into a rowan green tree + diagnostics.
 ///
-/// Uses the same parser and bridge as [`parse_scss()`], but pre-processes tokens
-/// with [`sass_lexer::sass_tokenize()`] to insert virtual `{`/`}`/`;` tokens
-/// based on indentation and newlines.
+/// Uses the same grammar and bridge as [`parse_scss()`]. The parser decides from the
+/// line breaks and indentation of the source where statements end and blocks open,
+/// and builds the same tree shape as for the equivalent SCSS, with zero-width
+/// `{`/`}`/`;` tokens at those points.
 pub fn parse_sass(source: &str) -> (rowan::GreenNode, Vec<(String, TextRange)>) {
-    let tokens = sass_lexer::sass_tokenize(source);
-    let input = input::Input::from_tokens(&tokens);
-    let mut parser = parser::Parser::new(input, source);
+    let input = input::Input::from_source_indented(source);
+    let mut parser = parser::Parser::with_layout(input, source, parser::Layout::Indented);
     grammar::source_file(&mut parser);
     let (events, errors, input, src) = parser.finish();
     build_tree(events, &errors, &input, src)

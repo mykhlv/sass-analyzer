@@ -3,7 +3,7 @@ use crate::parser::{CompletedMarker, Parser};
 use crate::syntax_kind::*;
 
 use super::super::ParseContext;
-use super::{expr, interpolation, sass_value};
+use super::{eat_comma, expr, interpolation, sass_value};
 
 // ── Atoms ──────────────────────────────────────────────────────────
 
@@ -23,7 +23,7 @@ pub(super) fn atom(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMar
         SLASH => {
             // Bare `/` as value atom (e.g., `(1, / 2)` or `$path: /images;`)
             let m = p.start();
-            p.bump();
+            super::super::lines::bump_operator(p);
             Some(m.complete(p, VALUE))
         }
         AMP => {
@@ -63,6 +63,7 @@ fn quoted_string(p: &mut Parser<'_>) -> CompletedMarker {
 
 pub(crate) fn interpolated_string(p: &mut Parser<'_>, _ctx: ParseContext) -> CompletedMarker {
     let m = p.start();
+    let unclosed_strings = p.unclosed_strings();
     p.bump(); // STRING_START
     // Token sequence: STRING_START (HASH_LBRACE expr RBRACE (STRING_MID | STRING_END))*
     loop {
@@ -76,10 +77,18 @@ pub(crate) fn interpolated_string(p: &mut Parser<'_>, _ctx: ParseContext) -> Com
                 break;
             }
             _ => {
-                if p.at_end() {
-                    p.error("unterminated interpolated string");
-                } else {
-                    p.error("expected string content or interpolation");
+                // A string left unclosed inside an interpolation ended this one with it, and
+                // has been reported.
+                if p.unclosed_strings() == unclosed_strings {
+                    if p.prev_kind() == RBRACE {
+                        // After a whole interpolation the lexer is back inside the string,
+                        // so only the newline or end of input that ended it comes here.
+                        p.error_unclosed_string();
+                    } else if p.at_end() {
+                        p.error("unterminated interpolated string");
+                    } else {
+                        p.error("expected string content or interpolation");
+                    }
                 }
                 break;
             }
@@ -185,14 +194,14 @@ fn ident_or_call(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarke
 
 fn standalone_percent(p: &mut Parser<'_>) -> CompletedMarker {
     let m = p.start();
-    p.bump(); // %
+    super::super::lines::bump_operator(p); // %
     m.complete(p, STANDALONE_PERCENT)
 }
 
 fn bang_dispatch(p: &mut Parser<'_>) -> CompletedMarker {
     // !important, !default, !global, !optional
     let m = p.start();
-    p.bump(); // !
+    super::super::lines::bump_operator(p); // !
     if p.at(IDENT) {
         let text = p.current_text();
         if text == "important" {
@@ -211,6 +220,10 @@ fn bang_dispatch(p: &mut Parser<'_>) -> CompletedMarker {
 // ── Parenthesized expr / map ───────────────────────────────────────
 
 fn paren_or_map(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
+    paren_or_map_in_brackets(&mut p.transparent_guard(), ctx)
+}
+
+fn paren_or_map_in_brackets(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
     assert!(p.at(LPAREN));
     let m = p.start();
     p.bump(); // (
@@ -231,7 +244,12 @@ fn paren_or_map(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
     // Space-separated values inside parens: `(28px 28px 0 0)`, `(small medium large)`
     // Also handles space-separated map keys: `(1 2: 3)` — stop at `:` so we can detect map.
     if !p.at(COMMA) && !p.at(RPAREN) && !p.at(COLON) && !p.at_end() {
-        while !p.at(COMMA) && !p.at(RPAREN) && !p.at(COLON) && !p.at_end() {
+        while !p.at(COMMA)
+            && !p.at(RPAREN)
+            && !p.at(COLON)
+            && !p.at_end()
+            && !p.at_unclosed_string_break()
+        {
             if expr(p, ParseContext::SassScript).is_none() {
                 break;
             }
@@ -243,9 +261,9 @@ fn paren_or_map(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
         return finish_map(p, m, first, ctx);
     }
 
-    if p.at(COMMA) {
+    if p.at(COMMA) || p.at_unclosed_string_break() {
         // Comma-separated list inside parens (possibly of space-separated groups)
-        while p.eat(COMMA) {
+        while eat_comma(p) {
             if !p.at(RPAREN) && !p.at_end() {
                 sass_value(p, ParseContext::SassScript);
             }
@@ -275,14 +293,19 @@ fn finish_map(
     let _ = entry_m.complete(p, MAP_ENTRY);
 
     // Parse remaining entries
-    while p.eat(COMMA) {
+    while eat_comma(p) {
         if p.at(RPAREN) || p.at_end() {
             break; // trailing comma
         }
         let em = p.start();
         // Key may be space-separated: `4 5: 6`
         expr(p, ParseContext::SassScript);
-        while !p.at(COLON) && !p.at(COMMA) && !p.at(RPAREN) && !p.at_end() {
+        while !p.at(COLON)
+            && !p.at(COMMA)
+            && !p.at(RPAREN)
+            && !p.at_end()
+            && !p.at_unclosed_string_break()
+        {
             if expr(p, ParseContext::SassScript).is_none() {
                 break;
             }
@@ -300,11 +323,12 @@ fn finish_map(
 
 fn bracketed_list(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
     assert!(p.at(LBRACKET));
+    let p = &mut *p.transparent_guard();
     let m = p.start();
     p.bump(); // [
     if !p.at(RBRACKET) && !p.at_end() {
         sass_value(p, ctx);
-        while p.eat(COMMA) {
+        while eat_comma(p) {
             if !p.at(RBRACKET) && !p.at_end() {
                 sass_value(p, ctx);
             }

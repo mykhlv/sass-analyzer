@@ -16,11 +16,23 @@ static ANGULAR_MATERIAL: LazyLock<String> = LazyLock::new(|| {
         return String::new();
     }
     let mut buf = String::new();
-    collect_scss_recursive(&corpus_dir, &mut buf);
+    collect_recursive(&corpus_dir, "scss", &mut buf);
     buf
 });
 
-fn collect_scss_recursive(dir: &Path, out: &mut String) {
+// Every file starts at column 0, so concatenating indented sources keeps each
+// file's block structure intact.
+static VUETIFY_SASS: LazyLock<String> = LazyLock::new(|| {
+    let corpus_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test-corpus/vuetify/src");
+    if !corpus_dir.exists() {
+        return String::new();
+    }
+    let mut buf = String::new();
+    collect_recursive(&corpus_dir, "sass", &mut buf);
+    buf
+});
+
+fn collect_recursive(dir: &Path, extension: &str, out: &mut String) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -28,12 +40,12 @@ fn collect_scss_recursive(dir: &Path, out: &mut String) {
     paths.sort();
     for path in paths {
         if path.is_dir() {
-            collect_scss_recursive(&path, out);
-        } else if path.extension().is_some_and(|ext| ext == "scss") {
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                out.push_str(&content);
-                out.push('\n');
-            }
+            collect_recursive(&path, extension, out);
+        } else if path.extension().is_some_and(|ext| ext == extension)
+            && let Ok(content) = std::fs::read_to_string(&path)
+        {
+            out.push_str(&content);
+            out.push('\n');
         }
     }
 }
@@ -158,10 +170,53 @@ fn parse_and_build_tree_angular_material(bencher: Bencher<'_, '_>) {
         });
 }
 
+// ── Vuetify (~290 KB indented-Sass corpus) ─────────────────────────────
+
+#[divan::bench]
+fn lex_and_build_input_vuetify_sass(bencher: Bencher<'_, '_>) {
+    let source = &*VUETIFY_SASS;
+    if source.is_empty() {
+        return;
+    }
+    bencher
+        .counter(divan::counter::BytesCount::of_str(source))
+        .with_inputs(|| source.as_str())
+        .bench_values(sass_parser::input::Input::from_source_indented);
+}
+
+#[divan::bench]
+fn parse_vuetify_sass(bencher: Bencher<'_, '_>) {
+    let source = &*VUETIFY_SASS;
+    if source.is_empty() {
+        return;
+    }
+    bencher
+        .counter(divan::counter::BytesCount::of_str(source))
+        .with_inputs(|| source.as_str())
+        .bench_values(sass_parser::parse_sass);
+}
+
+// A comment on every continued line: each one read first as reaching over the deeper
+// line beneath it, then re-lexed as the ordinary comment it is once the parser absorbs
+// the line break before it. Each re-lex lexes and compares only its own lines; the rest
+// of its cost is moving the arrays after them.
+static CONTINUED_COMMENTS_SASS: LazyLock<String> =
+    LazyLock::new(|| "$a: 1 +\n  // c\n    2\n.a,\n// c\n.b\n  c: d\n".repeat(5_000));
+
+#[divan::bench]
+fn parse_layout_continued_comments(bencher: Bencher<'_, '_>) {
+    let source = &*CONTINUED_COMMENTS_SASS;
+    bencher
+        .counter(divan::counter::BytesCount::of_str(source))
+        .with_inputs(|| source.as_str())
+        .bench_values(sass_parser::parse_sass);
+}
+
 // ── Incremental reparse benchmarks ──────────────────────────────────────
 
 /// Prepare an incremental edit scenario: parse old source, apply a single-char
-/// insert at `offset`, return (old_green, old_errors, edit, new_source).
+/// insert at `offset`, return (`old_green`, `old_errors`, edit, `new_source`).
+#[allow(clippy::cast_possible_truncation)] // insert is a short benchmark literal
 fn prepare_incremental(
     source: &str,
     offset: u32,
@@ -194,6 +249,7 @@ fn full_reparse_normalize_css(bencher: Bencher<'_, '_>) {
 }
 
 #[divan::bench]
+#[allow(clippy::cast_possible_truncation)] // fixture is small; truncation cannot occur
 fn incremental_reparse_normalize_css(bencher: Bencher<'_, '_>) {
     let offset = NORMALIZE_CSS.len() as u32 / 2;
     let (old_green, old_errors, edit, new_source) = prepare_incremental(NORMALIZE_CSS, offset, "x");
@@ -218,6 +274,7 @@ fn full_reparse_angular_material(bencher: Bencher<'_, '_>) {
 }
 
 #[divan::bench]
+#[allow(clippy::cast_possible_truncation)] // fixture source is well under u32::MAX bytes
 fn incremental_reparse_angular_material(bencher: Bencher<'_, '_>) {
     let source = &*ANGULAR_MATERIAL;
     if source.is_empty() {

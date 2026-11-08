@@ -7,6 +7,7 @@ pub fn if_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // if
+    p.continue_header(&super::lines::EXPRESSION);
     super::expressions::expr(p, super::ParseContext::SassScript);
     if p.at(LBRACE) {
         super::block(p);
@@ -18,8 +19,8 @@ pub fn if_rule(p: &mut Parser<'_>) {
         if p.at(AT) && (p.nth_text(1) == "else" || p.nth_text(1) == "elseif") {
             else_clause(p);
         } else if p.at(SEMICOLON)
-            && p.nth(1) == AT
-            && (p.nth_text(2) == "else" || p.nth_text(2) == "elseif")
+            && p.nth_past_virtual(1) == AT
+            && (p.nth_text_past_virtual(2) == "else" || p.nth_text_past_virtual(2) == "elseif")
         {
             p.bump(); // skip virtual SEMICOLON
             else_clause(p);
@@ -42,6 +43,7 @@ fn else_clause(p: &mut Parser<'_>) {
         super::expressions::expr(p, super::ParseContext::SassScript);
     } else {
         p.bump(); // else
+        p.continue_header(&super::lines::ELSE);
 
         // `@else if` — has a condition
         if p.at(IDENT) && p.current_text() == "if" {
@@ -61,8 +63,10 @@ pub fn for_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // for
+    p.continue_header(&super::lines::FOR);
     p.expect(DOLLAR);
     p.expect(IDENT); // variable name
+    p.continue_line_across_blank();
 
     // Expect `from`
     if p.at(IDENT) && p.current_text() == "from" {
@@ -72,6 +76,7 @@ pub fn for_rule(p: &mut Parser<'_>) {
     }
 
     super::expressions::expr(p, super::ParseContext::SassScript);
+    p.continue_line_across_blank();
 
     // Expect `through` or `to`
     if p.at(IDENT) && (p.current_text() == "through" || p.current_text() == "to") {
@@ -93,13 +98,17 @@ pub fn each_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // each
+    p.continue_header(&super::lines::EACH);
     p.expect(DOLLAR);
     p.expect(IDENT);
+    p.continue_line_across_blank();
 
     // Additional destructured variables: `$key, $value`
     while p.eat(COMMA) {
+        p.continue_line_across_blank();
         p.expect(DOLLAR);
         p.expect(IDENT);
+        p.continue_line_across_blank();
     }
 
     // Expect `in`
@@ -148,6 +157,7 @@ pub fn while_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // while
+    p.continue_header(&super::lines::EXPRESSION);
     super::expressions::expr(p, super::ParseContext::SassScript);
     if p.at(LBRACE) {
         super::block(p);

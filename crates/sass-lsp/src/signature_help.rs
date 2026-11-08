@@ -357,10 +357,11 @@ mod tests {
     use sass_parser::syntax::SyntaxNode;
     use sass_parser::text_range::TextSize;
 
-    fn call_at(input: &str, offset: u32) -> Option<CallInfo> {
+    #[allow(clippy::cast_possible_truncation)] // test inputs are short; truncation cannot occur
+    fn call_at(input: &str, offset: usize) -> Option<CallInfo> {
         let (green, _) = sass_parser::parse_scss(input);
         let root = SyntaxNode::new_root(green);
-        find_call_at_offset(&root, TextSize::from(offset))
+        find_call_at_offset(&root, TextSize::from(offset as u32))
     }
 
     #[test]
@@ -368,7 +369,7 @@ mod tests {
         let input = "@use 'x' as ns;\n$x: ns.func(1);";
         // Cursor inside arg list — after the '('
         let offset = input.find("(1").unwrap() + 1;
-        let info = call_at(input, offset as u32).unwrap();
+        let info = call_at(input, offset).unwrap();
         assert_eq!(info.namespace.as_deref(), Some("ns"));
         assert_eq!(info.name, "func");
         assert_eq!(info.kind, symbols::SymbolKind::Function);
@@ -378,18 +379,19 @@ mod tests {
     fn namespaced_mixin_include() {
         let input = "@use 'x' as ns;\n.a { @include ns.mix(1); }";
         let offset = input.find("(1").unwrap() + 1;
-        let info = call_at(input, offset as u32).unwrap();
+        let info = call_at(input, offset).unwrap();
         assert_eq!(info.namespace.as_deref(), Some("ns"));
         assert_eq!(info.name, "mix");
         assert_eq!(info.kind, symbols::SymbolKind::Mixin);
     }
 
     #[test]
+    #[allow(clippy::cast_possible_truncation)] // test input is short; truncation cannot occur
     fn count_active_parameter_nested_parens() {
         // func(a, fn(1, 2), c) — cursor after last comma
         let input = "@function f($a, $b, $c) {} $x: f(a, fn(1, 2), );";
         let cursor_offset = input.find(", );").unwrap() + 2; // after ", " before ")"
-        let info = call_at(input, cursor_offset as u32).unwrap();
+        let info = call_at(input, cursor_offset).unwrap();
         assert_eq!(info.name, "f");
         let active = count_active_parameter(input, &info, TextSize::from(cursor_offset as u32));
         assert_eq!(
@@ -425,7 +427,9 @@ mod tests {
                     "should contain description"
                 );
             }
-            _ => panic!("expected MarkupContent"),
+            tower_lsp_server::ls_types::Documentation::String(_) => {
+                panic!("expected MarkupContent")
+            }
         }
     }
 }

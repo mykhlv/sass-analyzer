@@ -108,6 +108,16 @@ pub(crate) fn handle_code_action(
     }
 }
 
+/// The text that ends a statement written into `uri`: indented Sass ends a
+/// statement at the newline, SCSS needs a `;`.
+fn statement_terminator(uri: &Uri) -> &'static str {
+    if crate::worker::is_sass_file(uri) {
+        ""
+    } else {
+        ";"
+    }
+}
+
 /// Read symbol name from the structured `data` field of a diagnostic.
 fn extract_name_from_data(diag: &Diagnostic) -> Option<String> {
     let data = diag.data.as_ref()?.as_object()?;
@@ -165,7 +175,8 @@ fn auto_import_actions(
         };
 
         let prefix = if needs_newline { "\n" } else { "" };
-        let use_statement = format!("{prefix}@use \"{use_path}\";\n");
+        let terminator = statement_terminator(from_uri);
+        let use_statement = format!("{prefix}@use \"{use_path}\"{terminator}\n");
 
         // Qualify the bare reference: $primary → colors.$primary, darken → colors.darken
         let qualified_ref = if kind == SymbolKind::Variable {
@@ -600,7 +611,8 @@ fn extract_variable_action(
     let indent = node_indentation(text, &insert_before);
     let insert_line_start = content_line_start(text, &insert_before);
 
-    let var_decl = format!("{indent}$new-variable: {expr_text};\n");
+    let terminator = statement_terminator(uri);
+    let var_decl = format!("{indent}$new-variable: {expr_text}{terminator}\n");
     let insert_pos = text_range_to_lsp(
         TextRange::new(insert_line_start, insert_line_start),
         line_index,
@@ -642,57 +654,95 @@ fn content_range(node: &SyntaxNode) -> TextRange {
     TextRange::new(first_content_offset(node), node.text_range().end())
 }
 
-fn is_declaration_node(kind: SyntaxKind) -> bool {
+/// Statements that cannot move into a mixin: `@content` and `@return` would
+/// change what they refer to, and a mixin may not declare a mixin or function.
+fn blocks_mixin_extraction(kind: SyntaxKind) -> bool {
     matches!(
         kind,
-        SyntaxKind::DECLARATION | SyntaxKind::VARIABLE_DECL | SyntaxKind::CUSTOM_PROPERTY_DECL
+        SyntaxKind::CONTENT_RULE
+            | SyntaxKind::RETURN_RULE
+            | SyntaxKind::MIXIN_RULE
+            | SyntaxKind::FUNCTION_RULE
     )
 }
 
-fn find_declarations_at_range(
+/// The block whose statements `range` selects, and the source text to move out
+/// of it.
+///
+/// Once trimmed of surrounding whitespace, the selection must lie inside one
+/// block's braces and cover each statement it touches completely; otherwise
+/// there is no action. Comments wholly inside the selection move along with the
+/// statements, a comment the selection cuts through stays put. The moved text
+/// is a single verbatim range, so whatever sits between the first and the last
+/// statement — nested rules, at-rules, comments — moves with them.
+#[allow(clippy::cast_possible_truncation)]
+fn find_statements_at_range(
     root: &SyntaxNode,
+    text: &str,
     range: TextRange,
-) -> Option<(SyntaxNode, Vec<SyntaxNode>)> {
-    let elem = root.covering_element(range);
-    let start_node = match elem {
+) -> Option<(SyntaxNode, TextRange)> {
+    let selected = &text[usize::from(range.start())..usize::from(range.end())];
+    let trimmed = selected.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let lead = selected.len() - selected.trim_start().len();
+    let start = range.start() + TextSize::from(lead as u32);
+    let sel = TextRange::at(start, TextSize::from(trimmed.len() as u32));
+
+    let start_node = match root.covering_element(sel) {
         NodeOrToken::Node(n) => n,
         NodeOrToken::Token(t) => t.parent()?,
     };
-
-    // Find enclosing BLOCK
     let block = start_node
         .ancestors()
         .find(|a| a.kind() == SyntaxKind::BLOCK)?;
 
-    // Use content ranges (skipping leading trivia) for containment checks,
-    // since users select visible text, not the trivia rowan attaches to nodes.
-    let decls: Vec<SyntaxNode> = block
-        .children()
-        .filter(|c| is_declaration_node(c.kind()))
-        .filter(|c| {
-            let cr = content_range(c);
-            cr.start() >= range.start() && cr.end() <= range.end()
-        })
-        .collect();
-
-    if decls.is_empty() {
+    let brace = |kind| {
+        block
+            .children_with_tokens()
+            .find(|e| e.kind() == kind)
+            .map(|e| e.text_range())
+    };
+    let inner_start = brace(SyntaxKind::LBRACE).map_or(block.text_range().start(), TextRange::end);
+    let inner_end = brace(SyntaxKind::RBRACE).map_or(block.text_range().end(), TextRange::start);
+    if sel.start() < inner_start || sel.end() > inner_end {
         return None;
     }
 
-    // Reject if selection partially overlaps any declaration
-    for child in block.children() {
-        if !is_declaration_node(child.kind()) {
+    let mut moved: Option<TextRange> = None;
+    for child in block.children_with_tokens() {
+        let r = match &child {
+            NodeOrToken::Node(n) => content_range(n),
+            NodeOrToken::Token(t) if t.kind().is_trivia() => continue,
+            NodeOrToken::Token(t) => t.text_range(),
+        };
+        if r.end() <= sel.start() || r.start() >= sel.end() {
             continue;
         }
-        let cr = content_range(&child);
-        let overlaps = cr.start() < range.end() && cr.end() > range.start();
-        let fully_contained = cr.start() >= range.start() && cr.end() <= range.end();
-        if overlaps && !fully_contained {
+        let NodeOrToken::Node(n) = &child else {
+            return None;
+        };
+        if !sel.contains_range(r) || n.descendants().any(|d| blocks_mixin_extraction(d.kind())) {
             return None;
         }
+        moved = Some(moved.map_or(r, |m| m.cover(r)));
     }
+    let mut moved = moved?;
 
-    Some((block, decls))
+    for token in block
+        .descendants_with_tokens()
+        .filter_map(NodeOrToken::into_token)
+    {
+        let is_comment = matches!(
+            token.kind(),
+            SyntaxKind::SINGLE_LINE_COMMENT | SyntaxKind::MULTI_LINE_COMMENT
+        );
+        if is_comment && sel.contains_range(token.text_range()) {
+            moved = moved.cover(token.text_range());
+        }
+    }
+    Some((block, moved))
 }
 
 fn extract_mixin_action(
@@ -715,58 +765,27 @@ fn extract_mixin_action(
     };
     let sel_range = TextRange::new(start, end);
 
-    let Some((block, decls)) = find_declarations_at_range(root, sel_range) else {
+    let Some((block, moved)) = find_statements_at_range(root, text, sel_range) else {
         return;
     };
 
-    // Find the enclosing rule/at-rule to insert the mixin before
-    let Some(rule_set) = block.ancestors().find(|a| {
-        matches!(
-            a.kind(),
-            SyntaxKind::RULE_SET
-                | SyntaxKind::MIXIN_RULE
-                | SyntaxKind::FUNCTION_RULE
-                | SyntaxKind::EACH_RULE
-                | SyntaxKind::FOR_RULE
-                | SyntaxKind::WHILE_RULE
-                | SyntaxKind::IF_RULE
-        )
-    }) else {
+    let Some(rule_set) = mixin_insertion_anchor(&block) else {
         return;
     };
 
     let rule_indent = node_indentation(text, &rule_set);
+    let body = mixin_body(text, &block, moved, rule_indent);
 
-    // Infer indent step from the first declaration's extra indent over the rule set.
-    // Falls back to 2 spaces if the declaration is at the same level (shouldn't happen).
-    let first_decl_indent = node_indentation(text, decls.first().unwrap());
-    let indent_step = first_decl_indent
-        .strip_prefix(rule_indent)
-        .filter(|s| !s.is_empty())
-        .unwrap_or("  ");
-    let body_indent = format!("{rule_indent}{indent_step}");
-    let mut body_lines = Vec::new();
-    for decl in &decls {
-        let decl_text = decl.text().to_string();
-        // Trim each line's existing indent and re-indent with body_indent
-        for line in decl_text.lines() {
-            let trimmed = line.trim_start();
-            if !trimmed.is_empty() {
-                body_lines.push(format!("{body_indent}{trimmed}"));
-            }
-        }
-    }
-    let body = body_lines.join("\n");
+    let (mixin_text, include_text) = if crate::worker::is_sass_file(uri) {
+        indented_mixin_texts(root, &block, &body, rule_indent)
+    } else {
+        (
+            format!("{rule_indent}@mixin new-mixin {{\n{body}\n{rule_indent}}}\n\n"),
+            "@include new-mixin;".to_owned(),
+        )
+    };
 
-    let mixin_text = format!("{rule_indent}@mixin new-mixin {{\n{body}\n{rule_indent}}}\n\n");
-
-    let first_decl = decls.first().unwrap();
-    let last_decl = decls.last().unwrap();
-    let first_content_start = content_range(first_decl).start();
-    let last_end = last_decl.text_range().end();
-
-    let replace_range = TextRange::new(first_content_start, last_end);
-    let replace_lsp = text_range_to_lsp(replace_range, line_index, text);
+    let replace_lsp = text_range_to_lsp(moved, line_index, text);
     let insert_line = content_line_start(text, &rule_set);
     let insert_range = TextRange::new(insert_line, insert_line);
     let insert_lsp = text_range_to_lsp(insert_range, line_index, text);
@@ -778,7 +797,7 @@ fn extract_mixin_action(
         },
         TextEdit {
             range: replace_lsp,
-            new_text: "@include new-mixin;".to_owned(),
+            new_text: include_text,
         },
     ];
     edits.sort_by_key(|e| (e.range.start.line, e.range.start.character));
@@ -795,6 +814,127 @@ fn extract_mixin_action(
         }),
         ..CodeAction::default()
     });
+}
+
+/// The statement the new mixin is inserted before, or `None` where no mixin can
+/// be included at all (a function body).
+///
+/// Dart Sass rejects a mixin declared inside another mixin, a control directive
+/// or an `@include` content block, so the mixin goes before the outermost of
+/// those. Elsewhere it goes before the nearest style rule, which keeps it local
+/// to the parent rule.
+fn mixin_insertion_anchor(block: &SyntaxNode) -> Option<SyntaxNode> {
+    if block
+        .ancestors()
+        .any(|a| a.kind() == SyntaxKind::FUNCTION_RULE)
+    {
+        return None;
+    }
+    block
+        .ancestors()
+        .filter(|a| {
+            matches!(
+                a.kind(),
+                SyntaxKind::MIXIN_RULE
+                    | SyntaxKind::INCLUDE_RULE
+                    | SyntaxKind::EACH_RULE
+                    | SyntaxKind::FOR_RULE
+                    | SyntaxKind::WHILE_RULE
+                    | SyntaxKind::IF_RULE
+            )
+        })
+        .last()
+        .or_else(|| block.ancestors().find(|a| a.kind() == SyntaxKind::RULE_SET))
+}
+
+/// The `moved` text of `block`, re-indented one unit under `rule_indent`.
+///
+/// The text moves verbatim; only indentation changes. Each line keeps its
+/// indentation relative to the first one, which keeps nested blocks and
+/// continuation lines attached to the line that owns them — and in indented
+/// Sass, where indentation alone opens a block, keeps the meaning intact.
+fn mixin_body(text: &str, block: &SyntaxNode, moved: TextRange, rule_indent: &str) -> String {
+    let start = usize::from(moved.start());
+    let first_indent = indentation_at(text, start);
+    // The unit is the step from the block's header to its body. The rule the
+    // mixin is inserted before can sit several levels above the block (a
+    // declaration under `@media` inside a rule), so it cannot serve as the base.
+    let header_indent = block.parent().map_or("", |h| node_indentation(text, &h));
+    let unit = first_indent
+        .strip_prefix(header_indent)
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| detect_indent_unit(text));
+    let body_indent = format!("{rule_indent}{unit}");
+
+    text[start..usize::from(moved.end())]
+        .lines()
+        .enumerate()
+        .map(|(i, line)| {
+            if line.trim().is_empty() {
+                return String::new();
+            }
+            let relative = if i == 0 {
+                line
+            } else {
+                line.strip_prefix(first_indent)
+                    .unwrap_or_else(|| line.trim_start())
+            };
+            format!("{body_indent}{relative}")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The mixin definition and the `@include` that replaces the selection, for
+/// indented Sass.
+///
+/// The `=`/`+` shorthands are used only when the file already uses them. The
+/// long forms are always valid and are what a reader expects by default; the
+/// shorthands are a style a file opts into, so the edit follows that choice
+/// rather than introducing it. The `+` form is never written into a nested
+/// property's block, where Dart Sass accepts only declarations and at-rules.
+fn indented_mixin_texts(
+    root: &SyntaxNode,
+    block: &SyntaxNode,
+    body: &str,
+    rule_indent: &str,
+) -> (String, String) {
+    let header = if uses_shorthand(root, SyntaxKind::MIXIN_RULE, "=") {
+        "=new-mixin"
+    } else {
+        "@mixin new-mixin"
+    };
+    let in_nested_property = block
+        .parent()
+        .is_some_and(|p| p.kind() == SyntaxKind::NESTED_PROPERTY);
+    let include = if !in_nested_property && uses_shorthand(root, SyntaxKind::INCLUDE_RULE, "+") {
+        "+new-mixin"
+    } else {
+        "@include new-mixin"
+    };
+    (
+        format!("{rule_indent}{header}\n{body}\n\n"),
+        include.to_owned(),
+    )
+}
+
+/// Whether any `kind` node in the file is written with the indented shorthand
+/// `sigil` (`=` for `@mixin`, `+` for `@include`). The parser keeps the sigil as
+/// the node's first IDENT, where the long form has the directive name.
+fn uses_shorthand(root: &SyntaxNode, kind: SyntaxKind, sigil: &str) -> bool {
+    root.descendants()
+        .filter(|n| n.kind() == kind)
+        .any(|n| ast_helpers::ident_text_range_of(&n).is_some_and(|(t, _)| t == sigil))
+}
+
+/// The leading whitespace of the first indented line, or two spaces for a file
+/// with no indentation at all.
+fn detect_indent_unit(text: &str) -> &str {
+    text.lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| &line[..line.len() - line.trim_start().len()])
+        .find(|ws| !ws.is_empty())
+        .unwrap_or("  ")
 }
 
 #[cfg(test)]
@@ -1211,7 +1351,7 @@ mod tests {
 
     // ── round-trip / integration tests ──────────────────────────────
 
-    /// Apply sorted, non-overlapping LSP TextEdits to source text (last-to-first).
+    /// Apply sorted, non-overlapping LSP `TextEdits` to source text (last-to-first).
     fn apply_edits(src: &str, edits: &[TextEdit]) -> String {
         let mut result = src.to_owned();
         // Apply in reverse order to preserve offsets
@@ -1273,25 +1413,64 @@ mod tests {
 
     #[test]
     fn extract_mixin_inside_mixin_body() {
-        let src = "@mixin outer {\n  .inner {\n    color: red;\n  }\n}\n";
-        // Select "color: red;" inside .inner which is inside @mixin outer
-        let edits = run_extract_mixin(src, (2, 4), (2, 15));
-        assert_eq!(edits.len(), 2);
-        assert!(edits[0].new_text.contains("@mixin new-mixin"));
-        let result = apply_edits(src, &edits);
-        let (_, errors) = sass_parser::parse_scss(&result);
-        assert!(errors.is_empty(), "Parse errors in:\n{result}\n{errors:?}");
+        // A mixin may not declare another one, so the new mixin goes before
+        // `@mixin outer`, not before `.inner`.
+        check_scss_mixin(
+            "@mixin outer {\n  .inner {\n    color: red;\n  }\n}\n",
+            "color: red;",
+            &expect_test::expect![[r#"
+                @mixin new-mixin {
+                  color: red;
+                }
+
+                @mixin outer {
+                  .inner {
+                    @include new-mixin;
+                  }
+                }
+            "#]],
+        );
     }
 
     #[test]
-    fn extract_mixin_inside_function_body() {
-        // Functions can't have rule sets, so this should produce no action
+    fn extract_mixin_inside_control_directive_and_content_block() {
+        check_scss_mixin(
+            ".a {\n  @each $k in x, y {\n    .#{$k} { color: red; }\n  }\n}\n",
+            "color: red;",
+            &expect_test::expect![[r#"
+                .a {
+                  @mixin new-mixin {
+                    color: red;
+                  }
+
+                  @each $k in x, y {
+                    .#{$k} { @include new-mixin; }
+                  }
+                }
+            "#]],
+        );
+        check_scss_mixin(
+            "@include wrap {\n  .b {\n    color: red;\n  }\n}\n",
+            "color: red;",
+            &expect_test::expect![[r#"
+                @mixin new-mixin {
+                  color: red;
+                }
+
+                @include wrap {
+                  .b {
+                    @include new-mixin;
+                  }
+                }
+            "#]],
+        );
+    }
+
+    #[test]
+    fn extract_mixin_inside_function_body_no_action() {
+        // `@include` is not allowed in a function.
         let src = "@function foo() {\n  $x: 1;\n  @return $x;\n}\n";
-        let edits = run_extract_mixin(src, (1, 2), (1, 8));
-        // VARIABLE_DECL is inside @function block but no RULE_SET ancestor —
-        // the enclosing rule is FUNCTION_RULE, so mixin is inserted before it
-        assert_eq!(edits.len(), 2);
-        assert!(edits[0].new_text.contains("@mixin new-mixin"));
+        assert!(run_extract_mixin(src, (1, 2), (1, 8)).is_empty());
     }
 
     #[test]
@@ -1314,7 +1493,7 @@ mod tests {
         assert_eq!(edits.len(), 2);
         // Mixin body should use tab indent, not 2 spaces
         assert!(
-            edits[0].new_text.contains("\t"),
+            edits[0].new_text.contains('\t'),
             "Expected tab indent in mixin body"
         );
     }
@@ -1469,21 +1648,6 @@ mod tests {
         assert!(!is_expression_node(SyntaxKind::SOURCE_FILE));
     }
 
-    // ── is_declaration_node ─────────────────────────────────────────
-
-    #[test]
-    fn is_declaration_node_known_kinds() {
-        assert!(is_declaration_node(SyntaxKind::DECLARATION));
-        assert!(is_declaration_node(SyntaxKind::VARIABLE_DECL));
-        assert!(is_declaration_node(SyntaxKind::CUSTOM_PROPERTY_DECL));
-    }
-
-    #[test]
-    fn is_declaration_node_non_decl_kinds() {
-        assert!(!is_declaration_node(SyntaxKind::RULE_SET));
-        assert!(!is_declaration_node(SyntaxKind::FUNCTION_CALL));
-    }
-
     // ── extract_name_from_message edge cases ────────────────────────
 
     #[test]
@@ -1534,5 +1698,611 @@ mod tests {
         let edits = run_extract_mixin(src, (1, 2), (1, 14));
         assert_eq!(edits.len(), 2);
         assert!(edits[0].new_text.contains("--gap: 10px;"));
+    }
+
+    fn check_scss_mixin(src: &str, selected: &str, expect: &expect_test::Expect) {
+        let start = src.find(selected).expect("selection not found in source");
+        #[allow(clippy::cast_possible_truncation)]
+        let sel = TextRange::new(
+            TextSize::from(start as u32),
+            TextSize::from((start + selected.len()) as u32),
+        );
+        let li = sass_parser::line_index::LineIndex::new(src);
+        let range = text_range_to_lsp(sel, &li, src);
+        let edits = run_extract_mixin(
+            src,
+            (range.start.line, range.start.character),
+            (range.end.line, range.end.character),
+        );
+        assert!(!edits.is_empty(), "no code action offered");
+        let result = apply_edits(src, &edits);
+        let (_, errors) = sass_parser::parse_scss(&result);
+        assert!(errors.is_empty(), "parse errors in:\n{result}\n{errors:?}");
+        expect.assert_eq(&result);
+    }
+
+    #[test]
+    fn extract_mixin_moves_nested_rule_between_decls() {
+        check_scss_mixin(
+            ".a {\n  color: red;\n  .b { x: y; }\n  margin: 0;\n}\n",
+            "color: red;\n  .b { x: y; }\n  margin: 0;",
+            &expect_test::expect![[r#"
+                @mixin new-mixin {
+                  color: red;
+                  .b { x: y; }
+                  margin: 0;
+                }
+
+                .a {
+                  @include new-mixin;
+                }
+            "#]],
+        );
+    }
+
+    #[test]
+    fn extract_mixin_moves_every_statement_kind_and_keeps_nesting() {
+        check_scss_mixin(
+            ".a {\n  color: red;\n  &:hover {\n    x: y;\n  }\n  /* note */\n  @include other;\n  @media print { display: none; }\n\n  font: {\n    family: x;\n  }\n  @extend %ph;\n  margin: 0;\n}\n",
+            "color: red;\n  &:hover {\n    x: y;\n  }\n  /* note */\n  @include other;\n  @media print { display: none; }\n\n  font: {\n    family: x;\n  }\n  @extend %ph;\n  margin: 0;",
+            &expect_test::expect![[r#"
+                @mixin new-mixin {
+                  color: red;
+                  &:hover {
+                    x: y;
+                  }
+                  /* note */
+                  @include other;
+                  @media print { display: none; }
+
+                  font: {
+                    family: x;
+                  }
+                  @extend %ph;
+                  margin: 0;
+                }
+
+                .a {
+                  @include new-mixin;
+                }
+            "#]],
+        );
+    }
+
+    #[test]
+    fn extract_mixin_whole_line_selection_with_comments() {
+        // Comments wholly inside the selection move; whitespace around it is
+        // ignored, so selecting full lines works.
+        check_scss_mixin(
+            ".a {\n  // heading\n  color: red; // trailing\n  margin: 0;\n}\n",
+            "  // heading\n  color: red; // trailing\n",
+            &expect_test::expect![[r#"
+                @mixin new-mixin {
+                  // heading
+                  color: red; // trailing
+                }
+
+                .a {
+                  @include new-mixin;
+                  margin: 0;
+                }
+            "#]],
+        );
+    }
+
+    #[test]
+    fn extract_mixin_comment_cut_by_selection_stays() {
+        check_scss_mixin(
+            ".a {\n  /* a long note */ color: red;\n}\n",
+            "note */ color: red;",
+            &expect_test::expect![[r#"
+                @mixin new-mixin {
+                  color: red;
+                }
+
+                .a {
+                  /* a long note */ @include new-mixin;
+                }
+            "#]],
+        );
+    }
+
+    #[test]
+    fn extract_mixin_single_line_block() {
+        check_scss_mixin(
+            ".a { color: red; .b { x: y; } margin: 0 }\n",
+            "color: red; .b { x: y; }",
+            &expect_test::expect![[r#"
+                @mixin new-mixin {
+                  color: red; .b { x: y; }
+                }
+
+                .a { @include new-mixin; margin: 0 }
+            "#]],
+        );
+    }
+
+    #[test]
+    fn extract_mixin_partial_statement_no_action() {
+        let src = ".a {\n  color: red;\n  .b { x: y; }\n  margin: 0;\n}\n";
+        // Ends inside `.b { … }`.
+        assert!(run_extract_mixin(src, (1, 2), (2, 8)).is_empty());
+        // Starts inside `color: red;`.
+        assert!(run_extract_mixin(src, (1, 4), (3, 12)).is_empty());
+    }
+
+    #[test]
+    fn extract_mixin_selection_crossing_closing_brace_no_action() {
+        let src = ".a {\n  .b {\n    x: y;\n  }\n  margin: 0;\n}\n.c { }\n";
+        // From inside `.b` past its `}`.
+        assert!(run_extract_mixin(src, (2, 4), (4, 12)).is_empty());
+        // From inside `.a` past its `}`.
+        assert!(run_extract_mixin(src, (4, 2), (6, 3)).is_empty());
+        // The braces themselves.
+        assert!(run_extract_mixin(src, (0, 3), (5, 1)).is_empty());
+    }
+
+    #[test]
+    fn extract_mixin_content_or_nested_mixin_no_action() {
+        let src = "@mixin m {\n  color: red;\n  @content;\n}\n";
+        assert!(run_extract_mixin(src, (1, 2), (2, 11)).is_empty());
+        let src = ".a {\n  color: red;\n  .b { @content; }\n}\n";
+        assert!(run_extract_mixin(src, (1, 2), (2, 18)).is_empty());
+    }
+
+    #[test]
+    fn extract_mixin_comment_only_selection_no_action() {
+        let src = ".a {\n  // just a note\n  color: red;\n}\n";
+        assert!(run_extract_mixin(src, (1, 2), (1, 16)).is_empty());
+    }
+
+    // ── indented Sass ───────────────────────────────────────────────
+
+    type ExtractAction = fn(
+        &Uri,
+        &SyntaxNode,
+        &str,
+        &sass_parser::line_index::LineIndex,
+        Range,
+        &mut Vec<CodeAction>,
+    );
+
+    /// Run `action` on a `.sass` document with `selected` (its first occurrence)
+    /// as the selection, and apply the resulting edits. Asserts that both the
+    /// input and the result parse as indented Sass with no errors.
+    fn apply_in_sass(action: ExtractAction, src: &str, selected: &str) -> Option<String> {
+        let (green, errors) = sass_parser::parse_sass(src);
+        assert!(errors.is_empty(), "input has parse errors: {errors:?}");
+        let root = SyntaxNode::new_root(green);
+        let li = sass_parser::line_index::LineIndex::new(src);
+        let uri: Uri = "file:///test.sass".parse().unwrap();
+        let start = src.find(selected).expect("selection not found in source");
+        #[allow(clippy::cast_possible_truncation)]
+        let sel = TextRange::new(
+            TextSize::from(start as u32),
+            TextSize::from((start + selected.len()) as u32),
+        );
+        let mut actions = Vec::new();
+        action(
+            &uri,
+            &root,
+            src,
+            &li,
+            text_range_to_lsp(sel, &li, src),
+            &mut actions,
+        );
+        let edits: Vec<TextEdit> = actions
+            .into_iter()
+            .flat_map(|a| a.edit.unwrap().changes.unwrap().into_values().flatten())
+            .collect();
+        if edits.is_empty() {
+            return None;
+        }
+        let result = apply_edits(src, &edits);
+        let (_, errors) = sass_parser::parse_sass(&result);
+        assert!(errors.is_empty(), "parse errors in:\n{result}\n{errors:?}");
+        Some(result)
+    }
+
+    fn check_sass(action: ExtractAction, src: &str, selected: &str, expect: &expect_test::Expect) {
+        let result = apply_in_sass(action, src, selected).expect("no code action offered");
+        expect.assert_eq(&result);
+    }
+
+    #[test]
+    fn statement_terminator_follows_the_extension() {
+        let sass: Uri = "file:///a/_b.sass".parse().unwrap();
+        let scss: Uri = "file:///a/_b.scss".parse().unwrap();
+        assert_eq!(statement_terminator(&sass), "");
+        assert_eq!(statement_terminator(&scss), ";");
+    }
+
+    #[test]
+    fn sass_extract_var_in_rule() {
+        check_sass(
+            extract_variable_action,
+            ".btn\n  color: #333\n",
+            "#333",
+            &expect_test::expect![[r"
+                $new-variable: #333
+                .btn
+                  color: $new-variable
+            "]],
+        );
+    }
+
+    #[test]
+    fn sass_extract_var_nested_rule_keeps_indentation() {
+        check_sass(
+            extract_variable_action,
+            ".parent\n    .child\n        color: #fff\n",
+            "#fff",
+            &expect_test::expect![[r"
+                .parent
+                    $new-variable: #fff
+                    .child
+                        color: $new-variable
+            "]],
+        );
+    }
+
+    #[test]
+    fn sass_extract_var_top_level_decl() {
+        check_sass(
+            extract_variable_action,
+            "$color: #333\n",
+            "#333",
+            &expect_test::expect![[r"
+                $new-variable: #333
+                $color: $new-variable
+            "]],
+        );
+    }
+
+    #[test]
+    fn sass_extract_var_in_tab_indented_mixin() {
+        let result = apply_in_sass(
+            extract_variable_action,
+            "@mixin box\n\twidth: 100px * 2\n",
+            "100px * 2",
+        );
+        assert_eq!(
+            result.as_deref(),
+            Some("$new-variable: 100px * 2\n@mixin box\n\twidth: $new-variable\n")
+        );
+    }
+
+    #[test]
+    fn sass_extract_var_multiline_expression() {
+        check_sass(
+            extract_variable_action,
+            ".btn\n  background: linear-gradient(\n    red,\n    blue\n  )\n",
+            "linear-gradient(\n    red,\n    blue\n  )",
+            &expect_test::expect![[r"
+                $new-variable: linear-gradient(
+                    red,
+                    blue
+                  )
+                .btn
+                  background: $new-variable
+            "]],
+        );
+    }
+
+    #[test]
+    fn sass_extract_var_selector_no_action() {
+        let src = ".btn\n  color: red\n";
+        assert_eq!(apply_in_sass(extract_variable_action, src, ".btn"), None);
+    }
+
+    #[test]
+    fn sass_extract_mixin_single_decl() {
+        check_sass(
+            extract_mixin_action,
+            ".btn\n  display: flex\n",
+            "display: flex",
+            &expect_test::expect![[r"
+                @mixin new-mixin
+                  display: flex
+
+                .btn
+                  @include new-mixin
+            "]],
+        );
+    }
+
+    #[test]
+    fn sass_extract_mixin_nested_rule_four_space_unit() {
+        check_sass(
+            extract_mixin_action,
+            ".parent\n    .child\n        display: flex\n        color: red\n    width: 1px\n",
+            "display: flex\n        color: red",
+            &expect_test::expect![[r"
+                .parent
+                    @mixin new-mixin
+                        display: flex
+                        color: red
+
+                    .child
+                        @include new-mixin
+                    width: 1px
+            "]],
+        );
+    }
+
+    #[test]
+    fn sass_extract_mixin_tab_unit() {
+        let result = apply_in_sass(
+            extract_mixin_action,
+            ".btn\n\tdisplay: flex\n\tcolor: red\n",
+            "display: flex\n\tcolor: red",
+        );
+        assert_eq!(
+            result.as_deref(),
+            Some("@mixin new-mixin\n\tdisplay: flex\n\tcolor: red\n\n.btn\n\t@include new-mixin\n")
+        );
+    }
+
+    #[test]
+    fn sass_extract_mixin_unit_comes_from_the_enclosing_block() {
+        // The mixin goes before `.a`, two levels above the declaration. Its body
+        // is still one unit deep, not two.
+        check_sass(
+            extract_mixin_action,
+            ".a\n  @media print\n    color: red\n",
+            "color: red",
+            &expect_test::expect![[r"
+                @mixin new-mixin
+                  color: red
+
+                .a
+                  @media print
+                    @include new-mixin
+            "]],
+        );
+    }
+
+    #[test]
+    fn sass_extract_mixin_keeps_relative_indentation() {
+        // Continuation lines of a multi-line value and anything between the
+        // selected declarations move with them, one level under the mixin.
+        check_sass(
+            extract_mixin_action,
+            ".a\n  color: red\n  // keep me\n  font: 12px\n    family: x\n  background: linear-gradient(\n    red,\n    blue\n  )\n  width: 1px\n",
+            "color: red\n  // keep me\n  font: 12px\n    family: x\n  background: linear-gradient(\n    red,\n    blue\n  )",
+            &expect_test::expect![[r"
+                @mixin new-mixin
+                  color: red
+                  // keep me
+                  font: 12px
+                    family: x
+                  background: linear-gradient(
+                    red,
+                    blue
+                  )
+
+                .a
+                  @include new-mixin
+                  width: 1px
+            "]],
+        );
+    }
+
+    #[test]
+    fn sass_extract_mixin_follows_shorthand_style() {
+        check_sass(
+            extract_mixin_action,
+            "=box\n  width: 1px\n.a\n  +box\n  color: red\n",
+            "color: red",
+            &expect_test::expect![[r"
+                =box
+                  width: 1px
+                =new-mixin
+                  color: red
+
+                .a
+                  +box
+                  +new-mixin
+            "]],
+        );
+    }
+
+    #[test]
+    fn sass_extract_mixin_shorthands_are_detected_independently() {
+        check_sass(
+            extract_mixin_action,
+            "@mixin box\n  width: 1px\n.a\n  +box\n  color: red\n",
+            "color: red",
+            &expect_test::expect![[r"
+                @mixin box
+                  width: 1px
+                @mixin new-mixin
+                  color: red
+
+                .a
+                  +box
+                  +new-mixin
+            "]],
+        );
+    }
+
+    #[test]
+    fn sass_extract_mixin_moves_nested_rule_between_decls() {
+        check_sass(
+            extract_mixin_action,
+            ".a\n  color: red\n  &:hover\n    x: y\n  +other\n  margin: 0\n  width: 1px\n",
+            "color: red\n  &:hover\n    x: y\n  +other\n  margin: 0",
+            &expect_test::expect![[r#"
+                @mixin new-mixin
+                  color: red
+                  &:hover
+                    x: y
+                  +other
+                  margin: 0
+
+                .a
+                  +new-mixin
+                  width: 1px
+            "#]],
+        );
+    }
+
+    #[test]
+    fn sass_extract_mixin_nested_property_uses_long_include() {
+        // Dart Sass reads `+new-mixin` in a nested property's block as a
+        // malformed declaration.
+        check_sass(
+            extract_mixin_action,
+            ".a\n  +b\n  font:\n    family: x\n    size: 1px\n",
+            "family: x",
+            &expect_test::expect![[r#"
+                @mixin new-mixin
+                  family: x
+
+                .a
+                  +b
+                  font:
+                    @include new-mixin
+                    size: 1px
+            "#]],
+        );
+    }
+
+    #[test]
+    fn sass_extract_mixin_partial_statement_no_action() {
+        let src = ".a\n  color: red\n  .b\n    x: y\n  margin: 0\n";
+        assert_eq!(
+            apply_in_sass(extract_mixin_action, src, "color: red\n  .b"),
+            None
+        );
+    }
+
+    #[test]
+    fn sass_extract_mixin_selection_not_on_decl_no_action() {
+        let src = ".btn\n  display: flex\n";
+        assert_eq!(apply_in_sass(extract_mixin_action, src, ".btn"), None);
+    }
+
+    const INVARIANT_SCSS: &[&str] = &[
+        "@use \"sass:math\";\n\n%reset { margin: 0; }\n\n@mixin other($x: 1px) {\n  padding: $x;\n  @content;\n}\n\n.card {\n  $gap: 8px;\n  display: flex; // layout\n  gap: $gap;\n  &:hover {\n    color: red;\n    .icon & { opacity: 0.5; }\n  }\n\n  /* spacing */\n  @include other(2px) {\n    border: 0;\n  }\n  @media (min-width: 600px) {\n    gap: math.div($gap, 2);\n  }\n  font: {\n    family: sans-serif;\n    size: 12px;\n  }\n  @extend %reset;\n  --accent: #{$gap};\n  margin: 0 auto !important;\n}\n",
+        "@mixin box {\n  .inner {\n    width: 1px;\n    @if $a == 1 { height: 2px; } @else { height: 3px; }\n    @each $k in a, b {\n      .#{$k} { color: $k; }\n    }\n  }\n}\n.nav { ul { li { a { color: blue; text-decoration: none; } } } }\n",
+    ];
+
+    const INVARIANT_SASS: &[&str] = &[
+        "@use \"sass:math\"\n\n%reset\n  margin: 0\n\n=other($x: 1px)\n  padding: $x\n  @content\n\n.card\n  $gap: 8px\n  display: flex\n  // layout\n  gap: $gap\n  &:hover\n    color: red\n    .icon &\n      opacity: 0.5\n\n  /* spacing */\n  +other(2px)\n    border: 0\n  @media (min-width: 600px)\n    gap: math.div($gap, 2)\n  font:\n    family: sans-serif\n    size: 12px\n  @extend %reset\n  margin: 0 auto !important\n",
+        "@mixin box\n    .inner\n        width: 1px\n        @if $a == 1\n            height: 2px\n        @else\n            height: 3px\n        background: linear-gradient(\n            red,\n            blue\n        )\n.nav\n    ul\n        li\n            color: blue\n",
+    ];
+
+    /// Byte offsets a user might plausibly start or end a selection at: every
+    /// token boundary, the middle of every longer token and every line end.
+    fn selection_offsets(root: &SyntaxNode, src: &str) -> Vec<usize> {
+        let mut offsets: Vec<usize> = root
+            .descendants_with_tokens()
+            .filter_map(NodeOrToken::into_token)
+            .flat_map(|t| {
+                let r = t.text_range();
+                let (start, end) = (usize::from(r.start()), usize::from(r.end()));
+                let mid = (start..=start + (end - start) / 2)
+                    .rev()
+                    .find(|&i| src.is_char_boundary(i))
+                    .unwrap_or(start);
+                [start, mid, end]
+            })
+            .chain(src.match_indices('\n').map(|(i, _)| i))
+            .collect();
+        offsets.sort_unstable();
+        offsets.dedup();
+        offsets
+    }
+
+    fn sorted_visible_chars(parts: &[&str]) -> Vec<char> {
+        let mut chars: Vec<char> = parts
+            .iter()
+            .flat_map(|p| p.chars())
+            .filter(|c| !c.is_whitespace())
+            .collect();
+        chars.sort_unstable();
+        chars
+    }
+
+    /// For every selection over a few realistic documents, an offered "Extract
+    /// to mixin" must keep every visible character of the document — adding
+    /// only the mixin's header and the `@include` — and leave a document that
+    /// parses without errors.
+    #[test]
+    fn extract_mixin_never_loses_text() {
+        type Parse = fn(&str) -> (sass_parser::syntax::GreenNode, Vec<(String, TextRange)>);
+        let cases = INVARIANT_SCSS
+            .iter()
+            .map(|s| (*s, "file:///t.scss", sass_parser::parse_scss as Parse))
+            .chain(
+                INVARIANT_SASS
+                    .iter()
+                    .map(|s| (*s, "file:///t.sass", sass_parser::parse_sass as Parse)),
+            );
+
+        let (mut tried, mut offered) = (0usize, 0usize);
+        for (src, uri, parse) in cases {
+            let (green, errors) = parse(src);
+            assert!(
+                errors.is_empty(),
+                "input has parse errors: {errors:?}\n{src}"
+            );
+            let root = SyntaxNode::new_root(green);
+            let li = sass_parser::line_index::LineIndex::new(src);
+            let uri: Uri = uri.parse().unwrap();
+            let offsets = selection_offsets(&root, src);
+
+            for (i, &start) in offsets.iter().enumerate() {
+                for &end in &offsets[i + 1..] {
+                    tried += 1;
+                    #[allow(clippy::cast_possible_truncation)]
+                    let sel =
+                        TextRange::new(TextSize::from(start as u32), TextSize::from(end as u32));
+                    let mut actions = Vec::new();
+                    let range = text_range_to_lsp(sel, &li, src);
+                    extract_mixin_action(&uri, &root, src, &li, range, &mut actions);
+                    for action in actions {
+                        offered += 1;
+                        let edits: Vec<TextEdit> = action
+                            .edit
+                            .unwrap()
+                            .changes
+                            .unwrap()
+                            .into_values()
+                            .flatten()
+                            .collect();
+                        let result = apply_edits(src, &edits);
+                        let added: Vec<&str> = edits
+                            .iter()
+                            .flat_map(|e| e.new_text.lines())
+                            .filter(|l| l.contains("new-mixin"))
+                            .collect();
+                        let mut scaffold = added.join("");
+                        if !crate::worker::is_sass_file(&uri) {
+                            scaffold.push('}');
+                        }
+                        let context =
+                            format!("selection {:?}\n--- result ---\n{result}", &src[start..end]);
+                        assert_eq!(
+                            sorted_visible_chars(&[&result]),
+                            sorted_visible_chars(&[src, &scaffold]),
+                            "visible text changed for {context}"
+                        );
+                        let (_, errors) = parse(&result);
+                        assert!(errors.is_empty(), "parse errors {errors:?} for {context}");
+                    }
+                }
+            }
+        }
+        assert!(tried > 50_000, "only {tried} selections tried");
+        assert!(offered > 500, "only {offered} actions offered");
+    }
+
+    #[test]
+    fn detect_indent_unit_first_indented_line() {
+        assert_eq!(detect_indent_unit("// c\n\n.a\n   b: c\n  d: e\n"), "   ");
+        assert_eq!(detect_indent_unit(".a\n\tb: c\n"), "\t");
+        assert_eq!(detect_indent_unit("$a: 1\n"), "  ");
     }
 }

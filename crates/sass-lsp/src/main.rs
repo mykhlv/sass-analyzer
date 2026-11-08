@@ -105,8 +105,11 @@ struct Backend {
     module_graph: Arc<workspace::ModuleGraph>,
     runtime_config: Arc<config::RuntimeConfig>,
     task_tx: mpsc::UnboundedSender<Task>,
-    /// Workspace root, captured from `initialize` for use in `didChangeConfiguration`.
+    /// Workspace root, captured from `initialize`. Read by `execute_command` to scope
+    /// the `sass-analyzer.checkWorkspace` command.
     workspace_root: RwLock<Option<PathBuf>>,
+    /// Every workspace folder, primary first. Captured from `initialize`.
+    workspace_folders: RwLock<Vec<PathBuf>>,
 }
 
 pub(crate) struct DocumentState {
@@ -170,6 +173,29 @@ pub(crate) fn compute_diff_edit(
     })
 }
 
+/// Build the set of filesystem roots the server is allowed to read from.
+///
+/// Every workspace folder is allowed. `load_paths` and `import_aliases` are relative to
+/// the primary folder, matching how `config::build_resolver` resolves them.
+pub(crate) fn compute_allowed_roots(
+    folders: &[PathBuf],
+    config: &config::SassAnalyzerConfig,
+) -> Vec<PathBuf> {
+    let Some(primary) = folders.first() else {
+        return Vec::new();
+    };
+    let mut roots: Vec<PathBuf> = folders.to_vec();
+    for lp in &config.load_paths {
+        roots.push(primary.join(lp));
+    }
+    for target in config.import_aliases.values() {
+        for p in target.paths() {
+            roots.push(primary.join(p));
+        }
+    }
+    roots
+}
+
 // ── LanguageServer impl ─────────────────────────────────────────────
 
 impl LanguageServer for Backend {
@@ -198,39 +224,41 @@ impl LanguageServer for Backend {
         let resolver = config::build_resolver(&lsp_config, workspace_root.as_deref());
         self.module_graph.set_resolver(resolver);
         self.module_graph
-            .set_prepend_imports(lsp_config.prepend_imports);
+            .set_prepend_imports(lsp_config.prepend_imports.clone());
 
         // Build allowed roots for path traversal protection.
         // Include all workspace folders so multi-root workspaces can resolve
         // cross-folder imports.
-        if let Some(root) = &workspace_root {
-            let mut roots = vec![root.clone()];
-            // Add additional workspace folders beyond the primary one.
-            if let Some(folders) = &params.workspace_folders {
-                for folder in folders.iter().skip(1) {
-                    if let Some(path) = folder.uri.to_file_path() {
-                        roots.push(path.into_owned());
-                    }
-                }
-            }
-            for lp in &lsp_config.load_paths {
-                roots.push(root.join(lp));
-            }
-            for target in lsp_config.import_aliases.values() {
-                for p in target.paths() {
-                    roots.push(root.join(p));
-                }
-            }
-            self.module_graph.set_allowed_roots(roots);
-        }
+        let workspace_folders: Vec<PathBuf> = params
+            .workspace_folders
+            .as_ref()
+            .map(|folders| {
+                folders
+                    .iter()
+                    .filter_map(|f| f.uri.to_file_path().map(std::borrow::Cow::into_owned))
+                    .collect()
+            })
+            .filter(|v: &Vec<PathBuf>| !v.is_empty())
+            .or_else(|| workspace_root.clone().map(|r| vec![r]))
+            .unwrap_or_default();
 
-        // Store workspace root for didChangeConfiguration.
+        self.module_graph
+            .set_allowed_roots(compute_allowed_roots(&workspace_folders, &lsp_config));
+
+        // Store workspace root and folders for didChangeConfiguration.
         {
             let mut guard = self
                 .workspace_root
                 .write()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             (*guard).clone_from(&workspace_root);
+        }
+        {
+            let mut guard = self
+                .workspace_folders
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            (*guard).clone_from(&workspace_folders);
         }
 
         tracing::info!(?workspace_root, "configured resolver");
@@ -459,26 +487,40 @@ impl LanguageServer for Backend {
         self.runtime_config.apply(&new_config);
 
         // Rebuild resolver, prepend imports, and allowed roots from new config.
-        let workspace_root = self
-            .workspace_root
+        let workspace_folders = self
+            .workspace_folders
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
+        let workspace_root = workspace_folders.first().cloned();
+
         let resolver = config::build_resolver(&new_config, workspace_root.as_deref());
         self.module_graph.set_resolver(resolver);
         self.module_graph
-            .set_prepend_imports(new_config.prepend_imports);
-        if let Some(root) = &workspace_root {
-            let mut roots = vec![root.clone()];
-            for lp in &new_config.load_paths {
-                roots.push(root.join(lp));
+            .set_prepend_imports(new_config.prepend_imports.clone());
+        self.module_graph
+            .set_allowed_roots(compute_allowed_roots(&workspace_folders, &new_config));
+
+        // Re-parse open files so their imports re-resolve with the new resolver.
+        // The version must match what is already stored: the worker drops a parse
+        // whose version is older than the current DocumentState.
+        for entry in self.source_texts.iter() {
+            let uri = entry.key().clone();
+            let text = entry.value().clone();
+            let version = self.documents.get(&uri).map_or(0, |d| d.version);
+            if self
+                .task_tx
+                .send(Task::Parse {
+                    uri,
+                    version,
+                    text,
+                    incremental: None,
+                })
+                .is_err()
+            {
+                tracing::error!("worker channel closed, config re-parse task dropped");
+                break;
             }
-            for target in new_config.import_aliases.values() {
-                for p in target.paths() {
-                    roots.push(root.join(p));
-                }
-            }
-            self.module_graph.set_allowed_roots(roots);
         }
 
         tracing::info!("configuration updated");
@@ -811,6 +853,7 @@ async fn main() {
             runtime_config,
             task_tx,
             workspace_root: RwLock::new(None),
+            workspace_folders: RwLock::new(Vec::new()),
         }
     });
     Server::new(stdin, stdout, socket).serve(service).await;

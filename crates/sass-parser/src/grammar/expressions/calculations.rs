@@ -18,6 +18,15 @@ const CALC_VALUE_START: TokenSet = TokenSet::new(&[
 pub(super) fn calculation(p: &mut Parser<'_>) -> CompletedMarker {
     let m = p.start();
     p.bump(); // function name (calc, min, max, etc.)
+    if p.at(LPAREN) {
+        calculation_args(&mut p.transparent_guard());
+    } else {
+        calculation_args(p);
+    }
+    m.complete(p, CALCULATION)
+}
+
+fn calculation_args(p: &mut Parser<'_>) {
     p.expect(LPAREN);
 
     if !p.at(RPAREN) && !p.at_end() {
@@ -30,7 +39,6 @@ pub(super) fn calculation(p: &mut Parser<'_>) -> CompletedMarker {
     }
 
     p.expect(RPAREN);
-    m.complete(p, CALCULATION)
 }
 
 /// Parse calc sum: `a + b` or `a - b` (lowest precedence inside calc).
@@ -49,8 +57,11 @@ fn calc_sum(p: &mut Parser<'_>) {
         } else if p.at_ts(CALC_VALUE_START) && !p.at(PLUS) && !p.at(MINUS) {
             // Space-separated value without operator (opaque content from
             // interpolation, var(), or variables): `calc(#{$x} 2)`, `calc(var(--c) 1)`
+            // At the nesting limit nothing is consumed, and retrying would never end.
+            if !calc_product(p) {
+                break;
+            }
             has_op = true;
-            calc_product(p);
         } else {
             break;
         }
@@ -63,9 +74,10 @@ fn calc_sum(p: &mut Parser<'_>) {
 }
 
 /// Parse calc product: `a * b` or `a / b` (higher precedence inside calc).
-fn calc_product(p: &mut Parser<'_>) {
+/// Returns whether its first value consumed a token.
+fn calc_product(p: &mut Parser<'_>) -> bool {
     let m = p.start();
-    calc_value(p);
+    let progressed = calc_value(p);
     let mut has_op = false;
     while p.at(STAR) || p.at(SLASH) {
         has_op = true;
@@ -77,12 +89,14 @@ fn calc_product(p: &mut Parser<'_>) {
     } else {
         m.abandon(p);
     }
+    progressed
 }
 
 /// Parse a single calc value: number, dimension, variable, nested calc, or parenthesized.
-fn calc_value(p: &mut Parser<'_>) {
+/// Returns whether it consumed a token: not at the nesting limit, nor where no value starts.
+fn calc_value(p: &mut Parser<'_>) -> bool {
     let Ok(mut g) = p.depth_guard() else {
-        return;
+        return false;
     };
     let m = g.start();
     match g.current() {
@@ -99,12 +113,12 @@ fn calc_value(p: &mut Parser<'_>) {
                     // Nested calculation: `calc(min(10px, 5vw) + 1rem)`
                     let _ = calculation(&mut g);
                     m.abandon(&mut g);
-                    return;
+                    return true;
                 }
                 // Non-calc function inside calc: `var(--x)`, `env(safe-area-inset-top)`
                 let _ = super::functions::function_call(&mut g, ParseContext::CssValue);
                 m.abandon(&mut g);
-                return;
+                return true;
             }
             // Plain ident
             g.bump();
@@ -114,6 +128,7 @@ fn calc_value(p: &mut Parser<'_>) {
             let _ = interpolation(&mut g);
         }
         LPAREN => {
+            let mut g = g.transparent_guard();
             g.bump(); // (
             calc_sum(&mut g);
             g.expect(RPAREN);
@@ -129,7 +144,10 @@ fn calc_value(p: &mut Parser<'_>) {
         }
         _ => {
             g.error("expected value in calculation");
+            let _ = m.complete(&mut g, CALC_VALUE);
+            return false;
         }
     }
     let _ = m.complete(&mut g, CALC_VALUE);
+    true
 }

@@ -5,8 +5,10 @@ use crate::syntax_kind::*;
 /// `@use "path"` / `as name` / `as *` / `with ($var: value, ...)`
 pub fn use_rule(p: &mut Parser<'_>) {
     let m = p.start();
+    let errors = p.error_count();
     p.bump(); // @
     p.bump(); // use
+    p.continue_header(&super::lines::MODULE);
 
     // Path — must be a non-interpolated string
     if p.at(STRING_START) {
@@ -35,17 +37,17 @@ pub fn use_rule(p: &mut Parser<'_>) {
         with_config(p);
     }
 
-    if !p.at(RBRACE) && !p.at_end() {
-        p.expect(SEMICOLON);
-    }
+    super::lines::end_without_block(p, errors, "`@use`");
     let _ = m.complete(p, USE_RULE);
 }
 
 /// `@forward "path"` / `as prefix-*` / `hide`/`show` / `with (...)`
 pub fn forward_rule(p: &mut Parser<'_>) {
     let m = p.start();
+    let errors = p.error_count();
     p.bump(); // @
     p.bump(); // forward
+    p.continue_header(&super::lines::MODULE);
 
     // Path
     if p.at(STRING_START) {
@@ -84,6 +86,7 @@ pub fn forward_rule(p: &mut Parser<'_>) {
                 if p.at(IDENT) || p.at(DOLLAR) {
                     visibility_member(p);
                     while p.eat(COMMA) {
+                        p.continue_line_across_blank();
                         visibility_member(p);
                     }
                 } else {
@@ -99,9 +102,7 @@ pub fn forward_rule(p: &mut Parser<'_>) {
         }
     }
 
-    if !p.at(RBRACE) && !p.at_end() {
-        p.expect(SEMICOLON);
-    }
+    super::lines::end_without_block(p, errors, "`@forward`");
     let _ = m.complete(p, FORWARD_RULE);
 }
 
@@ -123,6 +124,7 @@ fn with_config(p: &mut Parser<'_>) {
         p.error("expected `(`");
         return;
     }
+    let p = &mut *p.transparent_guard();
     p.bump(); // (
 
     if p.at(RPAREN) {
@@ -158,6 +160,7 @@ fn with_config_entry(p: &mut Parser<'_>) {
 /// `@import "path"` (deprecated, but still valid syntax)
 pub fn import_rule(p: &mut Parser<'_>) {
     let m = p.start();
+    let errors = p.error_count();
     p.bump(); // @
     p.bump(); // import
 
@@ -167,9 +170,7 @@ pub fn import_rule(p: &mut Parser<'_>) {
         import_argument(p);
     }
 
-    if !p.at(RBRACE) && !p.at_end() {
-        p.expect(SEMICOLON);
-    }
+    super::lines::end_without_block(p, errors, "`@import`");
     let _ = m.complete(p, IMPORT_RULE);
 }
 
@@ -230,7 +231,7 @@ fn import_conditions(p: &mut Parser<'_>) {
             }
             _ => {
                 has_conditions = true;
-                p.bump();
+                super::lines::bump_in_run(p);
             }
         }
     }

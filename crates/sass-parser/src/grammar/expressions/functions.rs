@@ -199,12 +199,13 @@ pub(super) fn function_call(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedM
 /// Parse argument list `(...)` for function calls and `@include`.
 pub(crate) fn arg_list(p: &mut Parser<'_>, ctx: ParseContext) {
     assert!(p.at(LPAREN));
+    let p = &mut *p.transparent_guard();
     let m = p.start();
     p.bump(); // (
 
     if !p.at(RPAREN) && !p.at_end() {
         arg(p, ctx);
-        while p.eat(COMMA) {
+        while super::eat_comma(p) {
             if !p.at(RPAREN) && !p.at_end() {
                 arg(p, ctx);
             }
@@ -296,11 +297,14 @@ fn special_function_call(p: &mut Parser<'_>) -> CompletedMarker {
         return m.complete(p, VALUE);
     }
 
+    let mut g = p.transparent_guard();
+    let p = &mut *g;
     p.bump(); // (
 
-    // Consume everything inside as opaque tokens until matching `)`
+    // Consume everything inside as opaque tokens until matching `)`, or until a string left
+    // unclosed, which took the rest of its line with it
     let mut depth: u32 = 1;
-    while !p.at_end() && depth > 0 {
+    while !p.at_end() && depth > 0 && !p.at_unclosed_string_break() {
         match p.current() {
             LPAREN => {
                 depth += 1;

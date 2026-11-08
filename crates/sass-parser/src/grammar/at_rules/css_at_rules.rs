@@ -12,20 +12,12 @@ pub fn layer_rule(p: &mut Parser<'_>) {
     p.bump(); // layer
 
     // Optional layer name(s)
-    if p.at(IDENT) {
-        p.bump();
-        // Dot-separated: `layer.sublayer`
-        while p.eat(DOT) {
-            p.expect(IDENT);
-        }
-
+    if at_layer_name(p) {
+        layer_name(p);
         // Comma-separated multiple names → statement form
         while p.eat(COMMA) {
-            if p.at(IDENT) {
-                p.bump();
-                while p.eat(DOT) {
-                    p.expect(IDENT);
-                }
+            if at_layer_name(p) {
+                layer_name(p);
             }
         }
     }
@@ -38,21 +30,54 @@ pub fn layer_rule(p: &mut Parser<'_>) {
     let _ = m.complete(p, LAYER_RULE);
 }
 
+fn at_layer_name(p: &Parser<'_>) -> bool {
+    p.at(IDENT) || p.at(HASH_LBRACE)
+}
+
+/// A dot-separated layer name: `a`, `a.b.c`. Each part is an ident, an interpolation, or
+/// a run of both glued together with no whitespace between them — `vuetify-#{$name}`,
+/// `#{$a}-suffix`. Same shape as an at-rule's own name in `generic_at_rule`.
+fn layer_name(p: &mut Parser<'_>) {
+    loop {
+        let mut consumed = false;
+        while (p.at(IDENT) || p.at(MINUS) || p.at(HASH_LBRACE))
+            && (!consumed || !p.has_whitespace_before())
+        {
+            if p.at(HASH_LBRACE) {
+                let _ = super::expressions::interpolation(p);
+            } else {
+                p.bump();
+            }
+            consumed = true;
+        }
+        if !p.eat(DOT) {
+            return;
+        }
+        if !at_layer_name(p) {
+            p.expect(IDENT);
+            return;
+        }
+    }
+}
+
 /// `@container name (width > 400px) { }` or `@container (width > 400px) { }`
 pub fn container_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // container
 
+    let errors = p.error_count();
+    let empty = p.at_ts(BLOCK_STOP) || p.at_end();
     // Optional container name (ident before parenthesized condition)
     if p.at(IDENT) {
         p.bump();
     }
 
-    super::eat_opaque_condition(p, BLOCK_STOP);
+    super::eat_opaque_condition(p, BLOCK_STOP, false);
+    super::lines::unfinished_condition(p, empty, &["and", "or", "not"], "container query");
 
     if p.at(LBRACE) {
-        super::block(p);
+        super::block_after(p, p.error_count() > errors);
     }
     let _ = m.complete(p, CONTAINER_RULE);
 }
@@ -63,10 +88,12 @@ pub fn scope_rule(p: &mut Parser<'_>) {
     p.bump(); // @
     p.bump(); // scope
 
-    super::eat_opaque_condition(p, BLOCK_STOP);
+    let errors = p.error_count();
+    super::eat_opaque_condition(p, BLOCK_STOP, false);
+    super::lines::unfinished_condition(p, false, &["to"], "scope boundary");
 
     if p.at(LBRACE) {
-        super::block(p);
+        super::block_after(p, p.error_count() > errors);
     }
     let _ = m.complete(p, SCOPE_RULE);
 }
@@ -128,12 +155,11 @@ pub fn namespace_rule(p: &mut Parser<'_>) {
 /// `@charset "UTF-8";`
 pub fn charset_rule(p: &mut Parser<'_>) {
     let m = p.start();
+    let errors = p.error_count();
     p.bump(); // @
     p.bump(); // charset
     p.expect(QUOTED_STRING);
-    if !p.at(RBRACE) && !p.at_end() {
-        p.expect(SEMICOLON);
-    }
+    super::lines::end_without_block(p, errors, "`@charset`");
     let _ = m.complete(p, CHARSET_RULE);
 }
 

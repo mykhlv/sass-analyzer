@@ -46,7 +46,7 @@ pub(crate) fn lsp_position_to_offset(
 ) -> Option<TextSize> {
     let line_start = line_index.line_start(position.line)? as usize;
     let remaining = &source[line_start..];
-    let line_text = remaining.split('\n').next().unwrap_or(remaining);
+    let line_text = remaining.split(['\n', '\r']).next().unwrap_or(remaining);
 
     let target_utf16 = position.character;
     let mut byte_offset = 0usize;

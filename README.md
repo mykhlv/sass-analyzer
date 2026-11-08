@@ -6,6 +6,10 @@
 
 A hand-written recursive descent SCSS/Sass parser and language server in Rust, built for IDE tooling. Supports both SCSS (`.scss`) and indented Sass (`.sass`) syntax.
 
+## Requirements
+
+- VS Code 1.82 or newer
+
 ## Why
 
 Existing SCSS extensions for VS Code struggle in monorepos: slow startup, high memory usage, incomplete module system support. sass-analyzer is a native Rust alternative — a lossless CST parser and full-featured LSP server that handles large workspaces without breaking a sweat.
@@ -69,11 +73,11 @@ Follows [rust-analyzer](https://rust-analyzer.github.io/book/contributing/archit
 Source text (.scss)              Source text (.sass)
     │                                │
     ▼                                ▼
-  Lexer ──► Input               SassLexer (indent → virtual {/}/;) ──► Input
+  Lexer ──► Input               IndentedLexer ──► Input + line facts
     │                                │
     └──────────┬─────────────────────┘
                ▼
-  Parser ──► Events (Enter/Token/Exit/Error)
+  Parser ──► Events (Enter/Token/Virtual/Exit/Error)
                │
                ▼
   Bridge ──► rowan GreenNode tree + diagnostics
@@ -86,7 +90,7 @@ Source text (.scss)              Source text (.sass)
 
 **Full SCSS syntax** — selectors, declarations, nested rules, `&` parent selector, interpolation `#{...}` everywhere (selectors, properties, values, strings, `url()`).
 
-**Indented Sass syntax** (`.sass`) — whitespace-significant syntax without braces or semicolons. A dedicated lexer converts indentation into virtual `{`/`}`/`;` tokens, feeding the same parser — all features work identically for both syntaxes.
+**Indented Sass syntax** (`.sass`) — whitespace-significant syntax without braces or semicolons. The same grammar parses both syntaxes; in indented mode the parser decides where statements and blocks end from the indentation, the way Dart Sass does, and records those boundaries as zero-width `{`/`}`/`;` tokens — all features work identically for both syntaxes.
 
 **Expressions** — arithmetic, comparison, logical operators, Pratt-parsed with correct precedence. Maps, lists, bracketed lists, function calls with keyword/rest args.
 
@@ -167,7 +171,7 @@ sass-cli lex file.scss        # Dump token stream
 ```
 cargo build --workspace
 cargo test --workspace
-cargo clippy --workspace -- -D warnings
+cargo clippy --workspace --all-targets -- -D warnings
 ```
 
 Requires Rust 1.94+ (edition 2024).
@@ -180,13 +184,15 @@ sass-analyzer/
 │   ├── sass-parser/          # Core library
 │   │   ├── src/
 │   │   │   ├── lexer.rs          # Tokenizer
+│   │   │   ├── lexer/indented.rs # Comment extent for indented Sass
 │   │   │   ├── parser.rs         # Parser infrastructure
+│   │   │   ├── parser/indented.rs # Indentation layout for indented Sass
 │   │   │   ├── grammar/          # Recursive descent grammar
 │   │   │   │   ├── selectors.rs
 │   │   │   │   ├── declarations.rs
-│   │   │   │   ├── expressions.rs    # Pratt parser
+│   │   │   │   ├── expressions/      # Pratt parser
+│   │   │   │   ├── lines.rs          # Where an indented line continues
 │   │   │   │   └── at_rules/         # 9 at-rule modules
-│   │   │   ├── sass_lexer.rs     # Indented Sass → virtual tokens
 │   │   │   ├── bridge.rs         # Events → rowan tree
 │   │   │   ├── ast/              # Typed AST wrappers
 │   │   │   ├── imports.rs        # Dependency extraction
@@ -195,7 +201,7 @@ sass-analyzer/
 │   │   │   └── token_set.rs      # [u64; 4] bit set
 │   │   ├── tests/            # expect-test snapshots
 │   │   ├── benches/          # divan benchmarks
-│   │   └── fuzz/             # 4 libfuzzer targets
+│   │   └── fuzz/             # 7 libfuzzer targets
 │   ├── sass-lsp/             # LSP server (tower-lsp-server)
 │   ├── sass-cli/             # Command-line tool
 │   └── xtask/                # Codegen from sass.ungram

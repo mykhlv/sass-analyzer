@@ -20,4 +20,11 @@ crates/sass-parser/fuzz/artifacts/
 /test-corpus/bulma/
 /test-corpus/angular-material/
 /test-corpus/sass-spec/
-/test-corpus/sass-spec-gaps.txt
+/test-corpus/sass-spec-full/
+/test-corpus/bulma-sass/
+/test-corpus/vuetify/
+/test-corpus/quasar/
+/test-corpus/sass-corpus-baseline.actual.txt
+/test-corpus/scss-corpus-baseline.actual.txt
+/test-corpus/sass-spec-shapes.actual.txt
+/test-corpus/sass-spec-noisy-errors.actual.txt

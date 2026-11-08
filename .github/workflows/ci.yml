@@ -18,7 +18,7 @@ jobs:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --workspace
-      - run: cargo clippy --workspace -- -D warnings
+      - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
       - name: Check formatting
         if: matrix.os == 'ubuntu-latest'
@@ -38,7 +38,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      # The cargo-deny action builds a Docker image on every run, and that build
+      # fails; the prebuilt binary needs no image.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      - run: cargo deny check
 
   version-sync:
     runs-on: ubuntu-latest
@@ -67,3 +72,70 @@ jobs:
         run: npm run lint
       - working-directory: editors/code
         run: npm run build
+
+  sass-spec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Cache sass-spec corpus
+        uses: actions/cache@v4
+        with:
+          path: test-corpus/sass-spec
+          key: sass-spec-${{ hashFiles('test-corpus/download.sh') }}
+      - name: Download corpus
+        run: bash test-corpus/download.sh sass-spec
+      # sass_spec_compatibility also compares the tree shape of every valid case
+      # with sass-spec-shapes.txt, failing on any difference and writing a .actual
+      # sibling instead of the tracked file.
+      - name: Run sass-spec compatibility
+        run: cargo test -p sass-parser --test sass_spec_test -- --ignored --nocapture
+      - name: Fail on compliance drift
+        run: |
+          if ! git diff --exit-code -- test-corpus/sass-spec-gaps.txt \
+                                        test-corpus/sass-spec-sass-gaps.txt \
+                                        test-corpus/sass-spec-shapes.txt \
+                                        test-corpus/sass-spec-noisy-errors.txt; then
+            echo "::error::sass-spec compliance changed. Review the diff above and \
+          commit the regenerated gap files if the change is an improvement."
+            exit 1
+          fi
+
+  sass-corpus:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Cache SCSS and indented-Sass corpora
+        uses: actions/cache@v4
+        with:
+          path: |
+            test-corpus/bootstrap
+            test-corpus/foundation
+            test-corpus/primer
+            test-corpus/bulma
+            test-corpus/angular-material
+            test-corpus/bulma-sass
+            test-corpus/vuetify
+            test-corpus/quasar
+          key: corpora-${{ hashFiles('test-corpus/download.sh') }}
+      - name: Download corpora
+        run: >-
+          bash test-corpus/download.sh bootstrap foundation primer bulma angular-material
+          bulma-sass vuetify quasar
+      # Runs both sass_corpora_match_baseline and scss_corpora_match_baseline. Each
+      # fails on any per-file difference (errors or tree shape) and then writes a
+      # .actual sibling instead of the tracked baseline.
+      - name: Parse the corpora
+        run: cargo test -p sass-parser --test corpus_test -- --ignored corpora_match_baseline --nocapture
+      - name: Fail on baseline drift
+        run: |
+          if ! git diff --exit-code -- test-corpus/sass-corpus-baseline.txt \
+                                        test-corpus/scss-corpus-baseline.txt; then
+            echo "::error::a corpus baseline was rewritten with different content \
+          although every record matched (a header change, or a baseline file missing \
+          from the commit). Commit the regenerated file after reviewing the diff."
+            exit 1
+          fi

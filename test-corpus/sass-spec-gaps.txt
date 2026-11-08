@@ -1,0 +1,8 @@
+libsass-todo-issues/issue_221262	4
+  0..1: expected rule
+  4..6: expected IDENT
+  9..10: expected IDENT
+libsass-todo-issues/issue_221292	3
+  4..5: expected rule
+  8..9: expected IDENT
+  664..664: expected RPAREN

@@ -4,6 +4,7 @@ use crate::syntax_kind::*;
 
 use super::ParseContext;
 use super::expressions;
+use super::lines::WordOperator;
 use super::selectors;
 
 /// 2.7: Parse declaration or nested property.
@@ -23,7 +24,7 @@ pub(crate) fn declaration(p: &mut Parser<'_>) {
     // 2.10: Check for nested property patterns
     if p.at(LBRACE) {
         // IDENT COLON LBRACE → nested property with no value: `font: { weight: bold; }`
-        super::block(p);
+        super::property_block(p);
         let _ = m.complete(p, NESTED_PROPERTY);
         return;
     }
@@ -34,10 +35,16 @@ pub(crate) fn declaration(p: &mut Parser<'_>) {
 
     // Check for !important after the value
     if p.at(BANG) {
-        let flag_text = if p.nth(1) == IDENT { p.nth_text(1) } else { "" };
+        let joined = p.joined(super::lines::LINE_JOINS);
+        let flag_text = if p.nth_joined(joined, 1) == IDENT {
+            p.nth_text_joined(joined, 1)
+        } else {
+            ""
+        };
         if flag_text == "important" {
             let fm = p.start();
             p.bump(); // !
+            p.continue_line();
             p.bump(); // important
             let _ = fm.complete(p, IMPORTANT);
         }
@@ -45,7 +52,7 @@ pub(crate) fn declaration(p: &mut Parser<'_>) {
 
     // 2.10(c): Value-and-block: `margin: 10px { top: 20px; }`
     if p.at(LBRACE) {
-        super::block(p);
+        super::property_block(p);
         let _ = m.complete(p, NESTED_PROPERTY);
         return;
     }
@@ -62,23 +69,26 @@ pub(crate) fn declaration(p: &mut Parser<'_>) {
 /// Depth-aware: tracks `()`, `[]`, `{}` nesting.
 fn custom_property_declaration(p: &mut Parser<'_>) {
     let m = p.start();
+    let errors = p.error_count();
     property(p);
     p.expect(COLON);
     if !p.at(SEMICOLON) && !p.at(RBRACE) && !p.at_end() {
-        custom_property_value(p);
+        custom_property_value(p, false);
     }
-    if !p.at(RBRACE) && !p.at_end() {
-        p.expect(SEMICOLON);
-    }
+    super::lines::end_without_block(p, errors, "a custom property");
     let _ = m.complete(p, CUSTOM_PROPERTY_DECL);
 }
 
 /// Parse a property name, including interpolation.
 ///
 /// Handles: `color`, `--custom`, `#{$prop}`, `border-#{$side}`,
-/// `#{$a}-#{$b}`, `#{$ns}-#{$prop}-color`.
+/// `#{$a}-#{$b}`, `#{$ns}-#{$prop}-color`, and the hacks `*color`, `.color`, `#color`,
+/// `:color`.
 fn property(p: &mut Parser<'_>) {
     let m = p.start();
+    if p.at(DOT) || p.at(HASH) || p.at(COLON) || p.at(STAR) {
+        p.bump();
+    }
     if !p.at(IDENT) && !p.at(HASH_LBRACE) && !p.at(MINUS) && !p.at(STAR) {
         p.error("expected property name");
         let _ = m.complete(p, PROPERTY);
@@ -110,49 +120,77 @@ fn value(p: &mut Parser<'_>) {
     let ctx = ParseContext::CssValue;
 
     let mut has_content = false;
+    // The last item was an operand, which `and` or `or` after it would combine.
+    let mut operand_before = false;
     loop {
-        if p.at(SEMICOLON) || p.at(RBRACE) || p.at(LBRACE) || p.at_end() {
+        // A string left unclosed ends the declaration at its line break: it most likely
+        // took the `;`, and if not, the next line is still more likely a new statement.
+        if p.at(SEMICOLON)
+            || p.at(RBRACE)
+            || p.at(LBRACE)
+            || p.at_end()
+            || p.at_unclosed_string_break()
+        {
             break;
         }
         // Break for `!important` only when it's at the END of the value
         if p.at(BANG) {
-            if p.nth(1) == IDENT && p.nth_text(1) == "important" {
-                let after = p.nth(2);
+            let joined = p.joined(super::lines::LINE_JOINS);
+            if p.nth_joined(joined, 1) == IDENT && p.nth_text_joined(joined, 1) == "important" {
+                let after = p.nth_joined(joined, 2);
                 if after == SEMICOLON || after == RBRACE || after == LBRACE || after == EOF {
                     break;
                 }
             }
             // Not end-of-value !important — consume as value content
             p.bump();
+            p.continue_line();
             has_content = true;
+            operand_before = false;
             continue;
         }
         // In CssValue context, `/` is a separator — just consume it
         if p.at(SLASH) {
             p.bump();
+            p.continue_line_to(expressions::EXPR_START);
             has_content = true;
+            operand_before = false;
             continue;
         }
+        // A comma that ends its line is a trailing one: the value ends there.
         if p.at(COMMA) {
             p.bump();
             has_content = true;
+            operand_before = false;
             continue;
         }
         if !p.at_ts(expressions::EXPR_START) {
             // Unknown token in value position — bump for progress
-            p.bump();
+            super::lines::bump_in_run(p);
             has_content = true;
+            operand_before = false;
             continue;
         }
+        let operator = super::lines::word_operator(p, operand_before);
         if expressions::expr(p, ctx).is_some() {
             has_content = true;
+            operand_before = true;
+            match operator {
+                WordOperator::GoesOn => {
+                    p.continue_line_to(expressions::EXPR_START);
+                }
+                WordOperator::NoOperand => {
+                    p.error_after_prev(format!("expected expression after `{}`", p.prev_text()));
+                }
+                WordOperator::No => {}
+            }
         } else {
             break;
         }
     }
 
     if !has_content && !p.at(SEMICOLON) && !p.at(RBRACE) && !p.at(LBRACE) && !p.at_end() {
-        p.err_and_bump("expected value");
+        super::lines::err_and_bump(p, "expected value");
     }
 
     let _ = m.complete(p, VALUE);
@@ -166,7 +204,7 @@ pub(super) fn css_function_body_declaration(p: &mut Parser<'_>) {
     property(p);
     p.expect(COLON);
     if !p.at(SEMICOLON) && !p.at(RBRACE) && !p.at_end() {
-        custom_property_value(p);
+        custom_property_value(p, true);
     }
     if !p.at(RBRACE) && !p.at_end() {
         p.expect(SEMICOLON);
@@ -177,18 +215,26 @@ pub(super) fn css_function_body_declaration(p: &mut Parser<'_>) {
 /// 2.9: Parse custom property value — fully depth-aware raw token scan.
 ///
 /// Tracks `()`, `[]`, `{}` nesting. Only terminates at `;` or `}` at depth 0.
-/// Interpolation `#{...}` is still processed.
-fn custom_property_value(p: &mut Parser<'_>) {
+/// Interpolation `#{...}` is still processed. In the indented layout, the lines indented
+/// beneath it are taken in as a brace group only if `takes_block`: a custom property
+/// takes none.
+fn custom_property_value(p: &mut Parser<'_>, takes_block: bool) {
     let m = p.start();
     let mut paren_depth: u32 = 0;
     let mut bracket_depth: u32 = 0;
     let mut brace_depth: u32 = 0;
     loop {
         let at_depth_zero = paren_depth == 0 && bracket_depth == 0 && brace_depth == 0;
+        // At the line break after a string left unclosed, as `value` does, inside brackets
+        // too: the string most likely took their ends with the `;`, `--a: f("x);`.
+        if p.at_unclosed_string_break() {
+            break;
+        }
         match p.current() {
             EOF => break,
             SEMICOLON if at_depth_zero => break,
             RBRACE if at_depth_zero => break,
+            LBRACE if at_depth_zero && !takes_block && p.at_lines_beneath() => break,
             LPAREN => {
                 paren_depth += 1;
                 p.bump();

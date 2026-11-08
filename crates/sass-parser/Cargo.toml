@@ -23,6 +23,7 @@ dhat.workspace = true
 divan.workspace = true
 expect-test.workspace = true
 mimalloc.workspace = true
+unicode-normalization.workspace = true
 
 [[bench]]
 name = "parse_benchmark"

@@ -157,6 +157,8 @@ pub enum SyntaxKind {
     GENERIC_AT_RULE,        // unknown @foo
     PARAM_LIST,             // ($name, $name: default, $rest...)
     PARAM,                  // single parameter
+    #[doc(hidden)]
+    __LAST,
 }
 
 impl SyntaxKind {
@@ -178,12 +180,11 @@ impl SyntaxKind {
 
 impl From<u16> for SyntaxKind {
     fn from(raw: u16) -> Self {
-        if raw > PARAM as u16 {
-            debug_assert!(false, "invalid SyntaxKind: {raw} (max: {})", PARAM as u16);
+        if raw >= __LAST as u16 {
             return ERROR;
         }
-        // SAFETY: SyntaxKind is #[repr(u16)] with contiguous discriminants 0..=PARAM.
-        // The bounds check above guarantees `raw` is in range.
+        // SAFETY: SyntaxKind is #[repr(u16)] with contiguous discriminants
+        // 0..__LAST. The bounds check above guarantees `raw` is in range.
         unsafe { std::mem::transmute(raw) }
     }
 }
@@ -195,3 +196,24 @@ impl From<SyntaxKind> for u16 {
 }
 
 pub(crate) use SyntaxKind::*;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn from_u16_rejects_out_of_range() {
+        assert_eq!(SyntaxKind::from(u16::MAX), ERROR);
+    }
+
+    #[test]
+    fn from_u16_round_trips_every_variant() {
+        for raw in 0..(__LAST as u16) {
+            let kind = SyntaxKind::from(raw);
+            assert_eq!(
+                kind as u16, raw,
+                "SyntaxKind discriminants must be contiguous"
+            );
+        }
+    }
+}

@@ -4,7 +4,7 @@ use super::*;
 // Folding ranges
 // ---------------------------------------------------------------------------
 
-async fn get_folds(
+pub(super) async fn get_folds(
     reader: &mut (impl AsyncReadExt + Unpin),
     writer: &mut (impl AsyncWriteExt + Unpin),
     uri: &str,
@@ -19,7 +19,7 @@ async fn get_folds(
             "params": {
                 "textDocument": {
                     "uri": uri,
-                    "languageId": "scss",
+                    "languageId": language_id(uri),
                     "version": 1,
                     "text": scss
                 }

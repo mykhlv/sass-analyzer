@@ -573,3 +573,62 @@ async fn semantic_transform_no_diagnostic() {
         "CSS transform functions should not trigger undefined"
     );
 }
+
+// ── Colon rules in indented Sass ───────────────────────────────────
+
+/// The `colon-selector` warnings published for `text`, opened as `uri`.
+async fn colon_selector_warnings(uri: &str, text: &str) -> Vec<Value> {
+    let (mut reader, mut writer) = spawn_server();
+    do_initialize(&mut reader, &mut writer).await;
+    let diags = open_and_get_diagnostics(&mut reader, &mut writer, uri, text, 1).await;
+    diags
+        .into_iter()
+        .filter(|d| d["code"].as_str() == Some("colon-selector"))
+        .collect()
+}
+
+#[tokio::test]
+async fn semantic_colon_rule_in_sass_is_a_warning() {
+    let warnings = colon_selector_warnings("file:///colon1.sass", ".a\n  color:red\n").await;
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert_eq!(warnings[0]["severity"], 2, "should be WARNING (2)");
+    assert_eq!(
+        warnings[0]["range"],
+        serde_json::json!({
+            "start": { "line": 1, "character": 2 },
+            "end": { "line": 1, "character": 11 },
+        })
+    );
+    let message = warnings[0]["message"].as_str().unwrap();
+    assert!(message.contains("`color:red`"), "{message}");
+    assert!(message.contains("selector"), "{message}");
+}
+
+#[tokio::test]
+async fn semantic_colon_rule_with_a_flag_is_still_a_warning() {
+    // A parse error for the stray `!important`, and the hint about the colon.
+    let warnings =
+        colon_selector_warnings("file:///colon2.sass", ".a\n  color:red !important\n").await;
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+}
+
+#[tokio::test]
+async fn semantic_colon_rule_not_reported_where_it_is_meant() {
+    for (uri, text) in [
+        // A rule with a block of its own, as `a:hover` has.
+        ("file:///colon3.sass", ".a\n  a:hover\n    b: c\n"),
+        // Declarations.
+        (
+            "file:///colon4.sass",
+            ".a\n  color: red\n  margin:0\n  --x:y\n",
+        ),
+        ("file:///colon5.sass", ".a\n  font:\n    family:x\n"),
+        // A selector that does not read as `name:value`.
+        ("file:///colon6.sass", ".a\n  &:hover\n  .b:c\n"),
+        // SCSS reads `color:red` as a declaration.
+        ("file:///colon7.scss", ".a { color:red; }\n"),
+    ] {
+        let warnings = colon_selector_warnings(uri, text).await;
+        assert!(warnings.is_empty(), "{text:?}: {warnings:?}");
+    }
+}

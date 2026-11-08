@@ -41,9 +41,18 @@ impl<N: AstNode> Iterator for AstChildren<N> {
 
 // ── Hand-written accessors (not codegen) ────────────────────────────
 
-/// Strip surrounding quotes from a string token, returning `None` for malformed tokens.
-fn unquote(text: &str) -> Option<&str> {
-    text.get(1..text.len().checked_sub(1)?)
+/// The contents of a `QUOTED_STRING` token's text: without its opening quote, and without its
+/// closing one unless the string was left unclosed at the end of its line.
+pub fn unquote(text: &str) -> &str {
+    let Some(&quote) = text.as_bytes().first() else {
+        return text;
+    };
+    let contents = &text[1..];
+    if crate::lexer::closes_string(contents, quote) {
+        &contents[..contents.len() - 1]
+    } else {
+        contents
+    }
 }
 
 fn extract_module_path(syntax: &SyntaxNode) -> Option<String> {
@@ -51,7 +60,7 @@ fn extract_module_path(syntax: &SyntaxNode) -> Option<String> {
         .children_with_tokens()
         .filter_map(rowan::NodeOrToken::into_token)
         .find(|t| t.kind() == SyntaxKind::QUOTED_STRING)?;
-    unquote(token.text()).map(str::to_owned)
+    Some(unquote(token.text()).to_owned())
 }
 
 /// Extract the first IDENT token text from a syntax node.
@@ -99,6 +108,6 @@ impl FunctionCall {
             .descendants_with_tokens()
             .filter_map(rowan::NodeOrToken::into_token)
             .find(|t| t.kind() == SyntaxKind::QUOTED_STRING)?;
-        unquote(first_token.text()).map(str::to_owned)
+        Some(unquote(first_token.text()).to_owned())
     }
 }
