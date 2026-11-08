@@ -1220,6 +1220,41 @@ mod tests {
         }
     }
 
+    /// Brackets left unclosed line after line leave every later line break deeper than the
+    /// brackets unwound so far, and an error in brackets opened on lines indented ever
+    /// deeper searches for a line at each of their columns: the line breaks and lines that
+    /// finding the next line start and the next line at a column walk grow with the
+    /// input, not with its square.
+    #[test]
+    fn line_searches_after_unclosed_brackets_are_linear_in_the_input() {
+        let nested: String = (1..100)
+            .map(|i| format!("{}f(\n", " ".repeat(2 * i)))
+            .chain([format!("{}!\n", " ".repeat(202))])
+            .chain(std::iter::repeat_n(format!("{}x\n", " ".repeat(300)), 100))
+            .collect();
+        for (statement, label) in [
+            ("@foo (\n".to_owned(), "an at-rule"),
+            (".a:not(\n".to_owned(), "a selector"),
+            ("  @debug 1 (\n".to_owned(), "a nested at-rule"),
+            (format!("$a: f(\n{nested}"), "nested brackets"),
+        ] {
+            let work = |count: usize| {
+                let source = format!(".z\n{}", statement.repeat(count));
+                super::indented::BREAK_WORK.set(0);
+                let input = Input::from_source_indented(&source);
+                let mut p = Parser::with_layout(input, &source, super::Layout::Indented);
+                crate::grammar::source_file(&mut p);
+                let _ = p.finish();
+                super::indented::BREAK_WORK.get()
+            };
+            let (small, large) = (work(100), work(1_000));
+            assert!(
+                small > 0 && large <= small * 15,
+                "{label}: {small} steps for 100 statements, {large} for 1000",
+            );
+        }
+    }
+
     /// Bump every token the indented layout presents, real or zero-width, and list
     /// them: `{}` and `;` for the zero-width ones, the source text for the others.
     fn indented_stream(source: &str) -> (String, Vec<String>) {

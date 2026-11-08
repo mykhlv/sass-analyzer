@@ -105,6 +105,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   left unclosed, `$m: (` / `a: 1` / `b: 2` / `.c { ... }`, takes the rest of its line
   with that one error. The rest was left to the next statement, with up to three more
   errors, and the rule on the next line was read into it
+- Indented Sass: a file with many brackets left unclosed, line after line, parses in time
+  linear in its size. Each line searched on to the end of the file for the next line
+  start, and each erroring bracket for the next line at its column: 80,000 such lines
+  took about a second, now under 0.1 s
 
 ## 0.4.0 — 2026-11-08
 
