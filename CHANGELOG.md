@@ -7,11 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-### Breaking
-- Minimum supported VS Code version is now 1.110 (was 1.80). This was raised in 0.3.4
-  without a changelog entry.
-
 ### Fixed
+- The extension installs on VS Code 1.82 and newer again, including editors built on an older
+  VS Code such as openvscode-server. 0.3.4 had raised the minimum to 1.110 without needing any
+  newer API.
 - Indented Sass: a blank line made of lone `\r` or form-feed line breaks, or of `\r\n`
   followed by a lone `\r`, ends a statement as one made of `\n` does. Only `\n` was
   counted, so in a file with old Mac line endings an operator at the end of a line took
