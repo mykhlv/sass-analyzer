@@ -5,6 +5,7 @@ use crate::syntax_kind::*;
 /// `@use "path"` / `as name` / `as *` / `with ($var: value, ...)`
 pub fn use_rule(p: &mut Parser<'_>) {
     let m = p.start();
+    let errors = p.error_count();
     p.bump(); // @
     p.bump(); // use
     p.continue_header(&super::lines::MODULE);
@@ -36,15 +37,14 @@ pub fn use_rule(p: &mut Parser<'_>) {
         with_config(p);
     }
 
-    if !p.at(RBRACE) && !p.at_end() {
-        p.expect(SEMICOLON);
-    }
+    super::lines::end_without_block(p, errors, "`@use`");
     let _ = m.complete(p, USE_RULE);
 }
 
 /// `@forward "path"` / `as prefix-*` / `hide`/`show` / `with (...)`
 pub fn forward_rule(p: &mut Parser<'_>) {
     let m = p.start();
+    let errors = p.error_count();
     p.bump(); // @
     p.bump(); // forward
     p.continue_header(&super::lines::MODULE);
@@ -102,9 +102,7 @@ pub fn forward_rule(p: &mut Parser<'_>) {
         }
     }
 
-    if !p.at(RBRACE) && !p.at_end() {
-        p.expect(SEMICOLON);
-    }
+    super::lines::end_without_block(p, errors, "`@forward`");
     let _ = m.complete(p, FORWARD_RULE);
 }
 
@@ -162,20 +160,17 @@ fn with_config_entry(p: &mut Parser<'_>) {
 /// `@import "path"` (deprecated, but still valid syntax)
 pub fn import_rule(p: &mut Parser<'_>) {
     let m = p.start();
+    let errors = p.error_count();
     p.bump(); // @
     p.bump(); // import
-    p.continue_header(&super::lines::MODULE);
 
     // Parse one or more import paths (comma-separated)
     import_argument(p);
     while p.eat(COMMA) {
-        p.continue_line_across_blank();
         import_argument(p);
     }
 
-    if !p.at(RBRACE) && !p.at_end() {
-        p.expect(SEMICOLON);
-    }
+    super::lines::end_without_block(p, errors, "`@import`");
     let _ = m.complete(p, IMPORT_RULE);
 }
 

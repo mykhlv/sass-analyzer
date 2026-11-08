@@ -24,8 +24,8 @@ const NESTED_RULE: &str = "\
 ";
 
 const CONTINUED_HEADER: &str = "\
-@media screen and (min-width: 100px),
-  print
+@each $name,
+  $glyph in (a b)
   .a
     color: red
 @include button($bg,
@@ -166,11 +166,37 @@ async fn sass_folding_continued_header() {
         CONTINUED_HEADER,
         701,
         &expect![[r#"
-            0..=3 block: "@media screen and (min-width: 100px)," .. "    color: red"
+            0..=3 block: "@each $name," .. "    color: red"
             2..=3 block: "  .a" .. "    color: red"
         "#]],
     )
     .await;
+}
+
+/// Folds are the same with `\r\n` and lone `\r` line endings as with `\n`: each is one
+/// line, to the layout and to the editor.
+#[tokio::test]
+async fn sass_folding_with_other_line_endings() {
+    let expected = expect![[r#"
+        0..=5 block: ".nav" .. "      color: blue"
+        2..=5 block: "  .item" .. "      color: blue"
+        4..=5 block: "    &:hover" .. "      color: blue"
+        6..=7 block: ".footer" .. "  padding: 0"
+    "#]];
+    for (id, ending) in [(704, "\r\n"), (705, "\r")] {
+        let source = NESTED_RULE.replace('\n', ending);
+        let (mut reader, mut writer) = spawn_server();
+        do_initialize(&mut reader, &mut writer).await;
+        let folds = get_folds(
+            &mut reader,
+            &mut writer,
+            "file:///fold_endings.sass",
+            &source,
+            id,
+        )
+        .await;
+        expected.assert_eq(&render_folds(&source.replace(ending, "\n"), &folds));
+    }
 }
 
 #[tokio::test]
@@ -243,28 +269,27 @@ async fn sass_selection_continued_header() {
         "file:///sel_header.sass",
         CONTINUED_HEADER,
         711,
-        // `print` on the header's second line, `color` in the body, `$border` in
+        // `glyph` on the header's second line, `color` in the body, `$border` in
         // the continued argument list.
         vec![(1, 3), (3, 5), (5, 4)],
         &expect![[r#"
             @ 1:3
-            1:2-1:7 "print"
-            0:6-1:7 " screen and (min-width: 100px),\n  print"
-            0:0-3:14 <65 bytes>
-            0:0-6:0 <98 bytes>
+            1:3-1:8 "glyph"
+            0:0-3:14 <50 bytes>
+            0:0-6:0 <83 bytes>
             @ 3:5
             3:4-3:9 "color"
             2:4-3:9 "\n    color"
             2:4-3:14 "\n    color: red"
-            1:7-3:14 "\n  .a\n    color: red"
-            0:0-3:14 <65 bytes>
-            0:0-6:0 <98 bytes>
+            1:17-3:14 "\n  .a\n    color: red"
+            0:0-3:14 <50 bytes>
+            0:0-6:0 <83 bytes>
             @ 5:4
             5:3-5:9 "border"
             4:20-5:9 "\n  $border"
             4:15-5:10 "($bg,\n  $border)"
             3:14-5:10 "\n@include button($bg,\n  $border)"
-            0:0-6:0 <98 bytes>
+            0:0-6:0 <83 bytes>
         "#]],
     )
     .await;

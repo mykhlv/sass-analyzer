@@ -7,7 +7,7 @@ pub fn if_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // if
-    p.continue_header(&super::lines::IF);
+    p.continue_header(&super::lines::EXPRESSION);
     super::expressions::expr(p, super::ParseContext::SassScript);
     if p.at(LBRACE) {
         super::block(p);
@@ -66,6 +66,7 @@ pub fn for_rule(p: &mut Parser<'_>) {
     p.continue_header(&super::lines::FOR);
     p.expect(DOLLAR);
     p.expect(IDENT); // variable name
+    p.continue_line_across_blank();
 
     // Expect `from`
     if p.at(IDENT) && p.current_text() == "from" {
@@ -75,6 +76,7 @@ pub fn for_rule(p: &mut Parser<'_>) {
     }
 
     super::expressions::expr(p, super::ParseContext::SassScript);
+    p.continue_line_across_blank();
 
     // Expect `through` or `to`
     if p.at(IDENT) && (p.current_text() == "through" || p.current_text() == "to") {
@@ -99,12 +101,14 @@ pub fn each_rule(p: &mut Parser<'_>) {
     p.continue_header(&super::lines::EACH);
     p.expect(DOLLAR);
     p.expect(IDENT);
+    p.continue_line_across_blank();
 
     // Additional destructured variables: `$key, $value`
     while p.eat(COMMA) {
         p.continue_line_across_blank();
         p.expect(DOLLAR);
         p.expect(IDENT);
+        p.continue_line_across_blank();
     }
 
     // Expect `in`
@@ -138,7 +142,6 @@ fn each_list(p: &mut Parser<'_>) {
         }
         if p.at(COMMA) {
             p.bump();
-            p.continue_line_across_blank();
         }
         if p.at(LBRACE) || p.at(RBRACE) || p.at_end() || p.at(SEMICOLON) {
             break;

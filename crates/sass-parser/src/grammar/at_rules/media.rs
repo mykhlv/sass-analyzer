@@ -8,7 +8,6 @@ pub fn media_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // media
-    p.continue_header(&super::lines::QUERY);
 
     // Media query list — opaque until `;` or `{`
     let errors = p.error_count();
@@ -27,7 +26,9 @@ fn media_query_list(p: &mut Parser<'_>) {
             }
         }
     } else {
+        let empty = p.at_ts(BLOCK_STOP) || p.at_end();
         super::eat_opaque_condition(p, BLOCK_STOP, false);
+        super::lines::unfinished_condition(p, empty, &["and", "or", "not"], "media query");
     }
     let _ = m.complete(p, MEDIA_QUERY);
 }
@@ -39,7 +40,7 @@ fn media_query_list(p: &mut Parser<'_>) {
 /// of its own since `errors`, and a statement on the next line is left to itself.
 fn rule_body(p: &mut Parser<'_>, errors: usize) {
     if p.at(LBRACE) {
-        super::block(p);
+        super::block_after(p, p.error_count() > errors);
     } else if !p.braced() {
     } else if !p.at_end() && !p.at(SEMICOLON) && !p.at(RBRACE) && !p.at_line_break() {
         super::super::skip_to_rule_block(p, p.error_count() == errors);
@@ -128,7 +129,6 @@ pub fn supports_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // supports
-    p.continue_header(&super::lines::QUERY);
 
     let errors = p.error_count();
     supports_condition(p);
@@ -141,7 +141,9 @@ fn supports_condition(p: &mut Parser<'_>) {
     if p.braced() {
         supports_logic(p);
     } else {
+        let empty = p.at_ts(BLOCK_STOP) || p.at_end();
         super::eat_opaque_condition(p, BLOCK_STOP, true);
+        super::lines::unfinished_condition(p, empty, &["and", "or", "not"], "condition");
     }
     let _ = m.complete(p, SUPPORTS_CONDITION);
 }

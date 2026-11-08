@@ -29,7 +29,9 @@ pub enum ParseContext {
 pub fn source_file(p: &mut Parser<'_>) {
     let m = p.start();
     while !p.at_end() {
+        let errors = p.error_count();
         top_level_item(p);
+        lines::rest_of_line(p, errors);
     }
     let _ = m.complete(p, SOURCE_FILE);
 }
@@ -92,24 +94,22 @@ fn at_namespace_var_assignment(p: &Parser<'_>) -> bool {
 /// Parse `ns.$var: value;` namespace variable assignment.
 fn namespace_variable_assignment(p: &mut Parser<'_>) {
     let m = p.start();
+    let errors = p.error_count();
     // Only a declaration that starts a statement goes on across lines.
     let statement = p.at_statement_start();
-    if statement {
-        p.continue_header(&lines::VARIABLE);
-    }
     p.bump(); // IDENT (namespace)
     p.bump(); // DOT
     p.bump(); // DOLLAR
-    p.expect(IDENT); // variable name
+    if p.expect(IDENT) && statement {
+        p.continue_line_across_blank();
+    }
     if p.expect(COLON) && statement {
-        p.continue_line();
+        p.continue_line_across_blank();
     }
     if !p.at(SEMICOLON) && !p.at(RBRACE) && !p.at_end() {
         expressions::sass_value_list(p, ParseContext::SassScript);
     }
-    if !p.at(RBRACE) && !p.at_end() {
-        p.expect(SEMICOLON);
-    }
+    lines::end_without_block(p, errors, "a variable declaration");
     let _ = m.complete(p, VARIABLE_DECL);
 }
 
@@ -143,6 +143,12 @@ fn block_item(p: &mut Parser<'_>) {
 /// The scan reads on across the line breaks the grammar will absorb (after a comma or an
 /// operator), so that it sees the whole statement in the indented syntax too.
 fn looks_like_declaration(p: &Parser<'_>) -> bool {
+    declaration_ahead(p, false)
+}
+
+/// [`looks_like_declaration`], `in_property` in a nested property's block, where Dart Sass
+/// reads every `name:` as a declaration.
+fn declaration_ahead(p: &Parser<'_>, in_property: bool) -> bool {
     let j = p.joined(lines::LINE_JOINS);
     let hack = matches!(p.current(), STAR | DOT | HASH | COLON)
         && matches!(p.nth_joined(j, 1), IDENT | HASH_LBRACE);
@@ -167,8 +173,12 @@ fn looks_like_declaration(p: &Parser<'_>) -> bool {
     if p.nth_joined(j, colon + 1) == LBRACE {
         return true;
     }
-    // Dart reads `.a:b` as a selector in the indented syntax, a hack declaration in SCSS.
-    if hack && !p.braced() && could_start_pseudo_class(p, j, colon + 1) {
+    // In the indented syntax Dart reads `name:` followed directly by the start of a name
+    // as a selector with a pseudo-class, `color:red` as `a:hover`, and `.a:b` too, except
+    // where only a declaration may stand and for a custom property. SCSS reads all of
+    // these as declarations.
+    let custom = !hack && p.current_text().starts_with("--");
+    if !p.braced() && !in_property && !custom && could_start_pseudo_class(p, j, colon + 1) {
         return false;
     }
     scan_for_declaration_end(p, j, colon + 1)
@@ -531,6 +541,17 @@ fn skip_until_block_end(p: &mut Parser<'_>) {
 /// holds one, and the rules after it stay intact. The indented layout ends it at a line
 /// instead: see [`Parser::end_unclosed_bracket`].
 pub(crate) fn eat_balanced(p: &mut Parser<'_>, open: SyntaxKind, close: SyntaxKind) {
+    eat_balanced_with(p, open, close, true);
+}
+
+/// [`eat_balanced`], reporting the bracket if it is left unclosed only if `report`: not
+/// when skipping tokens an error has been reported for.
+pub(crate) fn eat_balanced_with(
+    p: &mut Parser<'_>,
+    open: SyntaxKind,
+    close: SyntaxKind,
+    report: bool,
+) {
     assert!(p.at(open));
     let p = &mut *p.transparent_guard();
     let braced = p.braced();
@@ -558,7 +579,7 @@ pub(crate) fn eat_balanced(p: &mut Parser<'_>, open: SyntaxKind, close: SyntaxKi
         }
         p.bump();
     }
-    if depth > 0 && !p.at_unclosed_string_break() {
+    if report && depth > 0 && !p.at_unclosed_string_break() {
         report_unclosed(p, close);
     }
 }
@@ -576,6 +597,13 @@ pub(crate) fn report_unclosed(p: &mut Parser<'_>, close: SyntaxKind) {
 
 /// Parse a `{ ... }` block containing declarations and/or nested rules.
 pub(crate) fn block(p: &mut Parser<'_>) {
+    block_after(p, false);
+}
+
+/// [`block`], after a header that has reported an error, if `header_failed`: in the
+/// indented layout, a first line beneath it that starts no statement is most likely the
+/// rest of that header, and is not reported again.
+pub(crate) fn block_after(p: &mut Parser<'_>, header_failed: bool) {
     let Ok(mut g) = p.depth_guard() else {
         // Skip past the block to prevent infinite loops at depth limit
         skip_until_block_end(p);
@@ -584,6 +612,7 @@ pub(crate) fn block(p: &mut Parser<'_>) {
     debug_assert!(g.at(LBRACE));
     let m = g.start();
     g.bump(); // {
+    let mut quiet = header_failed;
     while !g.at(RBRACE) && !g.at_end() {
         if g.at(SEMICOLON) {
             g.bump();
@@ -594,9 +623,48 @@ pub(crate) fn block(p: &mut Parser<'_>) {
             || g.at_ts(selectors::COMBINATOR_TOKEN)
             || g.at_shorthand()
         {
+            let errors = g.error_count();
             block_item(&mut g);
-        } else {
+            lines::rest_of_line(&mut g, errors);
+        } else if g.braced() {
             lines::err_and_bump(&mut g, "expected declaration or nested rule");
+        } else {
+            lines::err_line(&mut g, "expected declaration or nested rule", !quiet);
+        }
+        quiet = false;
+    }
+    g.expect(RBRACE);
+    let _ = m.complete(&mut g, BLOCK);
+}
+
+/// The block of a nested property. In the indented layout it holds declarations, as in
+/// Dart Sass, with variables and at-rules: a line that is none of these is one error.
+/// Braced, it parses as [`block`] does.
+pub(crate) fn property_block(p: &mut Parser<'_>) {
+    if p.braced() {
+        block(p);
+        return;
+    }
+    let Ok(mut g) = p.depth_guard() else {
+        skip_until_block_end(p);
+        return;
+    };
+    debug_assert!(g.at(LBRACE));
+    let m = g.start();
+    g.bump(); // {
+    while !g.at(RBRACE) && !g.at_end() {
+        if g.at(SEMICOLON) {
+            g.bump();
+        } else if g.at(AT) || g.at(DOLLAR) || g.at_shorthand() || at_namespace_var_assignment(&g) {
+            let errors = g.error_count();
+            block_item(&mut g);
+            lines::rest_of_line(&mut g, errors);
+        } else if declaration_ahead(&g, true) {
+            let errors = g.error_count();
+            declarations::declaration(&mut g);
+            lines::rest_of_line(&mut g, errors);
+        } else {
+            lines::err_line(&mut g, "expected declaration", true);
         }
     }
     g.expect(RBRACE);
@@ -625,12 +693,18 @@ pub(crate) fn generic_at_rule_block(p: &mut Parser<'_>) {
             || g.at_ts(selectors::COMBINATOR_TOKEN)
             || g.at_shorthand()
         {
+            let errors = g.error_count();
             block_item(&mut g);
+            lines::rest_of_line(&mut g, errors);
         } else if g.at(NUMBER) {
             // Keyframe selector: `10% { ... }`, `from { ... }`
+            let errors = g.error_count();
             generic_keyframe_block(&mut g);
-        } else {
+            lines::rest_of_line(&mut g, errors);
+        } else if g.braced() {
             lines::err_and_bump(&mut g, "expected declaration or nested rule");
+        } else {
+            lines::err_line(&mut g, "expected declaration or nested rule", true);
         }
     }
     g.expect(RBRACE);

@@ -1,213 +1,58 @@
 //! Where a statement goes on across a line break in the indented syntax.
 //!
-//! Each grammar position that continues a statement onto the next line calls
-//! [`Parser::continue_line`] (or its comma form) itself. The tables here are the other
-//! half: how each at-rule's header, and a variable's value, may go on on a line indented
-//! beneath it, which the at-rule function declares with [`Parser::continue_header`]
-//! when it has read the rule's name.
-//!
-//! Forms marked `lenient:`, here and at the grammar positions that continue a line, are
-//! accepted although Dart Sass rejects them, or reads them otherwise; they are kept, for
-//! now, so that the indented frontend does not change what it accepts while it is being
-//! rebuilt.
+//! As in Dart Sass, a statement goes on across a line break only where it cannot end:
+//! right after a token that leaves it unfinished (an operator, a comma in a list that
+//! needs another item), and at each position of a header that requires more. The grammar continues the line there itself, with
+//! [`Parser::continue_line`] or its comma form. The tables here are the part of a header
+//! that is decided ahead of the cursor: whether it goes on after its name, or after one of
+//! its words, at the end of a line, which the at-rule function declares with
+//! [`Parser::continue_header`] when it has read the rule's name. A line indented beneath
+//! a header that may end is the rule's block, not more of its header.
 
 use crate::parser::{HeaderLines, Parser};
 #[allow(clippy::wildcard_imports)]
 use crate::syntax_kind::*;
 use crate::token_set::TokenSet;
 
-/// The tokens that start an expression on the next line of a header that takes one.
-#[rustfmt::skip]
-const EXPR_STARTS: TokenSet = TokenSet::new(&[
-    LPAREN, COMMA, QUOTED_STRING, STRING_START, NUMBER,
-]);
+const OPERATOR_WORDS: &[&str] = &["and", "or", "not"];
 
-/// Right after the name, a variable is the expression: `@if` / `  $a`.
-#[rustfmt::skip]
-const EXPR_BARE_STARTS: TokenSet = TokenSet::new(&[
-    LPAREN, COMMA, QUOTED_STRING, STRING_START, NUMBER, DOLLAR,
-]);
-
-#[rustfmt::skip]
-const EXPR_WORDS: &[&str] = &[
-    // lenient: Dart rejects `@if $x` / `  and $y` — "expected selector."
-    "and", "or", "not",
-    "if",
-];
-
-pub(crate) const IF: HeaderLines = HeaderLines {
-    starts: EXPR_STARTS,
-    words: EXPR_WORDS,
-    bare_starts: EXPR_BARE_STARTS,
-    bare_words: EXPR_WORDS,
-    end_words: EXPR_WORDS,
-    name_continues: false,
-};
-
-/// `@while`, `@return`, `@debug`, `@warn` and `@error`: a bare name leaves the header
-/// unfinished.
+/// `@if`, `@while`, `@return`, `@debug`, `@warn` and `@error`: the expression is required.
 pub(crate) const EXPRESSION: HeaderLines = HeaderLines {
+    end_words: OPERATOR_WORDS,
     name_continues: true,
-    ..IF
 };
-
-#[rustfmt::skip]
-const FOR_WORDS: &[&str] = &["from", "through", "to", "and", "or", "not", "if"];
 
 pub(crate) const FOR: HeaderLines = HeaderLines {
-    words: FOR_WORDS,
-    bare_words: FOR_WORDS,
-    end_words: FOR_WORDS,
-    ..EXPRESSION
+    end_words: &["from", "through", "to", "and", "or", "not"],
+    name_continues: true,
 };
-
-const EACH_WORDS: &[&str] = &["in", "and", "or", "not", "if"];
 
 pub(crate) const EACH: HeaderLines = HeaderLines {
-    words: EACH_WORDS,
-    bare_words: EACH_WORDS,
-    end_words: EACH_WORDS,
-    ..EXPRESSION
+    end_words: &["in", "and", "or", "not"],
+    name_continues: true,
 };
 
-/// A bare `@else` is a complete header: what is indented beneath it is its body, except
-/// for the `if` of `@else if`.
+/// A bare `@else` is a complete header: what is indented beneath it is its body.
 pub(crate) const ELSE: HeaderLines = HeaderLines {
-    bare_starts: TokenSet::EMPTY,
-    // lenient: Dart rejects `@else` / `  if $b` — "expected selector."
-    bare_words: &["if"],
-    ..IF
+    end_words: &["if", "and", "or", "not"],
+    name_continues: false,
 };
 
-const PARAMS: TokenSet = TokenSet::new(&[LPAREN, COMMA]);
-const PARENS: TokenSet = TokenSet::new(&[LPAREN]);
-
-pub(crate) const MIXIN: HeaderLines = HeaderLines {
-    starts: PARAMS,
-    words: &[],
-    bare_starts: PARAMS,
-    bare_words: &[],
+/// `@mixin`, `@function` and `@extend`: the name, or the selector, is required.
+pub(crate) const NAMED: HeaderLines = HeaderLines {
     end_words: &[],
     name_continues: true,
 };
 
-pub(crate) const FUNCTION: HeaderLines = MIXIN;
-
 pub(crate) const INCLUDE: HeaderLines = HeaderLines {
-    // lenient: Dart rejects `@include foo` / `  ($x)` — "Mixin doesn't accept a content
-    // block."
-    starts: PARAMS,
-    words: &["using"],
-    bare_starts: PARAMS,
-    bare_words: &["using"],
     end_words: &["using"],
-    ..MIXIN
+    name_continues: true,
 };
 
-pub(crate) const EXTEND: HeaderLines = HeaderLines {
-    starts: TokenSet::new(&[COMMA]),
-    bare_starts: TokenSet::new(&[COMMA]),
-    ..MIXIN
-};
-
-pub(crate) const CONTENT: HeaderLines = HeaderLines {
-    starts: PARENS,
-    bare_starts: PARENS,
-    name_continues: false,
-    ..MIXIN
-};
-
-const QUERY_WORDS: &[&str] = &["and", "or", "not"];
-
-/// `@media` and `@supports`.
-pub(crate) const QUERY: HeaderLines = HeaderLines {
-    starts: PARAMS,
-    words: QUERY_WORDS,
-    bare_starts: PARAMS,
-    bare_words: QUERY_WORDS,
-    // lenient: Dart rejects `@media screen and` / `  (min-width: 1px)` — "expected media
-    // condition in parentheses."
-    end_words: QUERY_WORDS,
-    name_continues: false,
-};
-
-pub(crate) const CONTAINER: HeaderLines = HeaderLines {
-    // lenient: Dart rejects `@container card` / `  (width > 400px)`, and `@container card
-    // (width > 400px) and` / `  (height > 100px)` — "expected selector."
-    starts: PARENS,
-    bare_starts: PARENS,
-    ..QUERY
-};
-
-pub(crate) const SCOPE: HeaderLines = HeaderLines {
-    starts: PARENS,
-    words: &["to"],
-    bare_starts: PARENS,
-    bare_words: &["to"],
-    // lenient: Dart rejects `@scope (.a) to` / `  (.b)` — "expected selector."
-    end_words: &["to"],
-    name_continues: false,
-};
-
-pub(crate) const AT_ROOT: HeaderLines = HeaderLines {
-    starts: PARENS,
-    words: &[],
-    // lenient: Dart rejects `@at-root` / `  (without: media)` — "expected selector."
-    bare_starts: PARENS,
-    bare_words: &[],
-    end_words: &[],
-    name_continues: false,
-};
-
-#[rustfmt::skip]
-const MODULE_STARTS: TokenSet = TokenSet::new(&[
-    LPAREN, COMMA, QUOTED_STRING, STRING_START,
-]);
-
-const MODULE_WORDS: &[&str] = &["as", "with", "show", "hide"];
-
-/// `@use`, `@forward` and `@import`.
+/// `@use` and `@forward`.
 pub(crate) const MODULE: HeaderLines = HeaderLines {
-    starts: MODULE_STARTS,
-    // lenient: Dart rejects `@use "x"` / `  as y` — "Nothing may be indented beneath a
-    // @use rule."
-    words: MODULE_WORDS,
-    bare_starts: MODULE_STARTS,
-    bare_words: MODULE_WORDS,
-    end_words: MODULE_WORDS,
-    name_continues: false,
-};
-
-pub(crate) const CHARSET: HeaderLines = HeaderLines {
-    starts: TokenSet::new(&[QUOTED_STRING, STRING_START]),
-    words: &[],
-    bare_starts: TokenSet::new(&[QUOTED_STRING, STRING_START]),
-    bare_words: &[],
-    end_words: &[],
-    name_continues: false,
-};
-
-#[rustfmt::skip]
-const VALUE_STARTS: TokenSet = TokenSet::new(&[
-    DOLLAR, LPAREN, QUOTED_STRING, STRING_START, COMMA, COLON, NUMBER,
-]);
-
-#[rustfmt::skip]
-const VALUE_WORDS: &[&str] = &[
-    "from", "through", "to", "in", "and", "or", "not", "as", "with", "show", "hide",
-    "using", "if",
-];
-
-/// A variable declaration's value goes on below it on a line that starts like a value.
-pub(crate) const VARIABLE: HeaderLines = HeaderLines {
-    // lenient: Dart rejects anything indented beneath a variable declaration: `$a: 1` /
-    // `  2` — "Nothing may be indented beneath a variable declaration."
-    starts: VALUE_STARTS,
-    words: VALUE_WORDS,
-    bare_starts: VALUE_STARTS,
-    bare_words: VALUE_WORDS,
-    end_words: &[],
-    name_continues: false,
+    end_words: &["as", "with", "show", "hide"],
+    name_continues: true,
 };
 
 /// Operators that leave a run of tokens unfinished at the end of a line.
@@ -233,30 +78,45 @@ pub(crate) fn bump_in_run(p: &mut Parser<'_>) {
         p.bump();
         p.continue_line_across_blank();
     } else if UNFINISHED.contains(kind) {
-        bump_operator(p);
+        let unit = p.at(PERCENT) && p.prev_kind() == NUMBER;
+        p.bump();
+        if !unit {
+            p.continue_line();
+        }
     } else {
         p.bump();
     }
 }
 
-/// Bump an operator, which continues its statement on the next line if it ends this
-/// one — except a `%` right after a number, which reads as the number's unit there.
+/// Bump an operator of an expression, which continues its statement on the next line if
+/// it ends this one, across blank lines to a line that starts an expression, as in Dart
+/// Sass — except a `%` right after a number, which reads as the number's unit there.
 pub(crate) fn bump_operator(p: &mut Parser<'_>) {
     let unit = p.at(PERCENT) && p.prev_kind() == NUMBER;
     p.bump();
     if !unit {
-        p.continue_line();
+        p.continue_line_to(super::expressions::EXPR_START);
     }
 }
 
-/// Whether the line goes on after the token at the cursor, a word that a CSS value reads
-/// as a plain identifier but Dart Sass as an operator, when it ends its line: `and` or
-/// `or` after an operand, or `not`. Dart takes the next line as its operand. A next line
-/// that starts like a declaration (`name:`) cannot be one — Dart rejects it — and is left
-/// a statement of its own rather than taken into the value.
-pub(crate) fn word_operator_goes_on(p: &Parser<'_>, operand_before: bool) -> bool {
+/// How a value goes on after the token at the cursor, when it is a word that a CSS value
+/// reads as a plain identifier but Dart Sass as an operator: `and` or `or` after an
+/// operand, or `not`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WordOperator {
+    /// Not such an operator, or not at the end of its line.
+    No,
+    /// At the end of its line: Dart takes the next line as its operand.
+    GoesOn,
+    /// At the end of its line, before a line that starts like a declaration (`name:`),
+    /// blank lines between or not, which cannot be its operand — Dart rejects it. The
+    /// line is left a statement of its own, and the operator is missing its operand.
+    NoOperand,
+}
+
+pub(crate) fn word_operator(p: &Parser<'_>, operand_before: bool) -> WordOperator {
     if !p.at(IDENT) {
-        return false;
+        return WordOperator::No;
     }
     let operator = match p.current_text() {
         "and" | "or" => operand_before,
@@ -264,10 +124,13 @@ pub(crate) fn word_operator_goes_on(p: &Parser<'_>, operand_before: bool) -> boo
         _ => false,
     };
     if !operator || !matches!(p.nth(1), SEMICOLON | LBRACE | RBRACE | EOF) {
-        return false;
+        return WordOperator::No;
     }
-    let joined = p.joined(TokenSet::new(&[IDENT]));
-    !(p.nth_joined(joined, 1) == IDENT && p.nth_joined(joined, 2) == COLON)
+    if p.next_line_starts_declaration() {
+        WordOperator::NoOperand
+    } else {
+        WordOperator::GoesOn
+    }
 }
 
 /// [`Parser::err_and_bump`], with the token bumped as in [`bump_in_run`].
@@ -276,4 +139,125 @@ pub(crate) fn err_and_bump(p: &mut Parser<'_>, message: &str) {
     p.error(message);
     bump_in_run(p);
     let _ = m.complete(p, ERROR);
+}
+
+/// Where the tokens of a line end in the indented layout, at the line's zero-width token
+/// or a written one.
+const LINE_END: TokenSet = TokenSet::new(&[SEMICOLON, LBRACE, RBRACE]);
+
+/// A line that starts no statement, at the cursor: one error, which takes the rest of
+/// the line, and below it the lines indented beneath it, which still parse as a block.
+/// Dart Sass reads such a line as a style rule whose selector it rejects.
+pub(crate) fn err_line(p: &mut Parser<'_>, message: &str, report: bool) {
+    let m = p.start();
+    if report {
+        p.error(message);
+    }
+    skip_line(p);
+    if p.at(LBRACE) {
+        super::block(p);
+    }
+    let _ = m.complete(p, ERROR);
+}
+
+/// After a statement, in the indented layout: what is left of its line is one error,
+/// `expected newline`, unless the statement has reported one since `errors`, with the
+/// lines indented beneath it, which still parse as a block.
+pub(crate) fn rest_of_line(p: &mut Parser<'_>, errors: usize) {
+    if p.braced() || p.at_ts(LINE_END) || p.at_end() || p.at_statement_start() {
+        return;
+    }
+    let m = p.start();
+    if p.error_count() == errors {
+        p.error("expected newline");
+    }
+    skip_line(p);
+    if p.at(LBRACE) {
+        super::block(p);
+    }
+    let _ = m.complete(p, ERROR);
+}
+
+/// The end of a statement that takes no block. In the indented layout, the lines
+/// indented beneath it are one error, unless the statement has reported one since
+/// `errors`, and are skipped as a whole, as Dart Sass stops at them.
+pub(crate) fn end_without_block(p: &mut Parser<'_>, errors: usize, statement: &str) {
+    if !p.at_lines_beneath() {
+        if !p.at(RBRACE) && !p.at_end() {
+            p.expect(SEMICOLON);
+        }
+        return;
+    }
+    let m = p.start();
+    if p.error_count() == errors {
+        p.error(format!("nothing may be indented beneath {statement}"));
+    }
+    p.bump(); // {
+    let mut depth = 1u32;
+    while !p.at_end() {
+        match p.current() {
+            LBRACE => depth += 1,
+            RBRACE => {
+                depth -= 1;
+                if depth == 0 {
+                    p.bump();
+                    break;
+                }
+            }
+            LPAREN | LBRACKET | HASH_LBRACE => {
+                skip_bracket(p);
+                continue;
+            }
+            _ => {}
+        }
+        p.bump();
+    }
+    let _ = m.complete(p, ERROR);
+}
+
+fn skip_line(p: &mut Parser<'_>) {
+    while !p.at_ts(LINE_END) && !p.at_end() {
+        if matches!(p.current(), LPAREN | LBRACKET | HASH_LBRACE) {
+            skip_bracket(p);
+        } else {
+            p.bump();
+        }
+    }
+}
+
+/// A bracket in tokens being skipped, through its closer, so that the line breaks
+/// inside it stay trivia and one it leaves unclosed ends as the grammar's do, unreported.
+fn skip_bracket(p: &mut Parser<'_>) {
+    match p.current() {
+        LPAREN => super::eat_balanced_with(p, LPAREN, RPAREN, false),
+        LBRACKET => super::eat_balanced_with(p, LBRACKET, RBRACKET, false),
+        _ => {
+            let _ = super::expressions::interpolation(p);
+        }
+    }
+}
+
+/// After a condition read as it comes in the indented layout — a media query, a
+/// `@supports`, `@container` or `@scope` prelude: whether its line leaves it unfinished,
+/// `empty` or ending with a comma or one of `words`, which Dart Sass reports rather than
+/// read on below it. Reports it, right after the condition.
+pub(crate) fn unfinished_condition(
+    p: &mut Parser<'_>,
+    empty: bool,
+    words: &[&str],
+    condition: &str,
+) {
+    if p.braced() || !(p.at_virtual() || p.at_end()) {
+        return;
+    }
+    if empty {
+        p.error_after_prev(format!("expected {condition}"));
+    } else if p.prev_kind() == COMMA
+        || (p.prev_kind() == IDENT
+            && words
+                .iter()
+                .any(|word| p.prev_text().eq_ignore_ascii_case(word)))
+    {
+        p.error_after_prev(format!("expected {condition} after `{}`", p.prev_text()));
+    }
 }

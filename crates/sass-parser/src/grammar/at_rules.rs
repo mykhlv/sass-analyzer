@@ -17,6 +17,7 @@ use crate::token_set::TokenSet;
 // and `crate::grammar::expressions::*` → `super::expressions::*`.
 use super::ParseContext;
 use super::block;
+use super::block_after;
 use super::declarations;
 use super::eat_balanced;
 use super::expressions;
@@ -134,7 +135,7 @@ fn generic_at_rule(p: &mut Parser<'_>) {
         } else if p.at(HASH_LBRACE) {
             let _ = interpolation(p);
         } else {
-            lines::bump_in_run(p);
+            p.bump();
         }
     }
     if p.at(LBRACE) {
@@ -155,7 +156,7 @@ pub(super) fn eat_opaque_condition(p: &mut Parser<'_>, stop: TokenSet, braces: b
             HASH_LBRACE => {
                 let _ = interpolation(p);
             }
-            _ => lines::bump_in_run(p),
+            _ => p.bump(),
         }
     }
 }

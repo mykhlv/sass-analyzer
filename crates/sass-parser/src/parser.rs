@@ -176,6 +176,13 @@ impl<'src> Parser<'src> {
         self.pos >= self.fence.index && self.fence.kind != SyntaxKind::EOF
     }
 
+    /// Whether the cursor is at the `{` the indented layout implies before lines indented
+    /// beneath the current one.
+    #[inline]
+    pub fn at_lines_beneath(&self) -> bool {
+        self.layout == Layout::Indented && self.at(SyntaxKind::LBRACE) && self.at_virtual()
+    }
+
     /// Whether the bracket at the cursor closes in kind: read on from it, its own closer
     /// comes before any closer of another kind, every bracket opened in between closing in
     /// kind too, and before the end of input. Braced layout only: the indented one lexes
@@ -333,6 +340,14 @@ impl<'src> Parser<'src> {
             Some(prev) => self.input.kind(prev),
             None => SyntaxKind::EOF,
         }
+    }
+
+    /// The source text of the input token before the cursor; empty at the start of the
+    /// input.
+    pub fn prev_text(&self) -> &'src str {
+        self.pos
+            .checked_sub(1)
+            .map_or("", |prev| &self.source[self.input.range(prev)])
     }
 
     /// Returns `false` for pos 0 (no preceding significant token) or at EOF.
@@ -689,6 +704,9 @@ impl<'src> Parser<'src> {
     // ── Errors ───────────────────────────────────────────────────────
 
     pub fn error(&mut self, msg: impl Into<String>) {
+        if self.layout == Layout::Indented {
+            self.end_header_before_error();
+        }
         let range = self.error_range();
         self.error_at(range, msg);
         if self.layout == Layout::Indented {

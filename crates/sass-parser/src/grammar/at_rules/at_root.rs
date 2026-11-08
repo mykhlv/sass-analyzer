@@ -7,7 +7,6 @@ pub fn at_root_rule(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(); // @
     p.bump(); // at-root
-    p.continue_header(&super::lines::AT_ROOT);
 
     // Check for query: `(with: ...)` or `(without: ...)`
     if p.at(LPAREN) {

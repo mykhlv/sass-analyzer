@@ -5,9 +5,10 @@ use crate::syntax_kind::*;
 /// `@extend selector !optional;` or `@extend sel1, sel2 !optional;`
 pub fn extend_rule(p: &mut Parser<'_>) {
     let m = p.start();
+    let errors = p.error_count();
     p.bump(); // @
     p.bump(); // extend
-    p.continue_header(&super::lines::EXTEND);
+    p.continue_header(&super::lines::NAMED);
 
     // Parse selector(s) — comma-separated simple/compound selectors
     // @extend only allows simple/compound selectors (no descendant combinators)
@@ -17,12 +18,11 @@ pub fn extend_rule(p: &mut Parser<'_>) {
     let mut has_selector_token = false;
     let mut has_combinator = false;
     let mut has_interpolation = false;
-    while !p.at(SEMICOLON) && !p.at(BANG) && !p.at(RBRACE) && !p.at_end() {
+    while !p.at(SEMICOLON) && !p.at(BANG) && !p.at(RBRACE) && !p.at_end() && !p.at_lines_beneath() {
         if p.at(COMMA) {
             // Comma separates multiple selectors: `@extend .a, .b;`
             has_selector_token = false;
             p.bump();
-            p.continue_line_across_blank();
             continue;
         }
         if p.at(HASH_LBRACE) {
@@ -70,8 +70,6 @@ pub fn extend_rule(p: &mut Parser<'_>) {
         }
     }
 
-    if !p.at(RBRACE) && !p.at_end() {
-        p.expect(SEMICOLON);
-    }
+    super::lines::end_without_block(p, errors, "`@extend`");
     let _ = m.complete(p, EXTEND_RULE);
 }

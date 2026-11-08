@@ -12,6 +12,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without a changelog entry.
 
 ### Fixed
+- Indented Sass: a blank line made of lone `\r` or form-feed line breaks, or of `\r\n`
+  followed by a lone `\r`, ends a statement as one made of `\n` does. Only `\n` was
+  counted, so in a file with old Mac line endings an operator at the end of a line took
+  the rule after a blank line into its value
+- LSP: a lone `\r` ends a line in positions, as the protocol defines, so diagnostics,
+  folding and every other range land on the right line in a file with old Mac line
+  endings; everything was reported on the first line
+- Indented Sass: a header goes on across blank lines where it requires more, as in Dart
+  Sass: a name after `@mixin`, `=`, `@function`, `@include` or `@extend` on a later line,
+  a condition after `@if`, and an argument after a word such as `in` or `as`. Each of
+  these reported an error when a blank line came first. A line that does not start what
+  the header requires, as a rule's `.z` below `@mixin` or `@use "x" as`, is still left a
+  rule of its own, and the error is reported at the end of the header. An operator's
+  operand may also follow it after a blank line, as in `$a: 1 +` / (blank) / `2`, when
+  that line starts like an expression; before a line that does not, as a rule's `.b` or a
+  declaration's `b: c`, the operand is still reported missing and the line below is left
+  alone
+- Indented Sass: a declaration value ending in `and`, `or` or `not` before a line that is
+  a declaration of its own, as `content: not` / `b: c`, blank lines between or not,
+  reports the operator's missing operand, as Dart Sass reports the form. It was accepted
+  with no diagnostic. `and` or `or` with nothing before it, as in `content: and`, is
+  still a plain word
+- Indented Sass: a nested property below a value that ends in a comma, as in `font: bold,`
+  / `family: x`, is read as one, as in Dart Sass; it was silently taken into the value. A
+  variable's value may follow its colon after a blank line, as in `$a:` / (blank) / `b`,
+  which reported four errors
 - Parser: an unterminated quoted string is now reported as "unterminated string" and ends
   at the end of its line, as in CSS and Dart Sass, in both SCSS and indented Sass. It used
   to swallow the rest of the file without a diagnostic of its own, hiding every symbol and
@@ -137,12 +163,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of two, with no diagnostic — and became visible only when the merged result
   could not parse, as in `@if $from` leaving its `@else` without a matching `@if`. These
   keywords now continue only where they can legitimately occur: in the header of a
-  directive that takes them — including `@container` and `@scope`, whose `and` and `to`
-  the narrowed sets initially missed — or, for the boolean operators `and`/`or`/`not`,
-  inside a value as well
-- Indented Sass: `@container name` followed by an indented `(width > 400px)` query
-  continues the header instead of erroring. `@container` was absent from the set of
-  directives whose header can take a parenthesised query, which predates this release
+  directive that takes them or, for the boolean operators `and`/`or`/`not`, inside a value
+  as well
 - Indented Sass: `@keyframes` frames written as `from`/`to` now open a body of their own.
   They previously produced a flat tree in which each frame's declarations were siblings of
   the frame selector rather than its children, so a `from` frame's properties appeared to
@@ -153,9 +175,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   since a header can hold an expression — and then errored on the second, so a two-line
   block reported a cascade that pointed at the wrong line. A bare `@else` is a complete
   header, taking an optional `if …` and nothing else, so an indented `$` under it opens
-  the body. `@else` on one line with `if …` on the next still continues the header, and
-  the other expression directives (`@if`, `@for`, `@return` …) are unaffected — they are
-  genuinely incomplete after their bare name
+  the body. The other expression directives (`@if`, `@for`, `@return` …) are unaffected —
+  they are genuinely incomplete after their bare name
 - Indented Sass: a bare `@at-root` now opens a body instead of pulling the next line into
   its header. `@at-root` followed by an indented `@include` reported "expected selector",
   because the header was continued to give the invalid `@at-root @include …`. This is
@@ -163,8 +184,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   real-world indented-Sass corpus: 26 errors across 19 files. Followed by an indented
   *selector* it produced no error but the wrong shape — the selector form `@at-root .bar`
   rather than a block containing `.bar`, which compiles to the same CSS and so went
-  unnoticed; it is now the block form the indented syntax calls for. `@at-root` followed
-  by an indented `(without: …)` query still continues the header, as it should
+  unnoticed; it is now the block form the indented syntax calls for
 - Indented Sass: a selector ending in a universal selector — `> *`, `& ~ *`, `.a *` — no
   longer swallows the block indented under it. `*` at the end of a line was always read as
   a multiplication operator, so the whole nested block was parsed as part of the selector
@@ -262,16 +282,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Indented Sass: where a statement ends and a block opens is now decided by the parser from
   the line layout, rather than guessed by the lexer. Real-world files parse to the same
   trees as before; the fixes above are the deliberate differences
+- Indented Sass: a statement goes on across a line break only where Dart Sass reads it
+  on — after an operator, inside brackets, and where the statement cannot end, as after
+  `@mixin`, `@for $i`, `@for $i from 1`, `@each $a`, `@function f`, `@use "a" as` or
+  `$a`. A line indented beneath a header that may end there is the rule's block, and a
+  comma at the end of a line ends the value or the at-rule's prelude there, as a trailing
+  comma. These were accepted as continued headers and are now the one error Dart Sass
+  reports: `@include foo` / `($x)`, `@use "x"` / `as y`, `@media screen and` /
+  `(min-width: 1px)`, `@media screen,` / `print`, `@container card` / `(width > 400px)`,
+  `@scope (.a) to` / `(.b)`, `@at-root` / `(without: media)`, `@else` / `if $b`, `@if $x`
+  / `and $y`, `@return 1` / `(2)`, `@extend .a,` / `.b`, `@import "a",` / `"b"`,
+  `$a: 1,` / `2`, `--x: a,` / `b` and `b: c,` / `d` indented deeper. Where Dart Sass
+  accepts the form but reads the next line as a statement of its own, so does the parser:
+  `b: c,` / `d` at the same column, `@layer a,` / `b` and `@foo a,` / `b` make `b` a rule.
+  Lines indented beneath a statement that takes no block, such as a variable, `@use` or
+  `@return`, are one "nothing may be indented beneath …" error, and a line that starts no
+  statement, or is left over after one, is one error rather than one per token
+- Indented Sass: a nested `name:value` with no space after the colon, as `color:red`, is
+  read as a selector, as Dart Sass reads it — `a:hover` and `color:red` look the same to
+  it. It was read as a declaration. Where nothing but a declaration may stand, in a
+  nested property's block, and for a custom property such as `--x:red`, it still is,
+  and a colon followed by anything that does not start a name, as in `margin:0` or
+  `color:#fff`, still makes a declaration. Since the empty rule compiles to nothing, the
+  language server warns that a space is likely missing after the `:`
 - Dependencies refreshed: 47 transitive Rust crates within semver, `rowan` 0.16 → 0.17,
   TypeScript 6 → 7, `@types/node` 25 → 26, esbuild 0.27 → 0.28
 - `@types/vscode` is now pinned with a tilde (`~1.110.0`) so it tracks the supported
   `engines.vscode` floor instead of drifting above it on every dependency update
 
 ### Known issues
-- In indented Sass, a declaration value ending in a bare `and`/`or`/`not` (`content: not`)
-  is accepted without the "expected newline." error Dart Sass reports. The line below is
-  no longer swallowed, but no diagnostic is shown. This form occurs zero times across the
-  Bulma, Vuetify and Quasar corpora
 - In indented Sass, text indented under a closed `/* … */` is accepted without the error
   Dart Sass reports. It does not occur in the Bulma, Vuetify and Quasar corpora
 

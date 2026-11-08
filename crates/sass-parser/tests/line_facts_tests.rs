@@ -95,15 +95,18 @@ fn first_token_does_not_start_a_line_even_when_indented() {
 }
 
 #[test]
-fn blank_line_counts_line_feeds_only() {
+fn blank_line_counts_every_line_ending_once() {
+    // `\r\n` is one line break, as a lone `\n`, `\r` or form feed is.
     check(
-        "a\n\n  b\r\n  c\r\n\r\nd\r\re",
+        "a\n\n  b\r\n  c\r\n\r\nd\r\re\x0c\x0cf\r\n\rg",
         expect![[r#"
             IDENT "a"
             IDENT "b" <- 2 spaces blank
             IDENT "c" <- 2 spaces
             IDENT "d" <- 0 blank
-            IDENT "e" <- 0
+            IDENT "e" <- 0 blank
+            IDENT "f" <- 0 blank
+            IDENT "g" <- 0 blank
             EOF
         "#]],
     );

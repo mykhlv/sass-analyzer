@@ -1,6 +1,6 @@
 use sass_parser::syntax::{GreenNode, NodeOrToken, SyntaxNode};
 use sass_parser::syntax_kind::SyntaxKind;
-use sass_parser::text_range::TextRange;
+use sass_parser::text_range::{TextRange, TextSize};
 use tower_lsp_server::ls_types::{DiagnosticSeverity, Uri};
 
 use crate::ast_helpers;
@@ -31,8 +31,85 @@ pub(crate) fn check_file(
     if !suppress_undefined {
         check_undefined(&root, symbols, module_graph, uri, &mut result);
     }
+    if crate::worker::is_sass_file(uri) {
+        check_colon_selectors(&root, &mut result);
+    }
 
     result
+}
+
+// ── Colon rules in indented Sass ────────────────────────────────────
+
+/// A nested rule with no block whose selector reads `name:value`, as `color:red`: the
+/// indented syntax reads it as a selector, as Dart Sass does, and the empty rule compiles
+/// to nothing, so a declaration with its space after `:` missing is far more likely.
+fn check_colon_selectors(root: &SyntaxNode, out: &mut Vec<SemanticDiagnostic>) {
+    for rule in root
+        .descendants()
+        .filter(|node| node.kind() == SyntaxKind::RULE_SET)
+    {
+        if rule
+            .parent()
+            .is_none_or(|parent| parent.kind() != SyntaxKind::BLOCK)
+            || rule
+                .children()
+                .any(|child| child.kind() == SyntaxKind::BLOCK)
+        {
+            continue;
+        }
+        let Some(list) = rule.first_child() else {
+            continue;
+        };
+        let mut selectors = list.children();
+        let (Some(selector), None) = (selectors.next(), selectors.next()) else {
+            continue;
+        };
+        let mut parts = selector.children();
+        let (Some(name), Some(pseudo)) = (parts.next(), parts.next()) else {
+            continue;
+        };
+        if !reads_as_property_name(&name)
+            || pseudo.kind() != SyntaxKind::PSEUDO_SELECTOR
+            || pseudo
+                .first_token()
+                .is_none_or(|t| t.kind() != SyntaxKind::COLON)
+        {
+            continue;
+        }
+        let text = list.text().to_string();
+        let start =
+            list.text_range().start() + TextSize::of(&text[..text.len() - text.trim_start().len()]);
+        let end = list.text_range().end() - TextSize::of(&text[text.trim_end().len()..]);
+        out.push(SemanticDiagnostic {
+            range: TextRange::new(start, end),
+            message: format!(
+                "`{}` is read as a selector, not a declaration: a space is likely missing \
+                 after `:`",
+                text.trim()
+            ),
+            severity: DiagnosticSeverity::WARNING,
+            code: "colon-selector",
+            data: None,
+        });
+    }
+}
+
+/// A selector part that a declaration could have as its property: a plain name, or an
+/// interpolation.
+fn reads_as_property_name(part: &SyntaxNode) -> bool {
+    match part.kind() {
+        SyntaxKind::INTERPOLATION => true,
+        SyntaxKind::SIMPLE_SELECTOR => {
+            let mut tokens = part
+                .children_with_tokens()
+                .filter(|element| !element.kind().is_trivia());
+            matches!(
+                (tokens.next(), tokens.next()),
+                (Some(NodeOrToken::Token(token)), None) if token.kind() == SyntaxKind::IDENT
+            )
+        }
+        _ => false,
+    }
 }
 
 // ── Argument count checking ─────────────────────────────────────────

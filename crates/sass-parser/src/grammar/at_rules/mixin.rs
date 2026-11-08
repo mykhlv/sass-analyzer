@@ -6,7 +6,7 @@ use crate::syntax_kind::*;
 pub fn mixin_rule(p: &mut Parser<'_>) {
     let m = p.start();
     if bump_name(p) {
-        p.continue_header(&super::lines::MIXIN);
+        p.continue_header(&super::lines::NAMED);
     }
     p.expect(IDENT); // name
     if p.at(LPAREN) {
@@ -66,15 +66,13 @@ pub fn include_rule(p: &mut Parser<'_>) {
 /// `@content` or `@content(args)`
 pub fn content_rule(p: &mut Parser<'_>) {
     let m = p.start();
+    let errors = p.error_count();
     p.bump(); // @
     p.bump(); // content
-    p.continue_header(&super::lines::CONTENT);
     if p.at(LPAREN) {
         super::expressions::arg_list(p, super::ParseContext::SassScript);
     }
-    if !p.at(RBRACE) && !p.at_end() {
-        p.expect(SEMICOLON);
-    }
+    super::lines::end_without_block(p, errors, "`@content`");
     let _ = m.complete(p, CONTENT_RULE);
 }
 

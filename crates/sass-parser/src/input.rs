@@ -54,18 +54,21 @@ impl LineBreak {
 
     /// Measure one WHITESPACE token, or `None` if it holds no newline.
     ///
-    /// One forward pass: the indentation restarts at every newline byte, and only `\n`
-    /// counts towards a blank line, so that a CRLF line break is one line, not two.
+    /// One forward pass: the indentation restarts at every newline byte, and each line
+    /// break counts once towards a blank line: `\r\n`, as a lone `\n`, `\r` or `\x0c`.
     pub fn measure(whitespace: &str) -> Option<Self> {
-        let mut line_feeds = 0u32;
+        let mut line_breaks = 0u32;
         let mut has_newline = false;
         let mut column = 0u32;
         let mut indent = 0u8;
         let mut indent_ended = false;
+        let mut after_cr = false;
         for b in whitespace.bytes() {
+            let crlf = after_cr && b == b'\n';
+            after_cr = b == b'\r';
             match b {
                 b'\n' | b'\r' | b'\x0c' => {
-                    line_feeds += u32::from(b == b'\n');
+                    line_breaks += u32::from(!crlf);
                     has_newline = true;
                     column = 0;
                     indent = 0;
@@ -86,7 +89,11 @@ impl LineBreak {
         if !has_newline {
             return None;
         }
-        let blank = if line_feeds >= 2 { Self::BLANK_LINE } else { 0 };
+        let blank = if line_breaks >= 2 {
+            Self::BLANK_LINE
+        } else {
+            0
+        };
         Some(Self {
             column,
             trivia: 0,
@@ -102,7 +109,7 @@ impl LineBreak {
         self.column
     }
 
-    /// The break spans at least one blank line (two or more `\n`).
+    /// The break spans at least one blank line (two or more line breaks).
     #[inline]
     pub fn is_blank_line(self) -> bool {
         self.flags & Self::BLANK_LINE != 0
