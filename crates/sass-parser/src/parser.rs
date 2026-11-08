@@ -379,10 +379,16 @@ impl<'src> Parser<'src> {
     /// Whether a line break comes before the token at the cursor, in the trivia after the
     /// token before it.
     pub fn at_line_break(&self) -> bool {
-        self.pos < self.fence.index
+        self.nth_at_line_break(0)
+    }
+
+    /// [`Parser::at_line_break`] for the token `offset` ahead; false at or past a fence.
+    pub fn nth_at_line_break(&self, offset: usize) -> bool {
+        let target = self.pos.saturating_add(offset);
+        target < self.fence.index
             && self
                 .input
-                .trivia_before(self.pos)
+                .trivia_before(target)
                 .iter()
                 .any(|&(kind, range)| {
                     kind == SyntaxKind::WHITESPACE

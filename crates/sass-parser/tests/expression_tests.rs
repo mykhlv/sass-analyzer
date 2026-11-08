@@ -4444,3 +4444,159 @@ fn map_entries_missing_their_colon_are_one_error_each() {
         "#]],
     );
 }
+
+#[test]
+fn map_missing_commas_left_unclosed_keeps_the_next_rule() {
+    // Dart Sass: `expected ")"` at the second colon. The map ends there, unclosed, and
+    // the rest of that line with it: the next line starts the next statement.
+    check(
+        "$m: (\na: 1\nb: 2\n.c { d: e }\n",
+        expect![[r#"
+        SOURCE_FILE@0..28
+          VARIABLE_DECL@0..15
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "m"
+            COLON@2..3 ":"
+            MAP_EXPR@3..12
+              WHITESPACE@3..4 " "
+              LPAREN@4..5 "("
+              MAP_ENTRY@5..12
+                VALUE@5..7
+                  WHITESPACE@5..6 "\n"
+                  IDENT@6..7 "a"
+                COLON@7..8 ":"
+                NUMBER_LITERAL@8..10
+                  WHITESPACE@8..9 " "
+                  NUMBER@9..10 "1"
+                VALUE@10..12
+                  WHITESPACE@10..11 "\n"
+                  IDENT@11..12 "b"
+            ERROR@12..15
+              COLON@12..13 ":"
+              WHITESPACE@13..14 " "
+              NUMBER@14..15 "2"
+          RULE_SET@15..27
+            SELECTOR_LIST@15..18
+              SELECTOR@15..18
+                SIMPLE_SELECTOR@15..18
+                  WHITESPACE@15..16 "\n"
+                  DOT@16..17 "."
+                  IDENT@17..18 "c"
+            BLOCK@18..27
+              WHITESPACE@18..19 " "
+              LBRACE@19..20 "{"
+              DECLARATION@20..25
+                PROPERTY@20..22
+                  WHITESPACE@20..21 " "
+                  IDENT@21..22 "d"
+                COLON@22..23 ":"
+                VALUE@23..25
+                  VALUE@23..25
+                    WHITESPACE@23..24 " "
+                    IDENT@24..25 "e"
+              WHITESPACE@25..26 " "
+              RBRACE@26..27 "}"
+          WHITESPACE@27..28 "\n"
+        errors:
+          12..13: expected RPAREN
+    "#]],
+    );
+}
+
+#[test]
+fn map_missing_commas_left_unclosed_at_the_end_of_input() {
+    check(
+        "$m: (\na: 1\nb: 2\n.c",
+        expect![[r#"
+        SOURCE_FILE@0..18
+          VARIABLE_DECL@0..15
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "m"
+            COLON@2..3 ":"
+            MAP_EXPR@3..12
+              WHITESPACE@3..4 " "
+              LPAREN@4..5 "("
+              MAP_ENTRY@5..12
+                VALUE@5..7
+                  WHITESPACE@5..6 "\n"
+                  IDENT@6..7 "a"
+                COLON@7..8 ":"
+                NUMBER_LITERAL@8..10
+                  WHITESPACE@8..9 " "
+                  NUMBER@9..10 "1"
+                VALUE@10..12
+                  WHITESPACE@10..11 "\n"
+                  IDENT@11..12 "b"
+            ERROR@12..15
+              COLON@12..13 ":"
+              WHITESPACE@13..14 " "
+              NUMBER@14..15 "2"
+          RULE_SET@15..18
+            SELECTOR_LIST@15..18
+              SELECTOR@15..18
+                SIMPLE_SELECTOR@15..18
+                  WHITESPACE@15..16 "\n"
+                  DOT@16..17 "."
+                  IDENT@17..18 "c"
+        errors:
+          12..13: expected RPAREN
+          18..18: expected `{`
+    "#]],
+    );
+}
+
+#[test]
+fn value_error_before_a_semicolon_on_its_line_skips_to_it() {
+    check(
+        "$m: (a: 1 b: 2;\n.c { d: e }\n",
+        expect![[r#"
+        SOURCE_FILE@0..28
+          VARIABLE_DECL@0..15
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "m"
+            COLON@2..3 ":"
+            MAP_EXPR@3..11
+              WHITESPACE@3..4 " "
+              LPAREN@4..5 "("
+              MAP_ENTRY@5..11
+                VALUE@5..6
+                  IDENT@5..6 "a"
+                COLON@6..7 ":"
+                NUMBER_LITERAL@7..9
+                  WHITESPACE@7..8 " "
+                  NUMBER@8..9 "1"
+                VALUE@9..11
+                  WHITESPACE@9..10 " "
+                  IDENT@10..11 "b"
+            ERROR@11..14
+              COLON@11..12 ":"
+              WHITESPACE@12..13 " "
+              NUMBER@13..14 "2"
+            SEMICOLON@14..15 ";"
+          RULE_SET@15..27
+            SELECTOR_LIST@15..18
+              SELECTOR@15..18
+                SIMPLE_SELECTOR@15..18
+                  WHITESPACE@15..16 "\n"
+                  DOT@16..17 "."
+                  IDENT@17..18 "c"
+            BLOCK@18..27
+              WHITESPACE@18..19 " "
+              LBRACE@19..20 "{"
+              DECLARATION@20..25
+                PROPERTY@20..22
+                  WHITESPACE@20..21 " "
+                  IDENT@21..22 "d"
+                COLON@22..23 ":"
+                VALUE@23..25
+                  VALUE@23..25
+                    WHITESPACE@23..24 " "
+                    IDENT@24..25 "e"
+              WHITESPACE@25..26 " "
+              RBRACE@26..27 "}"
+          WHITESPACE@27..28 "\n"
+        errors:
+          11..12: expected RPAREN
+    "#]],
+    );
+}

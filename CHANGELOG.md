@@ -101,6 +101,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   selector line below, `content: not` / `.c`, for its operand, and the lines beneath it
   for a nested property, with no error. A line below that is no operand, as `&:hover`,
   `b: c` or `$b: 2`, now reports the one error Dart Sass gives there
+- Parser: a variable's value that reports an error, as a map missing its commas and
+  left unclosed, `$m: (` / `a: 1` / `b: 2` / `.c { ... }`, takes the rest of its line
+  with that one error. The rest was left to the next statement, with up to three more
+  errors, and the rule on the next line was read into it
 
 ## 0.4.0 — 2026-11-08
 

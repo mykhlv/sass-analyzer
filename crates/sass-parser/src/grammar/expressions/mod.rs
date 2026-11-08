@@ -230,7 +230,12 @@ pub fn variable_declaration(p: &mut Parser<'_>) {
         p.continue_line_across_blank();
     }
 
+    let value_errors = p.error_count();
     sass_value_list(p, ParseContext::SassScript);
+    if p.error_count() > value_errors && skip_rest_of_line(p) {
+        let _ = m.complete(p, VARIABLE_DECL);
+        return;
+    }
 
     // Parse flags: !default, !global (can co-occur)
     while p.at(BANG) {
@@ -253,6 +258,41 @@ pub fn variable_declaration(p: &mut Parser<'_>) {
 
     super::lines::end_without_block(p, errors, "a variable declaration");
     let _ = m.complete(p, VARIABLE_DECL);
+}
+
+/// After a value that reported an error where it could not be read, such as a bracket
+/// left unclosed, braced: the rest of the statement on its line, as one error, up to the
+/// `;` or `}` that ends it there, or else to the line break, unless a `{`, a flag or a
+/// bracket, which may go on below, comes first. The next line most likely starts the next
+/// statement, `$m: (` / `a: 1` / `b: 2` / `.c {`; the `;` missing before it is that same
+/// mistake. Returns whether it skipped to such a line. The indented layout ends the
+/// statement at the line itself.
+fn skip_rest_of_line(p: &mut Parser<'_>) -> bool {
+    if !p.braced() || p.at_line_break() {
+        return false;
+    }
+    let mut count = 0;
+    let to_line = loop {
+        match p.nth(count) {
+            SEMICOLON | RBRACE => break false,
+            LBRACE | BANG | EOF | LPAREN | LBRACKET | HASH_LBRACE | STRING_START => {
+                return false;
+            }
+            _ => {}
+        }
+        count += 1;
+        if p.nth_at_line_break(count) {
+            break true;
+        }
+    };
+    if count > 0 {
+        let m = p.start();
+        for _ in 0..count {
+            p.bump();
+        }
+        let _ = m.complete(p, ERROR);
+    }
+    to_line
 }
 
 // ── Interpolation (Phase 3 upgrade) ────────────────────────────────
