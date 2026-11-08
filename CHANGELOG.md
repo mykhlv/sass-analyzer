@@ -144,6 +144,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   It was read as SCSS, so a `$v` defined in it was a member of the module, with a
   definition and a workspace symbol. It now exports no members and adds no symbols; go to
   definition and document links on the import still reach the file
+- Parser: `@extend .b ! optional`, or `!` and `optional` on lines of their own, is one
+  error after the `!`, as in Dart Sass, which takes the flag only when it is joined to its
+  `!`. The braced syntax accepted it
 
 ## 0.4.0 — 2026-11-08
 

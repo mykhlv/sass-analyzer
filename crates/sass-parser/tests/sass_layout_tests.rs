@@ -1502,6 +1502,144 @@ fn variable_default_on_the_next_line_is_one_error() {
 }
 
 #[test]
+fn extend_optional_on_the_next_line_is_one_error() {
+    check(
+        ".a\n  @extend .b !\n  optional\n  c: d\n",
+        expect![[r#"
+        SOURCE_FILE@0..36
+          RULE_SET@0..35
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            BLOCK@2..35
+              LBRACE@2..2 ""
+              EXTEND_RULE@2..17
+                WHITESPACE@2..5 "\n  "
+                AT@5..6 "@"
+                IDENT@6..12 "extend"
+                WHITESPACE@12..13 " "
+                DOT@13..14 "."
+                IDENT@14..15 "b"
+                WHITESPACE@15..16 " "
+                BANG@16..17 "!"
+                SEMICOLON@17..17 ""
+              RULE_SET@17..28
+                SELECTOR_LIST@17..28
+                  SELECTOR@17..28
+                    SIMPLE_SELECTOR@17..28
+                      WHITESPACE@17..20 "\n  "
+                      IDENT@20..28 "optional"
+              SEMICOLON@28..28 ""
+              DECLARATION@28..35
+                PROPERTY@28..32
+                  WHITESPACE@28..31 "\n  "
+                  IDENT@31..32 "c"
+                COLON@32..33 ":"
+                VALUE@33..35
+                  VALUE@33..35
+                    WHITESPACE@33..34 " "
+                    IDENT@34..35 "d"
+                SEMICOLON@35..35 ""
+              RBRACE@35..35 ""
+          WHITESPACE@35..36 "\n"
+        error 17..17: expected `optional`
+    "#]],
+    );
+}
+
+#[test]
+fn extend_optional_after_a_blank_line_is_one_error() {
+    check(
+        ".a\n  @extend .b !\n\n    optional\n  c: d\n",
+        expect![[r#"
+        SOURCE_FILE@0..39
+          RULE_SET@0..38
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            BLOCK@2..38
+              LBRACE@2..2 ""
+              EXTEND_RULE@2..31
+                WHITESPACE@2..5 "\n  "
+                AT@5..6 "@"
+                IDENT@6..12 "extend"
+                WHITESPACE@12..13 " "
+                DOT@13..14 "."
+                IDENT@14..15 "b"
+                WHITESPACE@15..16 " "
+                BANG@16..17 "!"
+                ERROR@17..31
+                  LBRACE@17..17 ""
+                  WHITESPACE@17..23 "\n\n    "
+                  IDENT@23..31 "optional"
+                  SEMICOLON@31..31 ""
+                  RBRACE@31..31 ""
+              DECLARATION@31..38
+                PROPERTY@31..35
+                  WHITESPACE@31..34 "\n  "
+                  IDENT@34..35 "c"
+                COLON@35..36 ":"
+                VALUE@36..38
+                  VALUE@36..38
+                    WHITESPACE@36..37 " "
+                    IDENT@37..38 "d"
+                SEMICOLON@38..38 ""
+              RBRACE@38..38 ""
+          WHITESPACE@38..39 "\n"
+        error 17..17: expected `optional`
+    "#]],
+    );
+}
+
+#[test]
+fn extend_optional_after_a_space_is_one_error() {
+    check(
+        ".a\n  @extend .b ! optional\n  c: d\n",
+        expect![[r#"
+        SOURCE_FILE@0..34
+          RULE_SET@0..33
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            BLOCK@2..33
+              LBRACE@2..2 ""
+              EXTEND_RULE@2..26
+                WHITESPACE@2..5 "\n  "
+                AT@5..6 "@"
+                IDENT@6..12 "extend"
+                WHITESPACE@12..13 " "
+                DOT@13..14 "."
+                IDENT@14..15 "b"
+                ERROR@15..26
+                  WHITESPACE@15..16 " "
+                  BANG@16..17 "!"
+                  WHITESPACE@17..18 " "
+                  IDENT@18..26 "optional"
+                SEMICOLON@26..26 ""
+              DECLARATION@26..33
+                PROPERTY@26..30
+                  WHITESPACE@26..29 "\n  "
+                  IDENT@29..30 "c"
+                COLON@30..31 ":"
+                VALUE@31..33
+                  VALUE@31..33
+                    WHITESPACE@31..32 " "
+                    IDENT@32..33 "d"
+                SEMICOLON@33..33 ""
+              RBRACE@33..33 ""
+          WHITESPACE@33..34 "\n"
+        error 17..17: expected `optional`
+    "#]],
+    );
+}
+
+#[test]
 fn a_mixin_name_after_a_blank_line_is_its_name() {
     check(
         "@mixin\n\n  foo\n  a: b\n",

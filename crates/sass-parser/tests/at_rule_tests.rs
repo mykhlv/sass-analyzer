@@ -5175,6 +5175,98 @@ fn font_face_rule() {
     );
 }
 
+#[test]
+fn extend_optional_after_a_line_break_is_one_error() {
+    check(
+        ".a { @extend .b !\noptional; c: d; }",
+        expect![[r#"
+        SOURCE_FILE@0..35
+          RULE_SET@0..35
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            BLOCK@2..35
+              WHITESPACE@2..3 " "
+              LBRACE@3..4 "{"
+              EXTEND_RULE@4..27
+                WHITESPACE@4..5 " "
+                AT@5..6 "@"
+                IDENT@6..12 "extend"
+                WHITESPACE@12..13 " "
+                DOT@13..14 "."
+                IDENT@14..15 "b"
+                ERROR@15..26
+                  WHITESPACE@15..16 " "
+                  BANG@16..17 "!"
+                  WHITESPACE@17..18 "\n"
+                  IDENT@18..26 "optional"
+                SEMICOLON@26..27 ";"
+              DECLARATION@27..33
+                PROPERTY@27..29
+                  WHITESPACE@27..28 " "
+                  IDENT@28..29 "c"
+                COLON@29..30 ":"
+                VALUE@30..32
+                  VALUE@30..32
+                    WHITESPACE@30..31 " "
+                    IDENT@31..32 "d"
+                SEMICOLON@32..33 ";"
+              WHITESPACE@33..34 " "
+              RBRACE@34..35 "}"
+        errors:
+          17..17: expected `optional`
+    "#]],
+    );
+}
+
+#[test]
+fn extend_optional_after_a_space_is_one_error() {
+    check(
+        ".a { @extend .b ! optional; c: d; }",
+        expect![[r#"
+        SOURCE_FILE@0..35
+          RULE_SET@0..35
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            BLOCK@2..35
+              WHITESPACE@2..3 " "
+              LBRACE@3..4 "{"
+              EXTEND_RULE@4..27
+                WHITESPACE@4..5 " "
+                AT@5..6 "@"
+                IDENT@6..12 "extend"
+                WHITESPACE@12..13 " "
+                DOT@13..14 "."
+                IDENT@14..15 "b"
+                ERROR@15..26
+                  WHITESPACE@15..16 " "
+                  BANG@16..17 "!"
+                  WHITESPACE@17..18 " "
+                  IDENT@18..26 "optional"
+                SEMICOLON@26..27 ";"
+              DECLARATION@27..33
+                PROPERTY@27..29
+                  WHITESPACE@27..28 " "
+                  IDENT@28..29 "c"
+                COLON@29..30 ":"
+                VALUE@30..32
+                  VALUE@30..32
+                    WHITESPACE@30..31 " "
+                    IDENT@31..32 "d"
+                SEMICOLON@32..33 ";"
+              WHITESPACE@33..34 " "
+              RBRACE@34..35 "}"
+        errors:
+          17..17: expected `optional`
+    "#]],
+    );
+}
+
 // ── @page ───────────────────────────────────────────────────────────────
 
 #[test]
