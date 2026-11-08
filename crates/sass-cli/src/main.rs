@@ -1,8 +1,12 @@
 use std::path::{Path, PathBuf};
 use std::process;
+use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
-use miette::{Diagnostic, NamedSource, Report, SourceSpan};
+use miette::{
+    Diagnostic, MietteError, MietteSpanContents, NamedSource, Report, SourceCode, SourceSpan,
+    SpanContents,
+};
 use sass_parser::syntax::{SyntaxNode, debug_tree};
 
 #[derive(Parser)]
@@ -166,40 +170,133 @@ fn dump_tokens<'src>(mut lexer: impl sass_parser::lexer::TokenSource<'src>) -> i
 
 #[derive(Debug, Diagnostic)]
 #[diagnostic(severity(Error))]
-struct ParseError {
+struct ParseError<S: SourceCode + std::fmt::Debug + 'static> {
     #[source_code]
-    src: NamedSource<String>,
+    src: NamedSource<S>,
     #[label("{msg}")]
     span: SourceSpan,
     msg: String,
 }
 
-impl std::fmt::Display for ParseError {
+impl<S: SourceCode + std::fmt::Debug + 'static> std::fmt::Display for ParseError<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "parse error")
     }
 }
 
-impl std::error::Error for ParseError {}
+impl<S: SourceCode + std::fmt::Debug + 'static> std::error::Error for ParseError<S> {}
+
+/// A file's text shared by all of its diagnostics, with the start of each line.
+///
+/// miette reads a span's context by scanning the source from its start, and each
+/// diagnostic used to own a copy of the source, so a file with many errors took
+/// time quadratic in its size. This hands miette only the lines around the span,
+/// found by binary search, so each diagnostic costs the size of its context.
+#[derive(Debug, Clone)]
+struct SharedSource {
+    text: Arc<str>,
+    /// Byte offset of each line's start. Lines end at `\r\n`, `\n` or a lone `\r`,
+    /// as miette counts them.
+    line_starts: Arc<[usize]>,
+}
+
+impl SharedSource {
+    fn new(text: &str) -> Self {
+        let bytes = text.as_bytes();
+        let mut line_starts = vec![0];
+        let mut i = 0;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'\r' if bytes.get(i + 1) == Some(&b'\n') => i += 1,
+                b'\r' | b'\n' => {}
+                _ => {
+                    i += 1;
+                    continue;
+                }
+            }
+            i += 1;
+            line_starts.push(i);
+        }
+        Self {
+            text: text.into(),
+            line_starts: line_starts.into(),
+        }
+    }
+
+    fn line_of(&self, offset: usize) -> usize {
+        self.line_starts.partition_point(|&start| start <= offset) - 1
+    }
+}
+
+impl SourceCode for SharedSource {
+    fn read_span<'a>(
+        &'a self,
+        span: &SourceSpan,
+        context_lines_before: usize,
+        context_lines_after: usize,
+    ) -> Result<Box<dyn SpanContents<'a> + 'a>, MietteError> {
+        let start = span.offset();
+        let end = start + span.len();
+        if end > self.text.len() {
+            return Err(MietteError::OutOfBounds);
+        }
+        // One line of margin past what miette reads, so that its scan of the
+        // window stops where its scan of the whole text would.
+        let first = self.line_of(start).saturating_sub(context_lines_before);
+        let last = self.line_of(end) + context_lines_after + 2;
+        let window_start = self.line_starts[first];
+        let window_end = self
+            .line_starts
+            .get(last)
+            .copied()
+            .unwrap_or(self.text.len());
+        let window = &self.text[window_start..window_end];
+        let inner = window.read_span(
+            &SourceSpan::new((start - window_start).into(), span.len()),
+            context_lines_before,
+            context_lines_after,
+        )?;
+        Ok(Box::new(MietteSpanContents::new(
+            inner.data(),
+            SourceSpan::new(
+                (inner.span().offset() + window_start).into(),
+                inner.span().len(),
+            ),
+            inner.line() + first,
+            inner.column(),
+            inner.line_count(),
+        )))
+    }
+}
 
 fn print_diagnostics(
     filename: &str,
     source: &str,
     errors: &[(String, sass_parser::text_range::TextRange)],
 ) {
-    let src = NamedSource::new(filename, source.to_owned());
-    for (msg, range) in errors {
-        let start: usize = range.start().into();
-        let len: usize = range.len().into();
+    use std::io::Write as _;
 
-        let err = ParseError {
-            src: src.clone(),
-            span: (start, len).into(),
-            msg: msg.clone(),
-        };
-
-        eprintln!("{:?}", Report::new(err));
+    // stderr is unbuffered, and a report is written in many small pieces.
+    let mut out = std::io::BufWriter::new(std::io::stderr().lock());
+    for report in diagnostic_reports(filename, source, errors) {
+        let _ = writeln!(out, "{report:?}");
     }
+}
+
+/// One report per parse error, all reading the one shared copy of `source`.
+fn diagnostic_reports(
+    filename: &str,
+    source: &str,
+    errors: &[(String, sass_parser::text_range::TextRange)],
+) -> impl Iterator<Item = Report> {
+    let src = NamedSource::new(filename, SharedSource::new(source));
+    errors.iter().map(move |(msg, range)| {
+        Report::new(ParseError {
+            src: src.clone(),
+            span: (usize::from(range.start()), usize::from(range.len())).into(),
+            msg: msg.clone(),
+        })
+    })
 }
 
 // ── helpers ──────────────────────────────────────────────────────────
@@ -256,5 +353,62 @@ fn collect_sass_recursive(dir: &Path, out: &mut Vec<PathBuf>) {
         {
             out.push(path);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use miette::{GraphicalReportHandler, GraphicalTheme};
+
+    fn render(report: &dyn Diagnostic) -> String {
+        let mut out = String::new();
+        GraphicalReportHandler::new_themed(GraphicalTheme::unicode_nocolor())
+            .render_report(&mut out, report)
+            .unwrap();
+        out
+    }
+
+    /// Every diagnostic renders as it does from the whole text.
+    #[test]
+    fn shared_source_renders_as_the_whole_text() {
+        let inputs = [
+            ".a { $: 1; }\n",
+            ".a { b: c; }\n.x { $: 1; }\n.y { $: 2; }\n.a { b: c; }\n",
+            ".a { b: c; }\r\n.x { $: 1; }\r\n\r\n.a { b: c; }\r\n",
+            ".a { b: c; }\r.x { $: 1; }\r.a { b: c; }\r",
+            "\n\n\n.x { $: 1; }",
+            ")",
+            ".a {\n  b: c;\n",
+            "@include",
+            "a { b: (1 + ; }\n\n\n\n\n\n\n.c { d: ) }\n",
+        ];
+        for input in inputs {
+            let (_, errors) = sass_parser::parse_scss(input);
+            assert!(!errors.is_empty(), "{input:?} has no errors");
+            let whole = NamedSource::new("t.scss", input.to_owned());
+            for (report, (msg, range)) in diagnostic_reports("t.scss", input, &errors).zip(&errors)
+            {
+                let expected = ParseError {
+                    src: whole.clone(),
+                    span: (usize::from(range.start()), usize::from(range.len())).into(),
+                    msg: msg.clone(),
+                };
+                assert_eq!(render(report.as_ref()), render(&expected), "{input:?}");
+            }
+        }
+    }
+
+    /// Many errors in one file render; each costs the size of its context.
+    #[test]
+    fn many_errors_render() {
+        let source = ".a { b: c; }\n".repeat(2000) + &".x { $: 1; }\n".repeat(2000);
+        let (_, errors) = sass_parser::parse_scss(&source);
+        assert_eq!(errors.len(), 2000);
+        let last = diagnostic_reports("t.scss", &source, &errors)
+            .map(|report| render(report.as_ref()))
+            .last()
+            .unwrap();
+        assert!(last.contains("4000 │ .x { $: 1; }"), "{last}");
     }
 }
