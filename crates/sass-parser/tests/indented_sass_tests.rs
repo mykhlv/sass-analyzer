@@ -3114,6 +3114,40 @@ fn value_context_is_cleared_when_a_block_opens() {
 }
 
 #[test]
+fn function_named_url_in_another_case() {
+    check_tree(
+        "@function URL($a)\n  @return $a\n",
+        expect![[r#"
+        SOURCE_FILE@0..31
+          FUNCTION_RULE@0..30
+            AT@0..1 "@"
+            IDENT@1..9 "function"
+            WHITESPACE@9..10 " "
+            IDENT@10..13 "URL"
+            PARAM_LIST@13..17
+              LPAREN@13..14 "("
+              PARAM@14..16
+                DOLLAR@14..15 "$"
+                IDENT@15..16 "a"
+              RPAREN@16..17 ")"
+            BLOCK@17..30
+              LBRACE@17..17 ""
+              RETURN_RULE@17..30
+                WHITESPACE@17..20 "\n  "
+                AT@20..21 "@"
+                IDENT@21..27 "return"
+                VARIABLE_REF@27..30
+                  WHITESPACE@27..28 " "
+                  DOLLAR@28..29 "$"
+                  IDENT@29..30 "a"
+                SEMICOLON@30..30 ""
+              RBRACE@30..30 ""
+          WHITESPACE@30..31 "\n"
+    "#]],
+    );
+}
+
+#[test]
 fn page_rule_selector_list() {
     check_tree(
         "@page toc, index:blank\n  margin: 1in\n",

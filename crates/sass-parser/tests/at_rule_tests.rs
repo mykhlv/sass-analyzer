@@ -269,6 +269,273 @@ fn content_simple() {
 // ── @function / @return ─────────────────────────────────────────────────
 
 #[test]
+fn function_named_url_in_another_case() {
+    check(
+        "@function URL($a) { @return $a; }",
+        expect![[r#"
+        SOURCE_FILE@0..33
+          FUNCTION_RULE@0..33
+            AT@0..1 "@"
+            IDENT@1..9 "function"
+            WHITESPACE@9..10 " "
+            IDENT@10..13 "URL"
+            PARAM_LIST@13..17
+              LPAREN@13..14 "("
+              PARAM@14..16
+                DOLLAR@14..15 "$"
+                IDENT@15..16 "a"
+              RPAREN@16..17 ")"
+            BLOCK@17..33
+              WHITESPACE@17..18 " "
+              LBRACE@18..19 "{"
+              RETURN_RULE@19..31
+                WHITESPACE@19..20 " "
+                AT@20..21 "@"
+                IDENT@21..27 "return"
+                VARIABLE_REF@27..30
+                  WHITESPACE@27..28 " "
+                  DOLLAR@28..29 "$"
+                  IDENT@29..30 "a"
+                SEMICOLON@30..31 ";"
+              WHITESPACE@31..32 " "
+              RBRACE@32..33 "}"
+    "#]],
+    );
+}
+
+#[test]
+fn function_name_after_a_comment_is_no_url() {
+    check(
+        "@function /* c */ Url($a) { @return $a; }",
+        expect![[r#"
+        SOURCE_FILE@0..41
+          FUNCTION_RULE@0..41
+            AT@0..1 "@"
+            IDENT@1..9 "function"
+            WHITESPACE@9..10 " "
+            MULTI_LINE_COMMENT@10..17 "/* c */"
+            WHITESPACE@17..18 " "
+            IDENT@18..21 "Url"
+            PARAM_LIST@21..25
+              LPAREN@21..22 "("
+              PARAM@22..24
+                DOLLAR@22..23 "$"
+                IDENT@23..24 "a"
+              RPAREN@24..25 ")"
+            BLOCK@25..41
+              WHITESPACE@25..26 " "
+              LBRACE@26..27 "{"
+              RETURN_RULE@27..39
+                WHITESPACE@27..28 " "
+                AT@28..29 "@"
+                IDENT@29..35 "return"
+                VARIABLE_REF@35..38
+                  WHITESPACE@35..36 " "
+                  DOLLAR@36..37 "$"
+                  IDENT@37..38 "a"
+                SEMICOLON@38..39 ";"
+              WHITESPACE@39..40 " "
+              RBRACE@40..41 "}"
+    "#]],
+    );
+}
+
+#[test]
+fn function_named_url_is_one_error() {
+    check(
+        "@function url($a) { @return $a; } .c { d: e; }",
+        expect![[r#"
+        SOURCE_FILE@0..46
+          FUNCTION_RULE@0..33
+            AT@0..1 "@"
+            IDENT@1..9 "function"
+            WHITESPACE@9..10 " "
+            IDENT@10..13 "url"
+            PARAM_LIST@13..17
+              LPAREN@13..14 "("
+              PARAM@14..16
+                DOLLAR@14..15 "$"
+                IDENT@15..16 "a"
+              RPAREN@16..17 ")"
+            BLOCK@17..33
+              WHITESPACE@17..18 " "
+              LBRACE@18..19 "{"
+              RETURN_RULE@19..31
+                WHITESPACE@19..20 " "
+                AT@20..21 "@"
+                IDENT@21..27 "return"
+                VARIABLE_REF@27..30
+                  WHITESPACE@27..28 " "
+                  DOLLAR@28..29 "$"
+                  IDENT@29..30 "a"
+                SEMICOLON@30..31 ";"
+              WHITESPACE@31..32 " "
+              RBRACE@32..33 "}"
+          RULE_SET@33..46
+            SELECTOR_LIST@33..36
+              SELECTOR@33..36
+                SIMPLE_SELECTOR@33..36
+                  WHITESPACE@33..34 " "
+                  DOT@34..35 "."
+                  IDENT@35..36 "c"
+            BLOCK@36..46
+              WHITESPACE@36..37 " "
+              LBRACE@37..38 "{"
+              DECLARATION@38..44
+                PROPERTY@38..40
+                  WHITESPACE@38..39 " "
+                  IDENT@39..40 "d"
+                COLON@40..41 ":"
+                VALUE@41..43
+                  VALUE@41..43
+                    WHITESPACE@41..42 " "
+                    IDENT@42..43 "e"
+                SEMICOLON@43..44 ";"
+              WHITESPACE@44..45 " "
+              RBRACE@45..46 "}"
+        errors:
+          10..13: invalid function name
+    "#]],
+    );
+}
+
+#[test]
+fn function_named_and_is_one_error() {
+    check(
+        "@function and($a) { @return $a; }",
+        expect![[r#"
+        SOURCE_FILE@0..33
+          FUNCTION_RULE@0..33
+            AT@0..1 "@"
+            IDENT@1..9 "function"
+            WHITESPACE@9..10 " "
+            IDENT@10..13 "and"
+            PARAM_LIST@13..17
+              LPAREN@13..14 "("
+              PARAM@14..16
+                DOLLAR@14..15 "$"
+                IDENT@15..16 "a"
+              RPAREN@16..17 ")"
+            BLOCK@17..33
+              WHITESPACE@17..18 " "
+              LBRACE@18..19 "{"
+              RETURN_RULE@19..31
+                WHITESPACE@19..20 " "
+                AT@20..21 "@"
+                IDENT@21..27 "return"
+                VARIABLE_REF@27..30
+                  WHITESPACE@27..28 " "
+                  DOLLAR@28..29 "$"
+                  IDENT@29..30 "a"
+                SEMICOLON@30..31 ";"
+              WHITESPACE@31..32 " "
+              RBRACE@32..33 "}"
+        errors:
+          10..13: invalid function name
+    "#]],
+    );
+}
+
+#[test]
+fn function_named_type_is_one_error() {
+    check(
+        "@function type($a) { @return $a; }",
+        expect![[r#"
+        SOURCE_FILE@0..34
+          FUNCTION_RULE@0..34
+            AT@0..1 "@"
+            IDENT@1..9 "function"
+            WHITESPACE@9..10 " "
+            IDENT@10..14 "type"
+            PARAM_LIST@14..18
+              LPAREN@14..15 "("
+              PARAM@15..17
+                DOLLAR@15..16 "$"
+                IDENT@16..17 "a"
+              RPAREN@17..18 ")"
+            BLOCK@18..34
+              WHITESPACE@18..19 " "
+              LBRACE@19..20 "{"
+              RETURN_RULE@20..32
+                WHITESPACE@20..21 " "
+                AT@21..22 "@"
+                IDENT@22..28 "return"
+                VARIABLE_REF@28..31
+                  WHITESPACE@28..29 " "
+                  DOLLAR@29..30 "$"
+                  IDENT@30..31 "a"
+                SEMICOLON@31..32 ";"
+              WHITESPACE@32..33 " "
+              RBRACE@33..34 "}"
+        errors:
+          10..14: this name is reserved for the plain-CSS function
+    "#]],
+    );
+}
+
+#[test]
+fn url_after_function_rule_stays_url_contents() {
+    check(
+        "@function URL($a) { @return $a; } .c { d: URL(a b); }",
+        expect![[r#"
+        SOURCE_FILE@0..53
+          FUNCTION_RULE@0..33
+            AT@0..1 "@"
+            IDENT@1..9 "function"
+            WHITESPACE@9..10 " "
+            IDENT@10..13 "URL"
+            PARAM_LIST@13..17
+              LPAREN@13..14 "("
+              PARAM@14..16
+                DOLLAR@14..15 "$"
+                IDENT@15..16 "a"
+              RPAREN@16..17 ")"
+            BLOCK@17..33
+              WHITESPACE@17..18 " "
+              LBRACE@18..19 "{"
+              RETURN_RULE@19..31
+                WHITESPACE@19..20 " "
+                AT@20..21 "@"
+                IDENT@21..27 "return"
+                VARIABLE_REF@27..30
+                  WHITESPACE@27..28 " "
+                  DOLLAR@28..29 "$"
+                  IDENT@29..30 "a"
+                SEMICOLON@30..31 ";"
+              WHITESPACE@31..32 " "
+              RBRACE@32..33 "}"
+          RULE_SET@33..53
+            SELECTOR_LIST@33..36
+              SELECTOR@33..36
+                SIMPLE_SELECTOR@33..36
+                  WHITESPACE@33..34 " "
+                  DOT@34..35 "."
+                  IDENT@35..36 "c"
+            BLOCK@36..53
+              WHITESPACE@36..37 " "
+              LBRACE@37..38 "{"
+              DECLARATION@38..51
+                PROPERTY@38..40
+                  WHITESPACE@38..39 " "
+                  IDENT@39..40 "d"
+                COLON@40..41 ":"
+                VALUE@41..50
+                  SPECIAL_FUNCTION_CALL@41..50
+                    WHITESPACE@41..42 " "
+                    IDENT@42..45 "URL"
+                    LPAREN@45..46 "("
+                    URL_CONTENTS@46..47 "a"
+                    WHITESPACE@47..48 " "
+                    URL_CONTENTS@48..49 "b"
+                    RPAREN@49..50 ")"
+                SEMICOLON@50..51 ";"
+              WHITESPACE@51..52 " "
+              RBRACE@52..53 "}"
+    "#]],
+    );
+}
+
+#[test]
 fn function_rule() {
     check(
         "@function double($n) { @return $n * 2; }",

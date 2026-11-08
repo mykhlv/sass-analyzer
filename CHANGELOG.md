@@ -116,6 +116,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Parser: `!important` inside brackets, as in `(a: 1 !important)`, `(1, 2 !important)`,
   `[a !important b]` or `f(a !important b)`, is an item of the value, as in Dart Sass, not
   an error. Only a positional argument ending with it was accepted
+- Parser: a function named `URL` or `Url`, which Dart Sass accepts with a deprecation
+  warning, is no longer an error: its name was read as the start of `url(...)`, and its
+  parameters as the URL. `@function url(...)`, as well as `and`, `or`, `not`,
+  `expression` and `element`, is one error on the name, "invalid function name", as in
+  Dart Sass, and `@function type(...)` reports that the name is reserved for the
+  plain-CSS function. `url(...)` in values is read as before
 
 ## 0.4.0 — 2026-11-08
 
