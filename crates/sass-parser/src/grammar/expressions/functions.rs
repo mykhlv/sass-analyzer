@@ -201,6 +201,7 @@ pub(crate) fn arg_list(p: &mut Parser<'_>, ctx: ParseContext) {
     assert!(p.at(LPAREN));
     let p = &mut *p.transparent_guard();
     let m = p.start();
+    let errors = p.error_count();
     p.bump(); // (
 
     if !p.at(RPAREN) && !p.at_end() {
@@ -212,7 +213,7 @@ pub(crate) fn arg_list(p: &mut Parser<'_>, ctx: ParseContext) {
         }
     }
 
-    p.expect(RPAREN);
+    crate::grammar::close_bracket(p, RPAREN, errors);
     let _ = m.complete(p, ARG_LIST);
 }
 

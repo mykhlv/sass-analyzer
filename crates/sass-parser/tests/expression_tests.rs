@@ -3107,10 +3107,7 @@ fn calc_space_separated_values_past_nesting_limit() {
     // "nesting too deep" error each time until memory ran out.
     let levels = "calc(".repeat(1_000);
     for (parse, source) in [
-        (
-            sass_parser::parse_scss as fn(&str) -> _,
-            format!("a{{b:{levels}"),
-        ),
+        (sass_parser::parse_scss as ParseFn, format!("a{{b:{levels}")),
         (
             sass_parser::parse_scss,
             format!("a{{b:calc({}x y", "(".repeat(254)),
@@ -4009,5 +4006,597 @@ fn nonascii_snowman_identifier() {
                   WHITESPACE@15..16 " "
                   RBRACE@16..17 "}"
         "#]],
+    );
+}
+
+// ── Recovery inside a bracket ───────────────────────────────────────
+
+#[test]
+fn paren_list_with_a_map_entry_is_one_error_through_the_paren() {
+    // Dart Sass: `expected ")"` at the colon.
+    check(
+        "$id: f((a,b:c)...);\n$e: g;\n",
+        expect![[r#"
+        SOURCE_FILE@0..27
+          VARIABLE_DECL@0..19
+            DOLLAR@0..1 "$"
+            IDENT@1..3 "id"
+            COLON@3..4 ":"
+            FUNCTION_CALL@4..18
+              WHITESPACE@4..5 " "
+              IDENT@5..6 "f"
+              ARG_LIST@6..18
+                LPAREN@6..7 "("
+                ARG@7..17
+                  LIST_EXPR@7..14
+                    LPAREN@7..8 "("
+                    VALUE@8..9
+                      IDENT@8..9 "a"
+                    COMMA@9..10 ","
+                    VALUE@10..11
+                      IDENT@10..11 "b"
+                    ERROR@11..13
+                      COLON@11..12 ":"
+                      IDENT@12..13 "c"
+                    RPAREN@13..14 ")"
+                  DOT_DOT_DOT@14..17 "..."
+                RPAREN@17..18 ")"
+            SEMICOLON@18..19 ";"
+          VARIABLE_DECL@19..26
+            WHITESPACE@19..20 "\n"
+            DOLLAR@20..21 "$"
+            IDENT@21..22 "e"
+            COLON@22..23 ":"
+            VALUE@23..25
+              WHITESPACE@23..24 " "
+              IDENT@24..25 "g"
+            SEMICOLON@25..26 ";"
+          WHITESPACE@26..27 "\n"
+        errors:
+          11..12: expected RPAREN
+    "#]],
+    );
+}
+
+#[test]
+fn bad_token_in_parens_is_one_error_through_both_parens() {
+    // Dart Sass: `Expected identifier.` at the `.`.
+    check(
+        "$a: f((b c. d e));\n$f: g;\n",
+        expect![[r#"
+        SOURCE_FILE@0..26
+          VARIABLE_DECL@0..18
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "a"
+            COLON@2..3 ":"
+            FUNCTION_CALL@3..17
+              WHITESPACE@3..4 " "
+              IDENT@4..5 "f"
+              ARG_LIST@5..17
+                LPAREN@5..6 "("
+                ARG@6..16
+                  PAREN_EXPR@6..16
+                    LPAREN@6..7 "("
+                    VALUE@7..8
+                      IDENT@7..8 "b"
+                    VALUE@8..10
+                      WHITESPACE@8..9 " "
+                      IDENT@9..10 "c"
+                    ERROR@10..15
+                      DOT@10..11 "."
+                      WHITESPACE@11..12 " "
+                      IDENT@12..13 "d"
+                      WHITESPACE@13..14 " "
+                      IDENT@14..15 "e"
+                    RPAREN@15..16 ")"
+                RPAREN@16..17 ")"
+            SEMICOLON@17..18 ";"
+          VARIABLE_DECL@18..25
+            WHITESPACE@18..19 "\n"
+            DOLLAR@19..20 "$"
+            IDENT@20..21 "f"
+            COLON@21..22 ":"
+            VALUE@22..24
+              WHITESPACE@22..23 " "
+              IDENT@23..24 "g"
+            SEMICOLON@24..25 ";"
+          WHITESPACE@25..26 "\n"
+        errors:
+          10..11: expected expression
+    "#]],
+    );
+}
+
+#[test]
+fn bad_token_in_brackets_is_one_error_through_the_bracket() {
+    check(
+        "a { b: [c, ) d]; e: f; }\n",
+        expect![[r#"
+        SOURCE_FILE@0..25
+          RULE_SET@0..24
+            SELECTOR_LIST@0..1
+              SELECTOR@0..1
+                SIMPLE_SELECTOR@0..1
+                  IDENT@0..1 "a"
+            BLOCK@1..24
+              WHITESPACE@1..2 " "
+              LBRACE@2..3 "{"
+              DECLARATION@3..16
+                PROPERTY@3..5
+                  WHITESPACE@3..4 " "
+                  IDENT@4..5 "b"
+                COLON@5..6 ":"
+                VALUE@6..15
+                  BRACKETED_LIST@6..15
+                    WHITESPACE@6..7 " "
+                    LBRACKET@7..8 "["
+                    VALUE@8..9
+                      IDENT@8..9 "c"
+                    COMMA@9..10 ","
+                    ERROR@10..14
+                      WHITESPACE@10..11 " "
+                      RPAREN@11..12 ")"
+                      WHITESPACE@12..13 " "
+                      IDENT@13..14 "d"
+                    RBRACKET@14..15 "]"
+                SEMICOLON@15..16 ";"
+              DECLARATION@16..22
+                PROPERTY@16..18
+                  WHITESPACE@16..17 " "
+                  IDENT@17..18 "e"
+                COLON@18..19 ":"
+                VALUE@19..21
+                  VALUE@19..21
+                    WHITESPACE@19..20 " "
+                    IDENT@20..21 "f"
+                SEMICOLON@21..22 ";"
+              WHITESPACE@22..23 " "
+              RBRACE@23..24 "}"
+          WHITESPACE@24..25 "\n"
+        errors:
+          11..12: expected expression
+    "#]],
+    );
+}
+
+#[test]
+fn error_in_interpolation_skips_to_its_brace() {
+    check(
+        "a { b: #{c ) d} e; f: g; }\n",
+        expect![[r##"
+        SOURCE_FILE@0..27
+          RULE_SET@0..26
+            SELECTOR_LIST@0..1
+              SELECTOR@0..1
+                SIMPLE_SELECTOR@0..1
+                  IDENT@0..1 "a"
+            BLOCK@1..26
+              WHITESPACE@1..2 " "
+              LBRACE@2..3 "{"
+              DECLARATION@3..18
+                PROPERTY@3..5
+                  WHITESPACE@3..4 " "
+                  IDENT@4..5 "b"
+                COLON@5..6 ":"
+                VALUE@6..17
+                  INTERPOLATION@6..15
+                    WHITESPACE@6..7 " "
+                    HASH_LBRACE@7..9 "#{"
+                    VALUE@9..10
+                      IDENT@9..10 "c"
+                    ERROR@10..14
+                      WHITESPACE@10..11 " "
+                      RPAREN@11..12 ")"
+                      WHITESPACE@12..13 " "
+                      IDENT@13..14 "d"
+                    RBRACE@14..15 "}"
+                  VALUE@15..17
+                    WHITESPACE@15..16 " "
+                    IDENT@16..17 "e"
+                SEMICOLON@17..18 ";"
+              DECLARATION@18..24
+                PROPERTY@18..20
+                  WHITESPACE@18..19 " "
+                  IDENT@19..20 "f"
+                COLON@20..21 ":"
+                VALUE@21..23
+                  VALUE@21..23
+                    WHITESPACE@21..22 " "
+                    IDENT@22..23 "g"
+                SEMICOLON@23..24 ";"
+              WHITESPACE@24..25 " "
+              RBRACE@25..26 "}"
+          WHITESPACE@26..27 "\n"
+        errors:
+          11..12: expected RBRACE
+    "##]],
+    );
+}
+
+#[test]
+fn bracket_left_unclosed_still_ends_at_the_statement() {
+    // No closer before the `;`: nothing is skipped, the bracket is reported unclosed.
+    check(
+        "a { b: f(c d; e: f; }\n",
+        expect![[r#"
+        SOURCE_FILE@0..22
+          RULE_SET@0..21
+            SELECTOR_LIST@0..1
+              SELECTOR@0..1
+                SIMPLE_SELECTOR@0..1
+                  IDENT@0..1 "a"
+            BLOCK@1..21
+              WHITESPACE@1..2 " "
+              LBRACE@2..3 "{"
+              DECLARATION@3..13
+                PROPERTY@3..5
+                  WHITESPACE@3..4 " "
+                  IDENT@4..5 "b"
+                COLON@5..6 ":"
+                VALUE@6..12
+                  FUNCTION_CALL@6..12
+                    WHITESPACE@6..7 " "
+                    IDENT@7..8 "f"
+                    ARG_LIST@8..12
+                      LPAREN@8..9 "("
+                      ARG@9..12
+                        VALUE@9..10
+                          IDENT@9..10 "c"
+                        VALUE@10..12
+                          WHITESPACE@10..11 " "
+                          IDENT@11..12 "d"
+                SEMICOLON@12..13 ";"
+              DECLARATION@13..19
+                PROPERTY@13..15
+                  WHITESPACE@13..14 " "
+                  IDENT@14..15 "e"
+                COLON@15..16 ":"
+                VALUE@16..18
+                  VALUE@16..18
+                    WHITESPACE@16..17 " "
+                    IDENT@17..18 "f"
+                SEMICOLON@18..19 ";"
+              WHITESPACE@19..20 " "
+              RBRACE@20..21 "}"
+          WHITESPACE@21..22 "\n"
+        errors:
+          12..13: expected RPAREN
+    "#]],
+    );
+}
+
+#[test]
+fn error_in_interpolation_ends_at_the_string_that_swallowed_its_brace() {
+    // Dart Sass: `Expected expression.` The string opened after `)` takes the rest of
+    // the line, the interpolation's `}` with it.
+    check(
+        "'#{)'{\na { b: c }\n",
+        expect![[r##"
+        SOURCE_FILE@0..18
+          ERROR@0..1
+            STRING_START@0..1 "'"
+          RULE_SET@1..17
+            SELECTOR_LIST@1..8
+              SELECTOR@1..8
+                INTERPOLATION@1..6
+                  HASH_LBRACE@1..3 "#{"
+                  ERROR@3..6
+                    RPAREN@3..4 ")"
+                    QUOTED_STRING@4..6 "'{"
+                SIMPLE_SELECTOR@6..8
+                  WHITESPACE@6..7 "\n"
+                  IDENT@7..8 "a"
+            BLOCK@8..17
+              WHITESPACE@8..9 " "
+              LBRACE@9..10 "{"
+              DECLARATION@10..15
+                PROPERTY@10..12
+                  WHITESPACE@10..11 " "
+                  IDENT@11..12 "b"
+                COLON@12..13 ":"
+                VALUE@13..15
+                  VALUE@13..15
+                    WHITESPACE@13..14 " "
+                    IDENT@14..15 "c"
+              WHITESPACE@15..16 " "
+              RBRACE@16..17 "}"
+          WHITESPACE@17..18 "\n"
+        errors:
+          0..1: expected rule
+          3..4: expected expression
+          4..6: unterminated string
+    "##]],
+    );
+}
+
+// ── Nesting limit ───────────────────────────────────────────────────
+
+type ParseFn = fn(
+    &str,
+) -> (
+    sass_parser::syntax::GreenNode,
+    Vec<(String, sass_parser::text_range::TextRange)>,
+);
+
+/// The errors of `parse` on `source`, after checking the round trip, and the text of each
+/// top-level node that is no error.
+fn errors_and_statements(parse: ParseFn, source: &str) -> (Vec<String>, Vec<String>) {
+    let (green, errors) = parse(source);
+    let tree = SyntaxNode::new_root(green);
+    assert_eq!(tree.text().to_string(), source, "lossless round-trip");
+    let statements = tree
+        .children()
+        .filter(|node| node.kind() != sass_parser::syntax_kind::SyntaxKind::ERROR)
+        .map(|node| node.text().to_string().trim().to_owned())
+        .collect();
+    (errors.into_iter().map(|(msg, _)| msg).collect(), statements)
+}
+
+#[test]
+fn nesting_too_deep_is_one_error_and_the_brackets_end_silently() {
+    // 1000 brackets left open: one error, not one per bracket and per retry.
+    let deep = "[".repeat(1_000);
+    for (parse, source, last) in [
+        (
+            sass_parser::parse_scss as ParseFn,
+            format!("a {{ b: {deep} }}\nc {{ d: e }}\n"),
+            "c { d: e }",
+        ),
+        (
+            sass_parser::parse_sass,
+            format!("a\n  b: {deep}\nc\n  d: e\n"),
+            "c\n  d: e",
+        ),
+        (
+            sass_parser::parse_scss,
+            format!("$a: {};\n$b: c;\n", "(".repeat(1_000)),
+            "$b: c;",
+        ),
+        (
+            sass_parser::parse_scss,
+            format!("a {{ b: {}; }}\nc {{ d: e }}\n", "calc(".repeat(1_000)),
+            "c { d: e }",
+        ),
+    ] {
+        let (errors, statements) = errors_and_statements(parse, &source);
+        assert_eq!(errors, ["nesting too deep"], "{source:.40}");
+        assert_eq!(statements.last().map(String::as_str), Some(last));
+    }
+}
+
+#[test]
+fn nesting_too_deep_closes_the_brackets_written_after_it() {
+    let source = format!(
+        "a {{ b: {}{}; c: d; }}\n",
+        "[".repeat(1_000),
+        "]".repeat(1_000)
+    );
+    let (errors, statements) = errors_and_statements(sass_parser::parse_scss, &source);
+    assert_eq!(errors, ["nesting too deep"]);
+    assert_eq!(statements.len(), 1);
+    let (green, _) = sass_parser::parse_scss(&source);
+    let declarations: Vec<String> = SyntaxNode::new_root(green)
+        .descendants()
+        .filter(|node| node.kind() == sass_parser::syntax_kind::SyntaxKind::DECLARATION)
+        .map(|node| node.text().to_string().trim().to_owned())
+        .collect();
+    assert_eq!(declarations.len(), 2, "{declarations:?}");
+    assert_eq!(declarations[1], "c: d;");
+}
+
+#[test]
+fn map_entries_missing_their_colon_are_one_error_each() {
+    // Dart Sass: `expected ":"` after `two`, where it stops.
+    check(
+        "$map: (\n  a: 1, two, 3,\n  foo: 'bar'\n);\n$b: c;\n",
+        expect![[r#"
+            SOURCE_FILE@0..47
+              VARIABLE_DECL@0..39
+                DOLLAR@0..1 "$"
+                IDENT@1..4 "map"
+                COLON@4..5 ":"
+                MAP_EXPR@5..38
+                  WHITESPACE@5..6 " "
+                  LPAREN@6..7 "("
+                  MAP_ENTRY@7..14
+                    VALUE@7..11
+                      WHITESPACE@7..10 "\n  "
+                      IDENT@10..11 "a"
+                    COLON@11..12 ":"
+                    NUMBER_LITERAL@12..14
+                      WHITESPACE@12..13 " "
+                      NUMBER@13..14 "1"
+                  COMMA@14..15 ","
+                  MAP_ENTRY@15..19
+                    VALUE@15..19
+                      WHITESPACE@15..16 " "
+                      IDENT@16..19 "two"
+                  COMMA@19..20 ","
+                  MAP_ENTRY@20..22
+                    NUMBER_LITERAL@20..22
+                      WHITESPACE@20..21 " "
+                      NUMBER@21..22 "3"
+                  COMMA@22..23 ","
+                  MAP_ENTRY@23..36
+                    VALUE@23..29
+                      WHITESPACE@23..26 "\n  "
+                      IDENT@26..29 "foo"
+                    COLON@29..30 ":"
+                    STRING_LITERAL@30..36
+                      WHITESPACE@30..31 " "
+                      QUOTED_STRING@31..36 "'bar'"
+                  WHITESPACE@36..37 "\n"
+                  RPAREN@37..38 ")"
+                SEMICOLON@38..39 ";"
+              VARIABLE_DECL@39..46
+                WHITESPACE@39..40 "\n"
+                DOLLAR@40..41 "$"
+                IDENT@41..42 "b"
+                COLON@42..43 ":"
+                VALUE@43..45
+                  WHITESPACE@43..44 " "
+                  IDENT@44..45 "c"
+                SEMICOLON@45..46 ";"
+              WHITESPACE@46..47 "\n"
+            errors:
+              19..20: expected COLON
+              22..23: expected COLON
+        "#]],
+    );
+}
+
+#[test]
+fn map_missing_commas_left_unclosed_keeps_the_next_rule() {
+    // Dart Sass: `expected ")"` at the second colon. The map ends there, unclosed, and
+    // the rest of that line with it: the next line starts the next statement.
+    check(
+        "$m: (\na: 1\nb: 2\n.c { d: e }\n",
+        expect![[r#"
+        SOURCE_FILE@0..28
+          VARIABLE_DECL@0..15
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "m"
+            COLON@2..3 ":"
+            MAP_EXPR@3..12
+              WHITESPACE@3..4 " "
+              LPAREN@4..5 "("
+              MAP_ENTRY@5..12
+                VALUE@5..7
+                  WHITESPACE@5..6 "\n"
+                  IDENT@6..7 "a"
+                COLON@7..8 ":"
+                NUMBER_LITERAL@8..10
+                  WHITESPACE@8..9 " "
+                  NUMBER@9..10 "1"
+                VALUE@10..12
+                  WHITESPACE@10..11 "\n"
+                  IDENT@11..12 "b"
+            ERROR@12..15
+              COLON@12..13 ":"
+              WHITESPACE@13..14 " "
+              NUMBER@14..15 "2"
+          RULE_SET@15..27
+            SELECTOR_LIST@15..18
+              SELECTOR@15..18
+                SIMPLE_SELECTOR@15..18
+                  WHITESPACE@15..16 "\n"
+                  DOT@16..17 "."
+                  IDENT@17..18 "c"
+            BLOCK@18..27
+              WHITESPACE@18..19 " "
+              LBRACE@19..20 "{"
+              DECLARATION@20..25
+                PROPERTY@20..22
+                  WHITESPACE@20..21 " "
+                  IDENT@21..22 "d"
+                COLON@22..23 ":"
+                VALUE@23..25
+                  VALUE@23..25
+                    WHITESPACE@23..24 " "
+                    IDENT@24..25 "e"
+              WHITESPACE@25..26 " "
+              RBRACE@26..27 "}"
+          WHITESPACE@27..28 "\n"
+        errors:
+          12..13: expected RPAREN
+    "#]],
+    );
+}
+
+#[test]
+fn map_missing_commas_left_unclosed_at_the_end_of_input() {
+    check(
+        "$m: (\na: 1\nb: 2\n.c",
+        expect![[r#"
+        SOURCE_FILE@0..18
+          VARIABLE_DECL@0..15
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "m"
+            COLON@2..3 ":"
+            MAP_EXPR@3..12
+              WHITESPACE@3..4 " "
+              LPAREN@4..5 "("
+              MAP_ENTRY@5..12
+                VALUE@5..7
+                  WHITESPACE@5..6 "\n"
+                  IDENT@6..7 "a"
+                COLON@7..8 ":"
+                NUMBER_LITERAL@8..10
+                  WHITESPACE@8..9 " "
+                  NUMBER@9..10 "1"
+                VALUE@10..12
+                  WHITESPACE@10..11 "\n"
+                  IDENT@11..12 "b"
+            ERROR@12..15
+              COLON@12..13 ":"
+              WHITESPACE@13..14 " "
+              NUMBER@14..15 "2"
+          RULE_SET@15..18
+            SELECTOR_LIST@15..18
+              SELECTOR@15..18
+                SIMPLE_SELECTOR@15..18
+                  WHITESPACE@15..16 "\n"
+                  DOT@16..17 "."
+                  IDENT@17..18 "c"
+        errors:
+          12..13: expected RPAREN
+          18..18: expected `{`
+    "#]],
+    );
+}
+
+#[test]
+fn value_error_before_a_semicolon_on_its_line_skips_to_it() {
+    check(
+        "$m: (a: 1 b: 2;\n.c { d: e }\n",
+        expect![[r#"
+        SOURCE_FILE@0..28
+          VARIABLE_DECL@0..15
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "m"
+            COLON@2..3 ":"
+            MAP_EXPR@3..11
+              WHITESPACE@3..4 " "
+              LPAREN@4..5 "("
+              MAP_ENTRY@5..11
+                VALUE@5..6
+                  IDENT@5..6 "a"
+                COLON@6..7 ":"
+                NUMBER_LITERAL@7..9
+                  WHITESPACE@7..8 " "
+                  NUMBER@8..9 "1"
+                VALUE@9..11
+                  WHITESPACE@9..10 " "
+                  IDENT@10..11 "b"
+            ERROR@11..14
+              COLON@11..12 ":"
+              WHITESPACE@12..13 " "
+              NUMBER@13..14 "2"
+            SEMICOLON@14..15 ";"
+          RULE_SET@15..27
+            SELECTOR_LIST@15..18
+              SELECTOR@15..18
+                SIMPLE_SELECTOR@15..18
+                  WHITESPACE@15..16 "\n"
+                  DOT@16..17 "."
+                  IDENT@17..18 "c"
+            BLOCK@18..27
+              WHITESPACE@18..19 " "
+              LBRACE@19..20 "{"
+              DECLARATION@20..25
+                PROPERTY@20..22
+                  WHITESPACE@20..21 " "
+                  IDENT@21..22 "d"
+                COLON@22..23 ":"
+                VALUE@23..25
+                  VALUE@23..25
+                    WHITESPACE@23..24 " "
+                    IDENT@24..25 "e"
+              WHITESPACE@25..26 " "
+              RBRACE@26..27 "}"
+          WHITESPACE@27..28 "\n"
+        errors:
+          11..12: expected RPAREN
+    "#]],
     );
 }

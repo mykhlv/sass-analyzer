@@ -69,6 +69,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   missing its space after `:` is no longer given for a pseudo selector, as an empty
   `a:hover`, `li:first-child`, `a:not(.b)` or `input:-webkit-autofill`. It is now given
   for an interpolated name, as `margin-#{$side}:auto`
+- Parser: a mistake inside a bracket — an argument list, a parameter list, the
+  configuration of `@use` or `@forward ... with (...)`, a parenthesized list or map, a
+  bracketed list or an interpolation — is one error, and what could not be read up to
+  the bracket's closer is skipped with it. The statement went on from the inside of the
+  bracket instead, which reported up to a dozen errors for one, as for
+  `@use "a" with (b.$c: d)` or `f((a, b: c)...)`. A parameter or a configured variable
+  missing its `$` no longer takes the ones after it with it
+- Parser: an expression nested too deep is one error, "nesting too deep". The rest of
+  the operand that went too deep is skipped with it, and the brackets left open around
+  it end there without errors of their own: 1000 unclosed `[` gave over 1700 errors
+- Parser: `@include m using $a { ... }`, missing the parentheses around `$a`, is one
+  error, a missing `(` as in Dart Sass, and the content block still parses as the
+  rule's. It was taken for a declaration, with up to nine errors
+- Parser: a `@use ... as` or `@forward ... as` clause with no identifier, as
+  `@forward "a" as 1-*`, is one error, and the clauses after it still parse. The rest of
+  the clause was left to the next statement, with up to three more errors
+- Parser: a map entry missing its `:`, as `two` in `(a: 1, two, b: 2)`, is one error,
+  not a second one for a value it never had
+- Parser: a rule missing its `{` where a string left unclosed starts, as the rest of
+  `'line1` / `line2';` read on the line after a line break that ended the string, reports
+  the string only, not a missing `{` at the same place as well
+- Parser: a `:`, `)` or `]` in a declaration's value, as in `c: d)` or `b: c:d`, is
+  reported, as Dart Sass does, and the rest of the value is skipped with it. Such
+  values were accepted silently, in both syntaxes. In the braced syntax, `name:` after a
+  value is the next declaration, missing the `;` before it: `color: red font-size: 14px`
+  reports the `;` and parses both declarations. Colons that values hold stay valid:
+  `progid:` filters, `url(a:b)`, strings, escapes, interpolation, custom properties
+- Parser: a `.` in a declaration's value that starts no number is reported, as Dart Sass
+  does. In the indented syntax, a word operator or `+` at the end of a line took a
+  selector line below, `content: not` / `.c`, for its operand, and the lines beneath it
+  for a nested property, with no error. A line below that is no operand, as `&:hover`,
+  `b: c` or `$b: 2`, now reports the one error Dart Sass gives there
+- SCSS: a variable's value that reports an error, as a map missing its commas and
+  left unclosed, `$m: (` / `a: 1` / `b: 2` / `.c { ... }`, takes the rest of its line
+  with that one error. The rest was left to the next statement, with up to three more
+  errors, and the rule on the next line was read into it
+- Indented Sass: a file with many brackets left unclosed, line after line, parses in time
+  linear in its size. Each line searched on to the end of the file for the next line
+  start, and each erroring bracket for the next line at its column, so the time grew with
+  the square of the file's length
 
 ## 0.4.0 — 2026-11-08
 

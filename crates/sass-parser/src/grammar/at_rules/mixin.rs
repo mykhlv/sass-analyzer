@@ -51,6 +51,14 @@ pub fn include_rule(p: &mut Parser<'_>) {
         p.bump(); // using
         if p.at(LPAREN) {
             super::param_list(p);
+        } else {
+            // The rest of the header, up to the content block it still takes.
+            let m = p.start();
+            p.error("expected `(`");
+            while !p.at(LBRACE) && !p.at(SEMICOLON) && !p.at(RBRACE) && !p.at_end() {
+                super::lines::bump_in_run(p);
+            }
+            let _ = m.complete(p, ERROR);
         }
     }
 

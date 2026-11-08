@@ -48,6 +48,10 @@ pub struct Parser<'src> {
     /// errors only occur on malformed input where parsing speed is not critical.
     error_messages: Vec<String>,
     depth: u32,
+    /// The cursor where errors go unreported: see [`Parser::quiet_here`].
+    quiet_at: usize,
+    /// The cursor where [`Parser::error`] last reported.
+    last_error_at: usize,
     layout: Layout,
     fence: Fence,
     /// Brackets (`()`, `[]`, `#{}`) the cursor is inside, counted by
@@ -102,6 +106,8 @@ impl<'src> Parser<'src> {
             events: Vec::with_capacity(estimated_events),
             error_messages: Vec::new(),
             depth: 0,
+            quiet_at: usize::MAX,
+            last_error_at: usize::MAX,
             layout,
             fence,
             transparent: 0,
@@ -304,6 +310,65 @@ impl<'src> Parser<'src> {
         unclosed
     }
 
+    /// Where the contents of the innermost bracket end, read on from the cursor, when an
+    /// error has left them unread: the number of tokens through the end, and what ends
+    /// them. That is its closer `close`, once every bracket opened before it has closed in
+    /// kind, or with `items` a `,` outside those brackets first, which ends the item at
+    /// the cursor; or a string left unclosed, which swallowed the closer with the rest of
+    /// its line. `None` if a `;`, a `{` outside interpolation, a `}` of no interpolation,
+    /// a closer that does not match a bracket opened since the cursor, or the next fence
+    /// comes first, or nothing within reach: the bracket is left unclosed instead.
+    pub fn rest_of_bracket(&self, close: SyntaxKind, items: bool) -> Option<(usize, BracketRest)> {
+        const REACH: usize = 4096;
+        let mut open: Vec<SyntaxKind> = Vec::new();
+        let mut string_starts: Vec<TextSize> = Vec::new();
+        let end = self.fence.index.min(self.pos.saturating_add(REACH));
+        for index in self.pos..end {
+            let count = index - self.pos + 1;
+            let range = self.input.range(index);
+            let kind = self.input.kind(index);
+            let string = match kind {
+                SyntaxKind::SEMICOLON | SyntaxKind::LBRACE => return None,
+                SyntaxKind::COMMA if items && open.is_empty() => {
+                    return Some((count, BracketRest::Comma));
+                }
+                SyntaxKind::QUOTED_STRING => Some((range.start(), &self.source[range][1..])),
+                SyntaxKind::STRING_START => {
+                    string_starts.push(range.start());
+                    None
+                }
+                SyntaxKind::STRING_END => string_starts
+                    .pop()
+                    .map(|start| (start, &self.source[range])),
+                _ => None,
+            };
+            if let Some((start, end_text)) = string
+                && self.string_left_unclosed(start, end_text)
+            {
+                return Some((count, BracketRest::UnclosedString));
+            }
+            if let Some(closer) = bracket_closer(kind) {
+                open.push(closer);
+            } else if matches!(
+                kind,
+                SyntaxKind::RPAREN | SyntaxKind::RBRACKET | SyntaxKind::RBRACE
+            ) {
+                match open.last() {
+                    Some(&closer) if closer == kind => {
+                        open.pop();
+                    }
+                    Some(_) => return None,
+                    None if kind == close => return Some((count, BracketRest::Closer)),
+                    // A stray `)` or `]` is more of what could not be read; a `}` closes
+                    // the block.
+                    None if kind == SyntaxKind::RBRACE => return None,
+                    None => {}
+                }
+            }
+        }
+        None
+    }
+
     /// Whether the string starting at `start`, whose text ends in `end_text`, lacks its
     /// closing quote.
     fn string_left_unclosed(&self, start: TextSize, end_text: &str) -> bool {
@@ -314,10 +379,16 @@ impl<'src> Parser<'src> {
     /// Whether a line break comes before the token at the cursor, in the trivia after the
     /// token before it.
     pub fn at_line_break(&self) -> bool {
-        self.pos < self.fence.index
+        self.nth_at_line_break(0)
+    }
+
+    /// [`Parser::at_line_break`] for the token `offset` ahead; false at or past a fence.
+    pub fn nth_at_line_break(&self, offset: usize) -> bool {
+        let target = self.pos.saturating_add(offset);
+        target < self.fence.index
             && self
                 .input
-                .trivia_before(self.pos)
+                .trivia_before(target)
                 .iter()
                 .any(|&(kind, range)| {
                     kind == SyntaxKind::WHITESPACE
@@ -457,6 +528,12 @@ impl<'src> Parser<'src> {
     pub fn at_unclosed_string_break(&self) -> bool {
         self.pos == self.unclosed_string_end
             && (self.unclosed_string_break_is_comma() || self.at_unclosed_string_stop())
+    }
+
+    /// Whether the cursor is right after a string left unclosed, at the line break that
+    /// ended it, whatever comes there.
+    pub fn after_unclosed_string(&self) -> bool {
+        self.pos == self.unclosed_string_end
     }
 
     /// Take the line break at [`Parser::at_unclosed_string_break`] as a comma, once. Inside
@@ -704,6 +781,10 @@ impl<'src> Parser<'src> {
     // ── Errors ───────────────────────────────────────────────────────
 
     pub fn error(&mut self, msg: impl Into<String>) {
+        if self.pos == self.quiet_at {
+            return;
+        }
+        self.last_error_at = self.pos;
         if self.layout == Layout::Indented {
             self.end_header_before_error();
         }
@@ -744,9 +825,18 @@ impl<'src> Parser<'src> {
         self.error_messages.len()
     }
 
+    /// Whether [`Parser::error`] last reported at the cursor, the token there not yet
+    /// bumped: a construct that stops at the same token has nothing new to report.
+    pub fn reported_here(&self) -> bool {
+        self.last_error_at == self.pos
+    }
+
     /// Report `msg` at the end of the input token before the cursor rather than at the
     /// cursor: where a missing token belongs, not past the trivia or on the line after.
     pub fn error_after_prev(&mut self, msg: impl Into<String>) {
+        if self.pos == self.quiet_at {
+            return;
+        }
         let Some(prev) = self.pos.checked_sub(1) else {
             self.error(msg);
             return;
@@ -792,6 +882,13 @@ impl<'src> Parser<'src> {
 
     // ── Recursion depth ──────────────────────────────────────────────
 
+    /// Report nothing more at the cursor until it moves: the constructs left open around
+    /// it end there, silently, after a mistake that has been reported for all of them, as
+    /// nesting too deep is.
+    pub fn quiet_here(&mut self) {
+        self.quiet_at = self.pos;
+    }
+
     #[allow(clippy::result_unit_err)]
     pub fn depth_guard(&mut self) -> Result<DepthGuard<'_, 'src>, ()> {
         if self.depth >= MAX_DEPTH {
@@ -821,6 +918,14 @@ impl<'src> Parser<'src> {
             outer_start,
         }
     }
+}
+
+/// What ends the contents of a bracket in [`Parser::rest_of_bracket`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BracketRest {
+    Closer,
+    Comma,
+    UnclosedString,
 }
 
 /// How the text of a string left unclosed ends, before the line break that ended it.
@@ -1111,6 +1216,41 @@ mod tests {
             assert!(
                 large <= 2_000 * 32,
                 "{statement:?}: {large} for 2000 statements"
+            );
+        }
+    }
+
+    /// Brackets left unclosed line after line leave every later line break deeper than the
+    /// brackets unwound so far, and an error in brackets opened on lines indented ever
+    /// deeper searches for a line at each of their columns: the line breaks and lines that
+    /// finding the next line start and the next line at a column walk grow with the
+    /// input, not with its square.
+    #[test]
+    fn line_searches_after_unclosed_brackets_are_linear_in_the_input() {
+        let nested: String = (1..100)
+            .map(|i| format!("{}f(\n", " ".repeat(2 * i)))
+            .chain([format!("{}!\n", " ".repeat(202))])
+            .chain(std::iter::repeat_n(format!("{}x\n", " ".repeat(300)), 100))
+            .collect();
+        for (statement, label) in [
+            ("@foo (\n".to_owned(), "an at-rule"),
+            (".a:not(\n".to_owned(), "a selector"),
+            ("  @debug 1 (\n".to_owned(), "a nested at-rule"),
+            (format!("$a: f(\n{nested}"), "nested brackets"),
+        ] {
+            let work = |count: usize| {
+                let source = format!(".z\n{}", statement.repeat(count));
+                super::indented::BREAK_WORK.set(0);
+                let input = Input::from_source_indented(&source);
+                let mut p = Parser::with_layout(input, &source, super::Layout::Indented);
+                crate::grammar::source_file(&mut p);
+                let _ = p.finish();
+                super::indented::BREAK_WORK.get()
+            };
+            let (small, large) = (work(100), work(1_000));
+            assert!(
+                small > 0 && large <= small * 15,
+                "{label}: {small} steps for 100 statements, {large} for 1000",
             );
         }
     }

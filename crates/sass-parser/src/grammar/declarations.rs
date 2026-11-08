@@ -57,7 +57,10 @@ pub(crate) fn declaration(p: &mut Parser<'_>) {
         return;
     }
 
-    if !p.at(RBRACE) && !p.at_end() {
+    // A string left unclosed took the rest of its line, the `;` with it, and the value
+    // ends at the declaration on the line after.
+    let swallowed = p.after_unclosed_string() && at_next_declaration(p);
+    if !p.at(RBRACE) && !p.at_end() && !swallowed {
         p.expect(SEMICOLON);
     }
     let _ = m.complete(p, DECLARATION);
@@ -164,6 +167,33 @@ fn value(p: &mut Parser<'_>) {
             operand_before = false;
             continue;
         }
+        if has_content && p.braced() && at_next_declaration(p) {
+            break;
+        }
+        if matches!(p.current(), COLON | RPAREN | RBRACKET) {
+            let message = if !has_content {
+                "expected expression"
+            } else if p.braced() {
+                "expected SEMICOLON"
+            } else {
+                "expected newline"
+            };
+            stray_in_value(p, message);
+            has_content = true;
+            break;
+        }
+        if p.at(DOT) {
+            // A `.` that starts no number. Joined to a word, it names a module's
+            // function, `math.div(...)`, whose `(` is missing.
+            let message = if p.prev_kind() == IDENT && !p.has_whitespace_before() {
+                "expected `(`"
+            } else {
+                "expected digit"
+            };
+            stray_in_value(p, message);
+            has_content = true;
+            break;
+        }
         if !p.at_ts(expressions::EXPR_START) {
             // Unknown token in value position — bump for progress
             super::lines::bump_in_run(p);
@@ -194,6 +224,40 @@ fn value(p: &mut Parser<'_>) {
     }
 
     let _ = m.complete(p, VALUE);
+}
+
+/// Whether the value goes on at the cursor with `name:`, which no value holds: the next
+/// declaration, missing the `;` before it; braced only, as a line holds one statement.
+/// `progid:` starts an IE filter function.
+fn at_next_declaration(p: &Parser<'_>) -> bool {
+    p.at(IDENT)
+        && p.nth(1) == COLON
+        && p.has_whitespace_before()
+        && !p.nth_has_whitespace_before(1)
+        && !p.current_text().eq_ignore_ascii_case("progid")
+}
+
+/// At a token no value holds where it stands: a `:`, `)` or `]`, before which Dart Sass
+/// expects the declaration to end, or reads no value at all if it comes first, or a `.`
+/// that starts no number. That is one error, `message`, which takes the rest of the value,
+/// up to where the declaration ends.
+fn stray_in_value(p: &mut Parser<'_>, message: &str) {
+    let m = p.start();
+    // A bracket that stopped at the token has reported it already.
+    if !p.reported_here() {
+        p.error(message);
+    }
+    while !matches!(p.current(), SEMICOLON | RBRACE | LBRACE | EOF)
+        && !p.at_end()
+        && !p.at_unclosed_string_break()
+    {
+        if matches!(p.current(), LPAREN | LBRACKET | HASH_LBRACE) {
+            super::lines::skip_bracket(p);
+        } else {
+            p.bump();
+        }
+    }
+    let _ = m.complete(p, ERROR);
 }
 
 /// Parse a declaration inside a CSS `@function --name()` body.

@@ -223,9 +223,10 @@ fn paren_or_map(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
     paren_or_map_in_brackets(&mut p.transparent_guard(), ctx)
 }
 
-fn paren_or_map_in_brackets(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
+fn paren_or_map_in_brackets(p: &mut Parser<'_>, _ctx: ParseContext) -> CompletedMarker {
     assert!(p.at(LPAREN));
     let m = p.start();
+    let errors = p.error_count();
     p.bump(); // (
 
     // Empty parens: `()` = empty list
@@ -238,7 +239,7 @@ fn paren_or_map_in_brackets(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedM
     // After first expression: `:` → map, `,` → list, `)` → paren expr
     if p.at(COLON) {
         // It's a map: (key: value, ...)
-        return finish_map(p, m, first, ctx);
+        return finish_map(p, m, first, errors);
     }
 
     // Space-separated values inside parens: `(28px 28px 0 0)`, `(small medium large)`
@@ -258,7 +259,7 @@ fn paren_or_map_in_brackets(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedM
 
     // Space-separated key followed by `:` → map: `(1 2: 3, 4 5: 6)`
     if p.at(COLON) {
-        return finish_map(p, m, first, ctx);
+        return finish_map(p, m, first, errors);
     }
 
     if p.at(COMMA) || p.at_unclosed_string_break() {
@@ -268,11 +269,11 @@ fn paren_or_map_in_brackets(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedM
                 sass_value(p, ParseContext::SassScript);
             }
         }
-        p.expect(RPAREN);
+        crate::grammar::close_bracket(p, RPAREN, errors);
         return m.complete(p, LIST_EXPR);
     }
 
-    p.expect(RPAREN);
+    crate::grammar::close_bracket(p, RPAREN, errors);
     m.complete(p, PAREN_EXPR)
 }
 
@@ -280,7 +281,7 @@ fn finish_map(
     p: &mut Parser<'_>,
     outer: crate::parser::Marker,
     first_key: Option<CompletedMarker>,
-    _ctx: ParseContext,
+    errors: usize,
 ) -> CompletedMarker {
     // Wrap already-parsed key expression in MAP_ENTRY
     let entry_m = if let Some(key) = first_key {
@@ -310,12 +311,14 @@ fn finish_map(
                 break;
             }
         }
-        p.expect(COLON);
-        sass_value(p, ParseContext::SassScript);
+        // An entry missing its `:` is reported once: no value follows it either.
+        if p.expect(COLON) {
+            sass_value(p, ParseContext::SassScript);
+        }
         let _ = em.complete(p, MAP_ENTRY);
     }
 
-    p.expect(RPAREN);
+    crate::grammar::close_bracket(p, RPAREN, errors);
     outer.complete(p, MAP_EXPR)
 }
 
@@ -325,6 +328,7 @@ fn bracketed_list(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
     assert!(p.at(LBRACKET));
     let p = &mut *p.transparent_guard();
     let m = p.start();
+    let errors = p.error_count();
     p.bump(); // [
     if !p.at(RBRACKET) && !p.at_end() {
         sass_value(p, ctx);
@@ -334,7 +338,7 @@ fn bracketed_list(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
             }
         }
     }
-    p.expect(RBRACKET);
+    crate::grammar::close_bracket(p, RBRACKET, errors);
     m.complete(p, BRACKETED_LIST)
 }
 
