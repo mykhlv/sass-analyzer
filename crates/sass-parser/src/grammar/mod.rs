@@ -430,6 +430,7 @@ pub(crate) fn skip_to_rule_block(p: &mut Parser<'_>, report: bool) {
     let m = p.start();
     let at = p.error_range();
     let strings = p.unclosed_strings();
+    let at_string = matches!(p.current(), QUOTED_STRING | STRING_START);
     let mut first = true;
     let mut same_line = true;
     let mut interpolation: u32 = 0;
@@ -451,7 +452,10 @@ pub(crate) fn skip_to_rule_block(p: &mut Parser<'_>, report: bool) {
         }
     }
     let took_block = p.unclosed_strings() > strings && same_line && p.at_virtual() && p.at(LBRACE);
-    if report && !took_block {
+    // A string left unclosed where the `{` belongs has reported the mistake there: most
+    // likely the closing quote of a string above that a line break ended, `'a` / `b';`.
+    let string_reported = at_string && p.unclosed_strings() > strings;
+    if report && !took_block && !string_reported {
         p.error_at_start(&m, at, "expected `{`");
     }
     let _ = m.complete(p, SyntaxKind::ERROR);

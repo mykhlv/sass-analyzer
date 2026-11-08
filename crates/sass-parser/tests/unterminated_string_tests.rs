@@ -2762,3 +2762,67 @@ fn a_bracket_the_string_left_open_closes_at_the_next_line() {
         assert_eq!(top_level_rules(parse_sass, source), rules, "{source:?}");
     }
 }
+
+#[test]
+fn closing_quote_on_the_line_after_is_no_missing_brace() {
+    // Dart Sass: `Expected '.`, at the form feed, which ends a line in a string. The rest
+    // of the string is read as a rule whose `{` an unclosed string took: that string's
+    // error is the one reported there.
+    common::check(
+        "a {\n  b: 'line1\x0cline2';\n}\nc { d: e }\n",
+        expect![[r#"
+        SOURCE_FILE@0..37
+          RULE_SET@0..25
+            SELECTOR_LIST@0..1
+              SELECTOR@0..1
+                SIMPLE_SELECTOR@0..1
+                  IDENT@0..1 "a"
+            BLOCK@1..25
+              WHITESPACE@1..2 " "
+              LBRACE@2..3 "{"
+              DECLARATION@3..15
+                PROPERTY@3..7
+                  WHITESPACE@3..6 "\n  "
+                  IDENT@6..7 "b"
+                COLON@7..8 ":"
+                VALUE@8..15
+                  STRING_LITERAL@8..15
+                    WHITESPACE@8..9 " "
+                    QUOTED_STRING@9..15 "'line1"
+              RULE_SET@15..23
+                SELECTOR_LIST@15..21
+                  SELECTOR@15..21
+                    SIMPLE_SELECTOR@15..21
+                      WHITESPACE@15..16 "\u{c}"
+                      IDENT@16..21 "line2"
+                ERROR@21..23
+                  QUOTED_STRING@21..23 "';"
+              WHITESPACE@23..24 "\n"
+              RBRACE@24..25 "}"
+          RULE_SET@25..36
+            SELECTOR_LIST@25..27
+              SELECTOR@25..27
+                SIMPLE_SELECTOR@25..27
+                  WHITESPACE@25..26 "\n"
+                  IDENT@26..27 "c"
+            BLOCK@27..36
+              WHITESPACE@27..28 " "
+              LBRACE@28..29 "{"
+              DECLARATION@29..34
+                PROPERTY@29..31
+                  WHITESPACE@29..30 " "
+                  IDENT@30..31 "d"
+                COLON@31..32 ":"
+                VALUE@32..34
+                  VALUE@32..34
+                    WHITESPACE@32..33 " "
+                    IDENT@33..34 "e"
+              WHITESPACE@34..35 " "
+              RBRACE@35..36 "}"
+          WHITESPACE@36..37 "\n"
+        errors:
+          9..15: unterminated string
+          21..23: unterminated string
+    "#]],
+    );
+}
