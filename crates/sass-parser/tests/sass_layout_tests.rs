@@ -1231,6 +1231,277 @@ fn a_header_goes_on_across_a_blank_line() {
 }
 
 #[test]
+fn important_after_a_blank_line_ends_the_declaration() {
+    check(
+        ".a\n  b: c !\n\n  important\n",
+        expect![[r#"
+        SOURCE_FILE@0..25
+          RULE_SET@0..24
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            BLOCK@2..24
+              LBRACE@2..2 ""
+              DECLARATION@2..24
+                PROPERTY@2..6
+                  WHITESPACE@2..5 "\n  "
+                  IDENT@5..6 "b"
+                COLON@6..7 ":"
+                VALUE@7..9
+                  VALUE@7..9
+                    WHITESPACE@7..8 " "
+                    IDENT@8..9 "c"
+                IMPORTANT@9..24
+                  WHITESPACE@9..10 " "
+                  BANG@10..11 "!"
+                  WHITESPACE@11..15 "\n\n  "
+                  IDENT@15..24 "important"
+                SEMICOLON@24..24 ""
+              RBRACE@24..24 ""
+          WHITESPACE@24..25 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn important_on_the_next_line_ends_the_declaration() {
+    check(
+        ".a\n  b: c !\n  important\n",
+        expect![[r#"
+        SOURCE_FILE@0..24
+          RULE_SET@0..23
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            BLOCK@2..23
+              LBRACE@2..2 ""
+              DECLARATION@2..23
+                PROPERTY@2..6
+                  WHITESPACE@2..5 "\n  "
+                  IDENT@5..6 "b"
+                COLON@6..7 ":"
+                VALUE@7..9
+                  VALUE@7..9
+                    WHITESPACE@7..8 " "
+                    IDENT@8..9 "c"
+                IMPORTANT@9..23
+                  WHITESPACE@9..10 " "
+                  BANG@10..11 "!"
+                  WHITESPACE@11..14 "\n  "
+                  IDENT@14..23 "important"
+                SEMICOLON@23..23 ""
+              RBRACE@23..23 ""
+          WHITESPACE@23..24 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn bang_before_a_blank_line_and_a_rule_is_one_error() {
+    check(
+        ".a\n  b: c !\n\n.d\n  e: f\n",
+        expect![[r#"
+        SOURCE_FILE@0..23
+          RULE_SET@0..11
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            BLOCK@2..11
+              LBRACE@2..2 ""
+              DECLARATION@2..11
+                PROPERTY@2..6
+                  WHITESPACE@2..5 "\n  "
+                  IDENT@5..6 "b"
+                COLON@6..7 ":"
+                VALUE@7..11
+                  VALUE@7..9
+                    WHITESPACE@7..8 " "
+                    IDENT@8..9 "c"
+                  ERROR@9..11
+                    WHITESPACE@9..10 " "
+                    BANG@10..11 "!"
+                SEMICOLON@11..11 ""
+              RBRACE@11..11 ""
+          RULE_SET@11..22
+            SELECTOR_LIST@11..15
+              SELECTOR@11..15
+                SIMPLE_SELECTOR@11..15
+                  WHITESPACE@11..13 "\n\n"
+                  DOT@13..14 "."
+                  IDENT@14..15 "d"
+            BLOCK@15..22
+              LBRACE@15..15 ""
+              DECLARATION@15..22
+                PROPERTY@15..19
+                  WHITESPACE@15..18 "\n  "
+                  IDENT@18..19 "e"
+                COLON@19..20 ":"
+                VALUE@20..22
+                  VALUE@20..22
+                    WHITESPACE@20..21 " "
+                    IDENT@21..22 "f"
+                SEMICOLON@22..22 ""
+              RBRACE@22..22 ""
+          WHITESPACE@22..23 "\n"
+        error 11..11: expected `important`
+    "#]],
+    );
+}
+
+#[test]
+fn variable_important_on_the_next_line() {
+    check(
+        "$a: 1 !\n  important\n.a\n  b: $a\n",
+        expect![[r#"
+        SOURCE_FILE@0..31
+          VARIABLE_DECL@0..19
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "a"
+            COLON@2..3 ":"
+            NUMBER_LITERAL@3..5
+              WHITESPACE@3..4 " "
+              NUMBER@4..5 "1"
+            IMPORTANT@5..19
+              WHITESPACE@5..6 " "
+              BANG@6..7 "!"
+              WHITESPACE@7..10 "\n  "
+              IDENT@10..19 "important"
+            SEMICOLON@19..19 ""
+          RULE_SET@19..30
+            SELECTOR_LIST@19..22
+              SELECTOR@19..22
+                SIMPLE_SELECTOR@19..22
+                  WHITESPACE@19..20 "\n"
+                  DOT@20..21 "."
+                  IDENT@21..22 "a"
+            BLOCK@22..30
+              LBRACE@22..22 ""
+              DECLARATION@22..30
+                PROPERTY@22..26
+                  WHITESPACE@22..25 "\n  "
+                  IDENT@25..26 "b"
+                COLON@26..27 ":"
+                VALUE@27..30
+                  VARIABLE_REF@27..30
+                    WHITESPACE@27..28 " "
+                    DOLLAR@28..29 "$"
+                    IDENT@29..30 "a"
+                SEMICOLON@30..30 ""
+              RBRACE@30..30 ""
+          WHITESPACE@30..31 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn variable_default_after_a_blank_line_is_one_error() {
+    check(
+        "$a: 1 !\n\ndefault\n.a\n  b: $a\n",
+        expect![[r#"
+        SOURCE_FILE@0..28
+          VARIABLE_DECL@0..7
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "a"
+            COLON@2..3 ":"
+            NUMBER_LITERAL@3..5
+              WHITESPACE@3..4 " "
+              NUMBER@4..5 "1"
+            ERROR@5..7
+              WHITESPACE@5..6 " "
+              BANG@6..7 "!"
+            SEMICOLON@7..7 ""
+          RULE_SET@7..16
+            SELECTOR_LIST@7..16
+              SELECTOR@7..16
+                SIMPLE_SELECTOR@7..16
+                  WHITESPACE@7..9 "\n\n"
+                  IDENT@9..16 "default"
+          SEMICOLON@16..16 ""
+          RULE_SET@16..27
+            SELECTOR_LIST@16..19
+              SELECTOR@16..19
+                SIMPLE_SELECTOR@16..19
+                  WHITESPACE@16..17 "\n"
+                  DOT@17..18 "."
+                  IDENT@18..19 "a"
+            BLOCK@19..27
+              LBRACE@19..19 ""
+              DECLARATION@19..27
+                PROPERTY@19..23
+                  WHITESPACE@19..22 "\n  "
+                  IDENT@22..23 "b"
+                COLON@23..24 ":"
+                VALUE@24..27
+                  VARIABLE_REF@24..27
+                    WHITESPACE@24..25 " "
+                    DOLLAR@25..26 "$"
+                    IDENT@26..27 "a"
+                SEMICOLON@27..27 ""
+              RBRACE@27..27 ""
+          WHITESPACE@27..28 "\n"
+        error 7..7: expected `important`
+    "#]],
+    );
+}
+
+#[test]
+fn variable_default_on_the_next_line_is_one_error() {
+    check(
+        "$a: 1 !\ndefault\n.a\n  b: $a\n",
+        expect![[r#"
+        SOURCE_FILE@0..27
+          VARIABLE_DECL@0..7
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "a"
+            COLON@2..3 ":"
+            NUMBER_LITERAL@3..5
+              WHITESPACE@3..4 " "
+              NUMBER@4..5 "1"
+            ERROR@5..7
+              WHITESPACE@5..6 " "
+              BANG@6..7 "!"
+            SEMICOLON@7..7 ""
+          RULE_SET@7..15
+            SELECTOR_LIST@7..15
+              SELECTOR@7..15
+                SIMPLE_SELECTOR@7..15
+                  WHITESPACE@7..8 "\n"
+                  IDENT@8..15 "default"
+          SEMICOLON@15..15 ""
+          RULE_SET@15..26
+            SELECTOR_LIST@15..18
+              SELECTOR@15..18
+                SIMPLE_SELECTOR@15..18
+                  WHITESPACE@15..16 "\n"
+                  DOT@16..17 "."
+                  IDENT@17..18 "a"
+            BLOCK@18..26
+              LBRACE@18..18 ""
+              DECLARATION@18..26
+                PROPERTY@18..22
+                  WHITESPACE@18..21 "\n  "
+                  IDENT@21..22 "b"
+                COLON@22..23 ":"
+                VALUE@23..26
+                  VARIABLE_REF@23..26
+                    WHITESPACE@23..24 " "
+                    DOLLAR@24..25 "$"
+                    IDENT@25..26 "a"
+                SEMICOLON@26..26 ""
+              RBRACE@26..26 ""
+          WHITESPACE@26..27 "\n"
+        error 7..7: expected `important`
+    "#]],
+    );
+}
+
+#[test]
 fn a_mixin_name_after_a_blank_line_is_its_name() {
     check(
         "@mixin\n\n  foo\n  a: b\n",

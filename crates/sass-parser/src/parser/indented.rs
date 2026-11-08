@@ -306,8 +306,10 @@ impl<'src> Parser<'src> {
             } else {
                 self.input.line_break_range(line)
             };
+            // After a comma, and a `!` that `important` may follow, blank lines too.
             while next < end
-                && (last == SyntaxKind::COMMA || !self.input.line_break(next).is_blank_line())
+                && (matches!(last, SyntaxKind::COMMA | SyntaxKind::BANG)
+                    || !self.input.line_break(next).is_blank_line())
             {
                 next += 1;
             }

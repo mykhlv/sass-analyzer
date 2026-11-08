@@ -128,6 +128,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `$a: 1 and;`, is still reported. In the indented syntax, an `@if` or `@while` line ending
   with such an operand, `@if and`, no longer reads the lines beneath it as more of its
   condition
+- Parser: a variable's value may end with `!important`, as `$a: 1 !important;` or
+  `$a: 1 ! important;`, which Dart Sass accepts; that was three errors. `!important` is
+  matched in any case, `!IMPORTANT`. A `!` followed by a space and another word, as
+  `$a: 1 ! default` or `b: c ! d`, is one error, "expected `important`", as in Dart Sass;
+  it was accepted
+- Indented Sass: `b: c !` / blank line / `important` is the declaration's `!important`,
+  as in Dart Sass; it read `important` as a rule of its own. A `!` ending a line before a
+  line that is not `important`, as `$a: 1 !` / `default`, is one error after the `!`
 
 ## 0.4.0 — 2026-11-08
 

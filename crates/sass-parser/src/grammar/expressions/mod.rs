@@ -72,7 +72,7 @@ pub fn expr(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarker> {
 /// Extra values become siblings (no wrapper node).
 pub(crate) fn sass_value(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarker> {
     let cm = expr(p, ctx)?;
-    while !at_value_end(p)
+    while (!at_value_end(p) || at_important_expr(p))
         && !p.at(COMMA)
         && !p.at(RPAREN)
         && !p.at(RBRACKET)
@@ -82,6 +82,8 @@ pub(crate) fn sass_value(p: &mut Parser<'_>, ctx: ParseContext) -> Option<Comple
             // CSS separator: `11px/1.5`, `font: 12px/1.4 sans-serif`
             p.bump();
             p.continue_line_to(EXPR_START);
+        } else if at_important_expr(p) {
+            important(p);
         } else if p.at_ts(EXPR_START) {
             expr(p, ctx);
         } else {
@@ -97,10 +99,7 @@ pub(crate) fn sass_value(p: &mut Parser<'_>, ctx: ParseContext) -> Option<Comple
 pub(crate) fn bracketed_value(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarker> {
     let cm = sass_value(p, ctx);
     while at_important(p) {
-        let m = p.start();
-        p.bump(); // !
-        p.bump(); // important
-        let _ = m.complete(p, IMPORTANT);
+        important(p);
         if p.at_ts(EXPR_START) {
             let _ = sass_value(p, ctx);
         }
@@ -109,7 +108,43 @@ pub(crate) fn bracketed_value(p: &mut Parser<'_>, ctx: ParseContext) -> Option<C
 }
 
 fn at_important(p: &Parser<'_>) -> bool {
-    p.at(BANG) && p.nth(1) == IDENT && p.nth_text(1) == "important"
+    if !p.at(BANG) {
+        return false;
+    }
+    let joined = p.joined(super::lines::LINE_JOINS);
+    p.nth_joined(joined, 1) == IDENT
+        && p.nth_text_joined(joined, 1)
+            .eq_ignore_ascii_case("important")
+}
+
+/// Whether the `!` at the cursor is one Dart Sass reads as `!important` in a value: one
+/// followed by `important`, in any case, or by whitespace, a line break included, and
+/// then anything, which it reports. Joined to another word it is a flag, `!default`,
+/// which ends the value.
+pub(crate) fn at_important_expr(p: &Parser<'_>) -> bool {
+    if !p.at(BANG) {
+        return false;
+    }
+    let joined = p.joined(super::lines::LINE_JOINS);
+    at_important(p)
+        || p.nth_joined(joined, 1) == EOF
+        || p.nth_has_whitespace_before_joined(joined, 1)
+}
+
+/// `!important`, with the line breaks between its two tokens, or a `!` that
+/// [`at_important_expr`] reads as such, missing its word.
+pub(crate) fn important(p: &mut Parser<'_>) {
+    let m = p.start();
+    let word = at_important(p);
+    p.bump(); // !
+    if word {
+        p.continue_line_across_blank();
+        p.bump(); // important
+        let _ = m.complete(p, IMPORTANT);
+    } else {
+        p.error("expected `important`");
+        let _ = m.complete(p, ERROR);
+    }
 }
 
 /// Parse a comma-separated list of space-separated groups.

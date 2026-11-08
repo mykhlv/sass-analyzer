@@ -41,10 +41,10 @@ pub(crate) fn declaration(p: &mut Parser<'_>) {
         } else {
             ""
         };
-        if flag_text == "important" {
+        if flag_text.eq_ignore_ascii_case("important") {
             let fm = p.start();
             p.bump(); // !
-            p.continue_line();
+            p.continue_line_across_blank();
             p.bump(); // important
             let _ = fm.complete(p, IMPORTANT);
         }
@@ -139,11 +139,20 @@ fn value(p: &mut Parser<'_>) {
         // Break for `!important` only when it's at the END of the value
         if p.at(BANG) {
             let joined = p.joined(super::lines::LINE_JOINS);
-            if p.nth_joined(joined, 1) == IDENT && p.nth_text_joined(joined, 1) == "important" {
+            let important = p.nth_joined(joined, 1) == IDENT
+                && p.nth_text_joined(joined, 1)
+                    .eq_ignore_ascii_case("important");
+            if important {
                 let after = p.nth_joined(joined, 2);
                 if after == SEMICOLON || after == RBRACE || after == LBRACE || after == EOF {
                     break;
                 }
+            } else if expressions::at_important_expr(p) {
+                // `! d`: Dart Sass reads `!important` there, missing its word.
+                expressions::important(p);
+                has_content = true;
+                operand_before = false;
+                continue;
             }
             // Not end-of-value !important — consume as value content
             p.bump();
