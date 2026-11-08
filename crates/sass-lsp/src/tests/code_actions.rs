@@ -3,6 +3,8 @@
 //! The server picks the statement syntax from the document's extension, so these
 //! go through `textDocument/codeAction` rather than calling the actions directly.
 
+use std::fmt::Write as _;
+
 use expect_test::expect;
 
 use super::*;
@@ -176,4 +178,242 @@ async fn sass_extract_variable_through_the_server() {
     "]]
     .assert_eq(&result);
     assert_parses_as_sass(&result);
+}
+
+/// Assert that every line break in `text` is `\r\n`.
+fn assert_only_crlf(text: &str) {
+    let lf = text.matches('\n').count();
+    let crlf = text.matches("\r\n").count();
+    let cr = text.matches('\r').count();
+    assert!(lf == crlf && cr == crlf, "mixed line endings in {text:?}");
+}
+
+/// The edits of the `title_prefix` action on `source` (a file named `name` in a
+/// fresh workspace that also holds `others`), applied.
+async fn apply_action_on_disk(
+    name: &str,
+    source: &str,
+    others: &[(&str, &str)],
+    range: &Value,
+    diagnostics: &Value,
+    title_prefix: &str,
+) -> String {
+    let dir = std::env::temp_dir().join(format!(
+        "sass_ca_{}_{}",
+        std::process::id(),
+        name.replace('.', "_")
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut other_uris = Vec::new();
+    for (other, text) in others {
+        let path = dir.join(other);
+        std::fs::write(&path, text).unwrap();
+        other_uris.push((file_uri(&path), *text));
+    }
+    let path = dir.join(name);
+    std::fs::write(&path, source).unwrap();
+    let uri = file_uri(&path);
+
+    let (mut reader, mut writer) = spawn_server();
+    do_initialize_with_root(&mut reader, &mut writer, &file_uri(&dir)).await;
+    for (other_uri, text) in &other_uris {
+        open_document(&mut writer, other_uri, text).await;
+    }
+    open_document(&mut writer, &uri, source).await;
+    let edits = code_action_edits(
+        &mut reader,
+        &mut writer,
+        &uri,
+        range,
+        diagnostics,
+        title_prefix,
+    )
+    .await;
+    let _ = std::fs::remove_dir_all(&dir);
+    apply_lsp_edits(source, &edits)
+}
+
+fn undefined_primary(range: &Value) -> Value {
+    serde_json::json!([{
+        "range": range,
+        "message": "undefined variable `primary`",
+        "code": "undefined-variable",
+        "data": { "name": "primary", "kind": "variable" }
+    }])
+}
+
+/// Auto-import writes the `@use` with the document's own line ending, both after
+/// an existing import and at the top of a file with none.
+#[tokio::test]
+async fn auto_import_keeps_crlf_line_endings() {
+    let cases = [
+        (
+            "after_use.scss",
+            "@use \"sass:math\";\r\n.a {\r\n  color: $primary;\r\n}\r\n",
+            "_colors.scss",
+            "$primary: red;\r\n",
+            2,
+        ),
+        (
+            "no_use.scss",
+            ".a {\r\n  color: $primary;\r\n}\r\n",
+            "_colors.scss",
+            "$primary: red;\r\n",
+            1,
+        ),
+        (
+            "after_use.sass",
+            "@use \"sass:math\"\r\n.a\r\n  color: $primary\r\n",
+            "_colors.sass",
+            "$primary: red\r\n",
+            2,
+        ),
+    ];
+    let mut results = String::new();
+    for (name, source, other, other_text, line) in cases {
+        let range = serde_json::json!({
+            "start": { "line": line, "character": 9 },
+            "end": { "line": line, "character": 17 }
+        });
+        let result = apply_action_on_disk(
+            name,
+            source,
+            &[(other, other_text)],
+            &range,
+            &undefined_primary(&range),
+            "Add `@use",
+        )
+        .await;
+        assert_only_crlf(&result);
+        let _ = writeln!(results, "{name}:\n{}", result.replace("\r\n", "\n"));
+    }
+    expect![[r#"
+        after_use.scss:
+        @use "sass:math";
+        @use "colors";
+        .a {
+          color: colors.$primary;
+        }
+
+        no_use.scss:
+        @use "colors";
+        .a {
+          color: colors.$primary;
+        }
+
+        after_use.sass:
+        @use "sass:math"
+        @use "colors"
+        .a
+          color: colors.$primary
+
+    "#]]
+    .assert_eq(&results);
+}
+
+/// Extract to variable writes the declaration with the document's own line
+/// ending, in both syntaxes.
+#[tokio::test]
+async fn extract_variable_keeps_crlf_line_endings() {
+    let range = serde_json::json!({
+        "start": { "line": 2, "character": 12 },
+        "end": { "line": 2, "character": 19 }
+    });
+    let mut results = String::new();
+    for (name, source) in [
+        (
+            "var.scss",
+            ".card {\r\n  .title {\r\n    margin: 4px * 2;\r\n  }\r\n}\r\n",
+        ),
+        ("var.sass", ".card\r\n  .title\r\n    margin: 4px * 2\r\n"),
+    ] {
+        let result = apply_action_on_disk(
+            name,
+            source,
+            &[],
+            &range,
+            &serde_json::json!([]),
+            "Extract to variable",
+        )
+        .await;
+        assert_only_crlf(&result);
+        let _ = writeln!(results, "{name}:\n{}", result.replace("\r\n", "\n"));
+    }
+    expect![[r#"
+        var.scss:
+        .card {
+          $new-variable: 4px * 2;
+          .title {
+            margin: $new-variable;
+          }
+        }
+
+        var.sass:
+        .card
+          $new-variable: 4px * 2
+          .title
+            margin: $new-variable
+
+    "#]]
+    .assert_eq(&results);
+}
+
+/// Extract to mixin writes the mixin, its body lines and the blank line after it
+/// with the document's own line ending, in both syntaxes.
+#[tokio::test]
+async fn extract_mixin_keeps_crlf_line_endings() {
+    let mut results = String::new();
+    for (name, source, end) in [
+        (
+            "mixin.scss",
+            ".card {\r\n  .title {\r\n    margin: 0;\r\n    color: red;\r\n  }\r\n}\r\n",
+            15,
+        ),
+        (
+            "mixin.sass",
+            ".card\r\n  .title\r\n    margin: 0\r\n    color: red\r\n",
+            14,
+        ),
+    ] {
+        let range = serde_json::json!({
+            "start": { "line": 2, "character": 4 },
+            "end": { "line": 3, "character": end }
+        });
+        let result = apply_action_on_disk(
+            name,
+            source,
+            &[],
+            &range,
+            &serde_json::json!([]),
+            "Extract to mixin",
+        )
+        .await;
+        assert_only_crlf(&result);
+        let _ = writeln!(results, "{name}:\n{}", result.replace("\r\n", "\n"));
+    }
+    expect![[r#"
+        mixin.scss:
+        .card {
+          @mixin new-mixin {
+            margin: 0;
+            color: red;
+          }
+
+          .title {
+            @include new-mixin;
+          }
+        }
+
+        mixin.sass:
+        .card
+          @mixin new-mixin
+            margin: 0
+            color: red
+
+          .title
+            @include new-mixin
+
+    "#]]
+    .assert_eq(&results);
 }

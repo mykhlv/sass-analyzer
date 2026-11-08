@@ -45,6 +45,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - LSP: "Check Workspace" no longer holds a lock on the open documents while it
   publishes their diagnostics, which could hang the server if a file was opened at
   that moment
+- LSP: the auto-import, extract-to-variable and extract-to-mixin code actions write
+  their lines with the document's own line breaks. In a file with `\r\n` line endings
+  they inserted bare `\n` breaks, and auto-import added a stray empty line after an
+  existing `@use`
 
 ## 0.4.0 — 2026-11-08
 
