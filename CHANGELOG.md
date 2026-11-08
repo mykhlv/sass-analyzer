@@ -113,6 +113,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is no longer an error. Only the first selector was read, and the rest was a rule missing
   its selector; a prelude such as `@page a + b` was read as a rule after the at-rule, with
   no error
+- Parser: `!important` inside brackets, as in `(a: 1 !important)`, `(1, 2 !important)`,
+  `[a !important b]` or `f(a !important b)`, is an item of the value, as in Dart Sass, not
+  an error. Only a positional argument ending with it was accepted
 
 ## 0.4.0 — 2026-11-08
 

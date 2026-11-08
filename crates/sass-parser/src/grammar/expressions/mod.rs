@@ -91,6 +91,27 @@ pub(crate) fn sass_value(p: &mut Parser<'_>, ctx: ParseContext) -> Option<Comple
     Some(cm)
 }
 
+/// A space-separated value inside brackets, where `!important` is one of its items, as in
+/// `(a: 1 !important)`, `[a !important b]` or `f(1 !important)`. Outside them it is the
+/// declaration's flag, which ends the value.
+pub(crate) fn bracketed_value(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarker> {
+    let cm = sass_value(p, ctx);
+    while at_important(p) {
+        let m = p.start();
+        p.bump(); // !
+        p.bump(); // important
+        let _ = m.complete(p, IMPORTANT);
+        if p.at_ts(EXPR_START) {
+            let _ = sass_value(p, ctx);
+        }
+    }
+    cm
+}
+
+fn at_important(p: &Parser<'_>) -> bool {
+    p.at(BANG) && p.nth(1) == IDENT && p.nth_text(1) == "important"
+}
+
 /// Parse a comma-separated list of space-separated groups.
 /// `$x: 1px 2px, 3px 4px;` → `LIST_EXPR` containing both groups separated by COMMA.
 /// Single values or space-only groups return without wrapper.

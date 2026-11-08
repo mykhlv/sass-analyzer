@@ -3,7 +3,7 @@ use crate::parser::{CompletedMarker, Parser};
 use crate::syntax_kind::*;
 
 use super::super::ParseContext;
-use super::{eat_comma, expr, interpolation, sass_value};
+use super::{bracketed_value, eat_comma, expr, interpolation};
 
 // ── Atoms ──────────────────────────────────────────────────────────
 
@@ -266,7 +266,7 @@ fn paren_or_map_in_brackets(p: &mut Parser<'_>, _ctx: ParseContext) -> Completed
         // Comma-separated list inside parens (possibly of space-separated groups)
         while eat_comma(p) {
             if !p.at(RPAREN) && !p.at_end() {
-                sass_value(p, ParseContext::SassScript);
+                bracketed_value(p, ParseContext::SassScript);
             }
         }
         crate::grammar::close_bracket(p, RPAREN, errors);
@@ -290,7 +290,7 @@ fn finish_map(
         p.start()
     };
     p.expect(COLON);
-    sass_value(p, ParseContext::SassScript);
+    bracketed_value(p, ParseContext::SassScript);
     let _ = entry_m.complete(p, MAP_ENTRY);
 
     // Parse remaining entries
@@ -313,7 +313,7 @@ fn finish_map(
         }
         // An entry missing its `:` is reported once: no value follows it either.
         if p.expect(COLON) {
-            sass_value(p, ParseContext::SassScript);
+            bracketed_value(p, ParseContext::SassScript);
         }
         let _ = em.complete(p, MAP_ENTRY);
     }
@@ -331,10 +331,10 @@ fn bracketed_list(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
     let errors = p.error_count();
     p.bump(); // [
     if !p.at(RBRACKET) && !p.at_end() {
-        sass_value(p, ctx);
+        bracketed_value(p, ctx);
         while eat_comma(p) {
             if !p.at(RBRACKET) && !p.at_end() {
-                sass_value(p, ctx);
+                bracketed_value(p, ctx);
             }
         }
     }

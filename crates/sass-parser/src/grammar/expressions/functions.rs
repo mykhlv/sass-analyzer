@@ -3,7 +3,7 @@ use crate::parser::{CompletedMarker, Parser};
 use crate::syntax_kind::*;
 
 use super::super::ParseContext;
-use super::sass_value;
+use super::bracketed_value;
 
 /// Calculation function names recognized by the dispatcher.
 #[rustfmt::skip]
@@ -226,25 +226,17 @@ fn arg(p: &mut Parser<'_>, ctx: ParseContext) {
         p.bump(); // $
         p.bump(); // name
         p.bump(); // :
-        sass_value(p, ctx);
+        bracketed_value(p, ctx);
         let _ = m.complete(p, ARG);
         return;
     }
 
     // Positional argument (may be space-separated: `func(1px 2px, 3px)`)
-    sass_value(p, ctx);
+    bracketed_value(p, ctx);
 
     // Check for splat: `$list...`
     if p.at(DOT_DOT_DOT) {
         p.bump();
-    }
-
-    // `!important` in argument: `@include foo(1px !important)`
-    if p.at(BANG) && p.nth(1) == IDENT && p.nth_text(1) == "important" {
-        let fm = p.start();
-        p.bump(); // !
-        p.bump(); // important
-        let _ = fm.complete(p, IMPORTANT);
     }
 
     let _ = m.complete(p, ARG);
