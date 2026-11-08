@@ -2368,13 +2368,14 @@ fn that_left_the_semicolon_to_the_next_line() {
 
 #[test]
 fn that_took_a_comma_of_a_declaration() {
-    // A comma the string took goes on with the list on the next line, as in brackets: the
-    // `c: d` there joins the value, with no further diagnostics.
+    // A comma the string took goes on with the list on the next line, as in brackets, but
+    // `c:` there starts no item: it is the next declaration, whose `;` before it the string
+    // took too. No further diagnostics.
     let source = ".a {\n  b: \"x,\n  c: d;\n}\n.e { f: g; }\n";
     assert_eq!(errors(parse_scss, source), ["unterminated string"]);
     assert_eq!(
         declarations(parse_scss, source),
-        ["b: \"x,\n  c: d;", "f: g;"]
+        ["b: \"x,", "c: d;", "f: g;"]
     );
 }
 

@@ -1183,12 +1183,14 @@ fn media_unclosed_paren_is_not_closed_by_a_call_below() {
                             NUMBER@51..52 "1"
                             IDENT@52..54 "px"
                         RPAREN@54..55 ")"
-                      RPAREN@55..56 ")"
+                      ERROR@55..56
+                        RPAREN@55..56 ")"
                   WHITESPACE@56..57 " "
                   RBRACE@57..58 "}"
               WHITESPACE@58..59 "\n"
             errors:
               10..11: expected RPAREN
+              55..56: expected SEMICOLON
         "#]],
     );
 }
@@ -1198,45 +1200,47 @@ fn media_paren_closed_inside_a_block_is_unclosed_at_the_block() {
     check(
         "@media (a {\n .b { c: d) }\n}\n",
         expect![[r#"
-        SOURCE_FILE@0..28
-          MEDIA_RULE@0..27
-            AT@0..1 "@"
-            IDENT@1..6 "media"
-            MEDIA_QUERY@6..9
-              WHITESPACE@6..7 " "
-              LPAREN@7..8 "("
-              IDENT@8..9 "a"
-            BLOCK@9..27
-              WHITESPACE@9..10 " "
-              LBRACE@10..11 "{"
-              RULE_SET@11..25
-                SELECTOR_LIST@11..15
-                  SELECTOR@11..15
-                    SIMPLE_SELECTOR@11..15
-                      WHITESPACE@11..13 "\n "
-                      DOT@13..14 "."
-                      IDENT@14..15 "b"
-                BLOCK@15..25
-                  WHITESPACE@15..16 " "
-                  LBRACE@16..17 "{"
-                  DECLARATION@17..23
-                    PROPERTY@17..19
-                      WHITESPACE@17..18 " "
-                      IDENT@18..19 "c"
-                    COLON@19..20 ":"
-                    VALUE@20..23
-                      VALUE@20..22
-                        WHITESPACE@20..21 " "
-                        IDENT@21..22 "d"
-                      RPAREN@22..23 ")"
-                  WHITESPACE@23..24 " "
-                  RBRACE@24..25 "}"
-              WHITESPACE@25..26 "\n"
-              RBRACE@26..27 "}"
-          WHITESPACE@27..28 "\n"
-        errors:
-          10..11: expected RPAREN
-    "#]],
+            SOURCE_FILE@0..28
+              MEDIA_RULE@0..27
+                AT@0..1 "@"
+                IDENT@1..6 "media"
+                MEDIA_QUERY@6..9
+                  WHITESPACE@6..7 " "
+                  LPAREN@7..8 "("
+                  IDENT@8..9 "a"
+                BLOCK@9..27
+                  WHITESPACE@9..10 " "
+                  LBRACE@10..11 "{"
+                  RULE_SET@11..25
+                    SELECTOR_LIST@11..15
+                      SELECTOR@11..15
+                        SIMPLE_SELECTOR@11..15
+                          WHITESPACE@11..13 "\n "
+                          DOT@13..14 "."
+                          IDENT@14..15 "b"
+                    BLOCK@15..25
+                      WHITESPACE@15..16 " "
+                      LBRACE@16..17 "{"
+                      DECLARATION@17..23
+                        PROPERTY@17..19
+                          WHITESPACE@17..18 " "
+                          IDENT@18..19 "c"
+                        COLON@19..20 ":"
+                        VALUE@20..23
+                          VALUE@20..22
+                            WHITESPACE@20..21 " "
+                            IDENT@21..22 "d"
+                          ERROR@22..23
+                            RPAREN@22..23 ")"
+                      WHITESPACE@23..24 " "
+                      RBRACE@24..25 "}"
+                  WHITESPACE@25..26 "\n"
+                  RBRACE@26..27 "}"
+              WHITESPACE@27..28 "\n"
+            errors:
+              10..11: expected RPAREN
+              22..23: expected SEMICOLON
+        "#]],
     );
 }
 

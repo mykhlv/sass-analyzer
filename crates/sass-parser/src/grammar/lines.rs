@@ -227,7 +227,7 @@ fn skip_line(p: &mut Parser<'_>) {
 
 /// A bracket in tokens being skipped, through its closer, so that the line breaks
 /// inside it stay trivia and one it leaves unclosed ends as the grammar's do, unreported.
-fn skip_bracket(p: &mut Parser<'_>) {
+pub(crate) fn skip_bracket(p: &mut Parser<'_>) {
     match p.current() {
         LPAREN => super::eat_balanced_with(p, LPAREN, RPAREN, false),
         LBRACKET => super::eat_balanced_with(p, LBRACKET, RBRACKET, false),

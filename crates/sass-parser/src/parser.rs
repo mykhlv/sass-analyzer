@@ -50,6 +50,8 @@ pub struct Parser<'src> {
     depth: u32,
     /// The cursor where errors go unreported: see [`Parser::quiet_here`].
     quiet_at: usize,
+    /// The cursor where [`Parser::error`] last reported.
+    last_error_at: usize,
     layout: Layout,
     fence: Fence,
     /// Brackets (`()`, `[]`, `#{}`) the cursor is inside, counted by
@@ -105,6 +107,7 @@ impl<'src> Parser<'src> {
             error_messages: Vec::new(),
             depth: 0,
             quiet_at: usize::MAX,
+            last_error_at: usize::MAX,
             layout,
             fence,
             transparent: 0,
@@ -521,6 +524,12 @@ impl<'src> Parser<'src> {
             && (self.unclosed_string_break_is_comma() || self.at_unclosed_string_stop())
     }
 
+    /// Whether the cursor is right after a string left unclosed, at the line break that
+    /// ended it, whatever comes there.
+    pub fn after_unclosed_string(&self) -> bool {
+        self.pos == self.unclosed_string_end
+    }
+
     /// Take the line break at [`Parser::at_unclosed_string_break`] as a comma, once. Inside
     /// brackets, it stands for the comma the string swallowed with the rest of its line,
     /// `(a: "x,` / `b: 2)`, or the one a list laid out an item per line puts there:
@@ -769,6 +778,7 @@ impl<'src> Parser<'src> {
         if self.pos == self.quiet_at {
             return;
         }
+        self.last_error_at = self.pos;
         if self.layout == Layout::Indented {
             self.end_header_before_error();
         }
@@ -807,6 +817,12 @@ impl<'src> Parser<'src> {
     /// How many errors have been reported so far.
     pub fn error_count(&self) -> usize {
         self.error_messages.len()
+    }
+
+    /// Whether [`Parser::error`] last reported at the cursor, the token there not yet
+    /// bumped: a construct that stops at the same token has nothing new to report.
+    pub fn reported_here(&self) -> bool {
+        self.last_error_at == self.pos
     }
 
     /// Report `msg` at the end of the input token before the cursor rather than at the

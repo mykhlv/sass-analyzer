@@ -2389,53 +2389,55 @@ fn a_call_below_does_not_close_an_unclosed_media_query() {
     check(
         "@media (a\n  .b\n    c: d\n.e\n  f: g(h))\n",
         expect![[r#"
-        SOURCE_FILE@0..38
-          MEDIA_RULE@0..23
-            AT@0..1 "@"
-            IDENT@1..6 "media"
-            MEDIA_QUERY@6..23
-              WHITESPACE@6..7 " "
-              LPAREN@7..8 "("
-              IDENT@8..9 "a"
-              WHITESPACE@9..12 "\n  "
-              DOT@12..13 "."
-              IDENT@13..14 "b"
-              WHITESPACE@14..19 "\n    "
-              IDENT@19..20 "c"
-              COLON@20..21 ":"
-              WHITESPACE@21..22 " "
-              IDENT@22..23 "d"
-          SEMICOLON@23..23 ""
-          RULE_SET@23..37
-            SELECTOR_LIST@23..26
-              SELECTOR@23..26
-                SIMPLE_SELECTOR@23..26
-                  WHITESPACE@23..24 "\n"
-                  DOT@24..25 "."
-                  IDENT@25..26 "e"
-            BLOCK@26..37
-              LBRACE@26..26 ""
-              DECLARATION@26..37
-                PROPERTY@26..30
-                  WHITESPACE@26..29 "\n  "
-                  IDENT@29..30 "f"
-                COLON@30..31 ":"
-                VALUE@31..37
-                  FUNCTION_CALL@31..36
-                    WHITESPACE@31..32 " "
-                    IDENT@32..33 "g"
-                    ARG_LIST@33..36
-                      LPAREN@33..34 "("
-                      ARG@34..35
-                        VALUE@34..35
-                          IDENT@34..35 "h"
-                      RPAREN@35..36 ")"
-                  RPAREN@36..37 ")"
-                SEMICOLON@37..37 ""
-              RBRACE@37..37 ""
-          WHITESPACE@37..38 "\n"
-        error 23..23: expected RPAREN
-    "#]],
+            SOURCE_FILE@0..38
+              MEDIA_RULE@0..23
+                AT@0..1 "@"
+                IDENT@1..6 "media"
+                MEDIA_QUERY@6..23
+                  WHITESPACE@6..7 " "
+                  LPAREN@7..8 "("
+                  IDENT@8..9 "a"
+                  WHITESPACE@9..12 "\n  "
+                  DOT@12..13 "."
+                  IDENT@13..14 "b"
+                  WHITESPACE@14..19 "\n    "
+                  IDENT@19..20 "c"
+                  COLON@20..21 ":"
+                  WHITESPACE@21..22 " "
+                  IDENT@22..23 "d"
+              SEMICOLON@23..23 ""
+              RULE_SET@23..37
+                SELECTOR_LIST@23..26
+                  SELECTOR@23..26
+                    SIMPLE_SELECTOR@23..26
+                      WHITESPACE@23..24 "\n"
+                      DOT@24..25 "."
+                      IDENT@25..26 "e"
+                BLOCK@26..37
+                  LBRACE@26..26 ""
+                  DECLARATION@26..37
+                    PROPERTY@26..30
+                      WHITESPACE@26..29 "\n  "
+                      IDENT@29..30 "f"
+                    COLON@30..31 ":"
+                    VALUE@31..37
+                      FUNCTION_CALL@31..36
+                        WHITESPACE@31..32 " "
+                        IDENT@32..33 "g"
+                        ARG_LIST@33..36
+                          LPAREN@33..34 "("
+                          ARG@34..35
+                            VALUE@34..35
+                              IDENT@34..35 "h"
+                          RPAREN@35..36 ")"
+                      ERROR@36..37
+                        RPAREN@36..37 ")"
+                    SEMICOLON@37..37 ""
+                  RBRACE@37..37 ""
+              WHITESPACE@37..38 "\n"
+            error 23..23: expected RPAREN
+            error 36..37: expected newline
+        "#]],
     );
 }
 
@@ -2444,75 +2446,77 @@ fn a_call_below_does_not_close_an_unclosed_pseudo_class() {
     check(
         ".a:not(.b\n  c: d\n.e\n  f: g\n.h\n  i: j(k))\n",
         expect![[r#"
-        SOURCE_FILE@0..41
-          RULE_SET@0..16
-            SELECTOR_LIST@0..16
-              SELECTOR@0..16
-                SIMPLE_SELECTOR@0..2
-                  DOT@0..1 "."
-                  IDENT@1..2 "a"
-                PSEUDO_SELECTOR@2..16
-                  COLON@2..3 ":"
-                  IDENT@3..6 "not"
-                  LPAREN@6..7 "("
-                  DOT@7..8 "."
-                  IDENT@8..9 "b"
-                  WHITESPACE@9..12 "\n  "
-                  IDENT@12..13 "c"
-                  COLON@13..14 ":"
-                  WHITESPACE@14..15 " "
-                  IDENT@15..16 "d"
-          SEMICOLON@16..16 ""
-          RULE_SET@16..26
-            SELECTOR_LIST@16..19
-              SELECTOR@16..19
-                SIMPLE_SELECTOR@16..19
-                  WHITESPACE@16..17 "\n"
-                  DOT@17..18 "."
-                  IDENT@18..19 "e"
-            BLOCK@19..26
-              LBRACE@19..19 ""
-              DECLARATION@19..26
-                PROPERTY@19..23
-                  WHITESPACE@19..22 "\n  "
-                  IDENT@22..23 "f"
-                COLON@23..24 ":"
-                VALUE@24..26
-                  VALUE@24..26
-                    WHITESPACE@24..25 " "
-                    IDENT@25..26 "g"
-                SEMICOLON@26..26 ""
-              RBRACE@26..26 ""
-          RULE_SET@26..40
-            SELECTOR_LIST@26..29
-              SELECTOR@26..29
-                SIMPLE_SELECTOR@26..29
-                  WHITESPACE@26..27 "\n"
-                  DOT@27..28 "."
-                  IDENT@28..29 "h"
-            BLOCK@29..40
-              LBRACE@29..29 ""
-              DECLARATION@29..40
-                PROPERTY@29..33
-                  WHITESPACE@29..32 "\n  "
-                  IDENT@32..33 "i"
-                COLON@33..34 ":"
-                VALUE@34..40
-                  FUNCTION_CALL@34..39
-                    WHITESPACE@34..35 " "
-                    IDENT@35..36 "j"
-                    ARG_LIST@36..39
-                      LPAREN@36..37 "("
-                      ARG@37..38
-                        VALUE@37..38
-                          IDENT@37..38 "k"
-                      RPAREN@38..39 ")"
-                  RPAREN@39..40 ")"
-                SEMICOLON@40..40 ""
-              RBRACE@40..40 ""
-          WHITESPACE@40..41 "\n"
-        error 16..16: expected RPAREN
-    "#]],
+            SOURCE_FILE@0..41
+              RULE_SET@0..16
+                SELECTOR_LIST@0..16
+                  SELECTOR@0..16
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "a"
+                    PSEUDO_SELECTOR@2..16
+                      COLON@2..3 ":"
+                      IDENT@3..6 "not"
+                      LPAREN@6..7 "("
+                      DOT@7..8 "."
+                      IDENT@8..9 "b"
+                      WHITESPACE@9..12 "\n  "
+                      IDENT@12..13 "c"
+                      COLON@13..14 ":"
+                      WHITESPACE@14..15 " "
+                      IDENT@15..16 "d"
+              SEMICOLON@16..16 ""
+              RULE_SET@16..26
+                SELECTOR_LIST@16..19
+                  SELECTOR@16..19
+                    SIMPLE_SELECTOR@16..19
+                      WHITESPACE@16..17 "\n"
+                      DOT@17..18 "."
+                      IDENT@18..19 "e"
+                BLOCK@19..26
+                  LBRACE@19..19 ""
+                  DECLARATION@19..26
+                    PROPERTY@19..23
+                      WHITESPACE@19..22 "\n  "
+                      IDENT@22..23 "f"
+                    COLON@23..24 ":"
+                    VALUE@24..26
+                      VALUE@24..26
+                        WHITESPACE@24..25 " "
+                        IDENT@25..26 "g"
+                    SEMICOLON@26..26 ""
+                  RBRACE@26..26 ""
+              RULE_SET@26..40
+                SELECTOR_LIST@26..29
+                  SELECTOR@26..29
+                    SIMPLE_SELECTOR@26..29
+                      WHITESPACE@26..27 "\n"
+                      DOT@27..28 "."
+                      IDENT@28..29 "h"
+                BLOCK@29..40
+                  LBRACE@29..29 ""
+                  DECLARATION@29..40
+                    PROPERTY@29..33
+                      WHITESPACE@29..32 "\n  "
+                      IDENT@32..33 "i"
+                    COLON@33..34 ":"
+                    VALUE@34..40
+                      FUNCTION_CALL@34..39
+                        WHITESPACE@34..35 " "
+                        IDENT@35..36 "j"
+                        ARG_LIST@36..39
+                          LPAREN@36..37 "("
+                          ARG@37..38
+                            VALUE@37..38
+                              IDENT@37..38 "k"
+                          RPAREN@38..39 ")"
+                      ERROR@39..40
+                        RPAREN@39..40 ")"
+                    SEMICOLON@40..40 ""
+                  RBRACE@40..40 ""
+              WHITESPACE@40..41 "\n"
+            error 16..16: expected RPAREN
+            error 39..40: expected newline
+        "#]],
     );
 }
 
@@ -3353,8 +3357,9 @@ fn unclosed_brackets_inside_a_closed_one_unwind_with_it() {
                                 ARG@12..13
                                   NUMBER_LITERAL@12..13
                                     NUMBER@12..13 "1"
-                      WHITESPACE@13..14 " "
-                      RBRACKET@14..15 "]"
+                      ERROR@13..15
+                        WHITESPACE@13..14 " "
+                        RBRACKET@14..15 "]"
                     SEMICOLON@15..15 ""
                   RBRACE@15..15 ""
               RULE_SET@15..25

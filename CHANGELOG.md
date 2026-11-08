@@ -90,6 +90,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Parser: a rule missing its `{` where a string left unclosed starts, as the rest of
   `'line1` / `line2';` read on the line after a line break that ended the string, reports
   the string only, not a missing `{` at the same place as well
+- Parser: a `:`, `)` or `]` in a declaration's value, as in `c: d)` or `b: c:d`, is
+  reported, as Dart Sass does, and the rest of the value is skipped with it. Such
+  values were accepted silently, in both syntaxes. In the braced syntax, `name:` after a
+  value is the next declaration, missing the `;` before it: `color: red font-size: 14px`
+  reports the `;` and parses both declarations. Colons that values hold stay valid:
+  `progid:` filters, `url(a:b)`, strings, escapes, interpolation, custom properties
 
 ## 0.4.0 — 2026-11-08
 
