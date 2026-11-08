@@ -45,10 +45,10 @@ if want foundation; then
     else
         echo "downloading foundation $FOUNDATION_VERSION..."
         TMPDIR=$(mktemp -d)
-        curl -sL "https://github.com/foundation/foundation-sites/archive/refs/tags/${FOUNDATION_VERSION}.tar.gz" \
+        curl -sL "https://github.com/foundation/yeti/archive/refs/tags/${FOUNDATION_VERSION}.tar.gz" \
             | tar xz -C "$TMPDIR"
         mkdir -p "$FOUNDATION_DIR"
-        mv "$TMPDIR/foundation-sites-${FOUNDATION_VERSION#v}/scss" "$FOUNDATION_DIR/scss"
+        mv "$TMPDIR/yeti-${FOUNDATION_VERSION#v}/scss" "$FOUNDATION_DIR/scss"
         rm -rf "$TMPDIR"
         echo "foundation scss extracted to $FOUNDATION_DIR/scss"
     fi
