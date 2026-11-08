@@ -1219,6 +1219,9 @@ fn a_header_goes_on_across_a_blank_line() {
         ".b\n  c: d\n.a\n  @extend\n\n    .b\n",
         ".x\n  @if\n\n    true\n    a: b\n",
         "@use \"sass:math\" as\n\n  m\n",
+        "@mixin\n\nfoo\n  a: b\n.x\n  +foo\n",
+        "=\n\nfoo\n  a: b\n.x\n  +foo\n",
+        "@use \"sass:math\" as\n\nm\n.a\n  b: m.$pi\n",
         ".x\n  @each $v in\n\n    1 2\n    a: $v\n",
         "$a: 1\n.x\n  @if $a and\n\n    $a\n    b: c\n",
     ] {
@@ -1318,7 +1321,190 @@ fn an_operand_after_a_blank_line_is_the_operand() {
 #[test]
 fn a_header_with_only_blank_lines_after_it_is_one_error() {
     assert_eq!(error_count("@mixin\n\n"), 1);
-    assert_eq!(error_count("@mixin\n\n.a\n  b: c\n"), 1);
+    check(
+        "@mixin\n\n.a\n  b: c\n",
+        expect![[r#"
+        SOURCE_FILE@0..18
+          MIXIN_RULE@0..6
+            AT@0..1 "@"
+            IDENT@1..6 "mixin"
+          SEMICOLON@6..6 ""
+          RULE_SET@6..17
+            SELECTOR_LIST@6..10
+              SELECTOR@6..10
+                SIMPLE_SELECTOR@6..10
+                  WHITESPACE@6..8 "\n\n"
+                  DOT@8..9 "."
+                  IDENT@9..10 "a"
+            BLOCK@10..17
+              LBRACE@10..10 ""
+              DECLARATION@10..17
+                PROPERTY@10..14
+                  WHITESPACE@10..13 "\n  "
+                  IDENT@13..14 "b"
+                COLON@14..15 ":"
+                VALUE@15..17
+                  VALUE@15..17
+                    WHITESPACE@15..16 " "
+                    IDENT@16..17 "c"
+                SEMICOLON@17..17 ""
+              RBRACE@17..17 ""
+          WHITESPACE@17..18 "\n"
+        error 6..6: expected IDENT
+    "#]],
+    );
+}
+
+/// A header goes on to the next line where it requires more, but a line that does not
+/// start what it requires is not the rest of it: the header ends above it, missing what
+/// it requires, and the line is a statement of its own.
+#[test]
+fn an_unfinished_header_leaves_the_line_after_it_a_statement() {
+    for source in [
+        "@mixin\n\n\n",
+        "@mixin\n",
+        "=\n\n",
+        "@use \"x\" as\n\n",
+        "@function f()\n  @return\n\n",
+        "@include\n\n",
+        "@if\n\n",
+        "@each $v in\n\n",
+    ] {
+        let source = format!("{source}.z\n  y: x\n");
+        let tree = render(parse_sass, &source);
+        assert_eq!(error_count(&source), 1, "{source:?}:\n{tree}");
+        assert!(ends_with_rule_z(&source), "{source:?}:\n{tree}");
+    }
+    // `@for` reports each part it is missing, but the rule below is still its own.
+    let source = "@for $i from\n\n.z\n  y: x\n";
+    let tree = render(parse_sass, source);
+    assert!(error_count(source) <= 3, "{source:?}:\n{tree}");
+    assert!(ends_with_rule_z(source), "{source:?}:\n{tree}");
+}
+
+/// A deeper line right below a header missing its name goes on with the header.
+#[test]
+fn a_mixin_missing_its_name_takes_the_parameters_below_it() {
+    check(
+        "@mixin\n  ($a)\n  b: $a\n",
+        expect![[r#"
+        SOURCE_FILE@0..22
+          MIXIN_RULE@0..21
+            AT@0..1 "@"
+            IDENT@1..6 "mixin"
+            PARAM_LIST@6..13
+              WHITESPACE@6..9 "\n  "
+              LPAREN@9..10 "("
+              PARAM@10..12
+                DOLLAR@10..11 "$"
+                IDENT@11..12 "a"
+              RPAREN@12..13 ")"
+            BLOCK@13..21
+              LBRACE@13..13 ""
+              DECLARATION@13..21
+                PROPERTY@13..17
+                  WHITESPACE@13..16 "\n  "
+                  IDENT@16..17 "b"
+                COLON@17..18 ":"
+                VALUE@18..21
+                  VARIABLE_REF@18..21
+                    WHITESPACE@18..19 " "
+                    DOLLAR@19..20 "$"
+                    IDENT@20..21 "a"
+                SEMICOLON@21..21 ""
+              RBRACE@21..21 ""
+          WHITESPACE@21..22 "\n"
+        error 9..10: expected IDENT
+    "#]],
+    );
+}
+
+#[test]
+fn a_use_rule_missing_its_namespace_ends_before_the_next_rule() {
+    check(
+        "@use \"x\" as\n\n.z\n  y: x\n",
+        expect![[r#"
+        SOURCE_FILE@0..23
+          USE_RULE@0..11
+            AT@0..1 "@"
+            IDENT@1..4 "use"
+            WHITESPACE@4..5 " "
+            QUOTED_STRING@5..8 "\"x\""
+            WHITESPACE@8..9 " "
+            IDENT@9..11 "as"
+            SEMICOLON@11..11 ""
+          RULE_SET@11..22
+            SELECTOR_LIST@11..15
+              SELECTOR@11..15
+                SIMPLE_SELECTOR@11..15
+                  WHITESPACE@11..13 "\n\n"
+                  DOT@13..14 "."
+                  IDENT@14..15 "z"
+            BLOCK@15..22
+              LBRACE@15..15 ""
+              DECLARATION@15..22
+                PROPERTY@15..19
+                  WHITESPACE@15..18 "\n  "
+                  IDENT@18..19 "y"
+                COLON@19..20 ":"
+                VALUE@20..22
+                  VALUE@20..22
+                    WHITESPACE@20..21 " "
+                    IDENT@21..22 "x"
+                SEMICOLON@22..22 ""
+              RBRACE@22..22 ""
+          WHITESPACE@22..23 "\n"
+        error 11..11: expected IDENT
+    "#]],
+    );
+}
+
+#[test]
+fn a_return_missing_its_value_ends_before_the_next_rule() {
+    check(
+        "@function f()\n  @return\n\n.z\n  y: x\n",
+        expect![[r#"
+        SOURCE_FILE@0..35
+          FUNCTION_RULE@0..23
+            AT@0..1 "@"
+            IDENT@1..9 "function"
+            WHITESPACE@9..10 " "
+            IDENT@10..11 "f"
+            PARAM_LIST@11..13
+              LPAREN@11..12 "("
+              RPAREN@12..13 ")"
+            BLOCK@13..23
+              LBRACE@13..13 ""
+              RETURN_RULE@13..23
+                WHITESPACE@13..16 "\n  "
+                AT@16..17 "@"
+                IDENT@17..23 "return"
+                SEMICOLON@23..23 ""
+              RBRACE@23..23 ""
+          RULE_SET@23..34
+            SELECTOR_LIST@23..27
+              SELECTOR@23..27
+                SIMPLE_SELECTOR@23..27
+                  WHITESPACE@23..25 "\n\n"
+                  DOT@25..26 "."
+                  IDENT@26..27 "z"
+            BLOCK@27..34
+              LBRACE@27..27 ""
+              DECLARATION@27..34
+                PROPERTY@27..31
+                  WHITESPACE@27..30 "\n  "
+                  IDENT@30..31 "y"
+                COLON@31..32 ":"
+                VALUE@32..34
+                  VALUE@32..34
+                    WHITESPACE@32..33 " "
+                    IDENT@33..34 "x"
+                SEMICOLON@34..34 ""
+              RBRACE@34..34 ""
+          WHITESPACE@34..35 "\n"
+        error 23..23: expected expression
+    "#]],
+    );
 }
 
 // ── Line endings ─────────────────────────────────────────────────────

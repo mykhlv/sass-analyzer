@@ -704,6 +704,9 @@ impl<'src> Parser<'src> {
     // ── Errors ───────────────────────────────────────────────────────
 
     pub fn error(&mut self, msg: impl Into<String>) {
+        if self.layout == Layout::Indented {
+            self.end_header_before_error();
+        }
         let range = self.error_range();
         self.error_at(range, msg);
         if self.layout == Layout::Indented {

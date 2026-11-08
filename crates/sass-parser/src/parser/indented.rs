@@ -61,6 +61,8 @@ pub(super) struct IndentedState {
     statement_start: usize,
     /// The header being parsed, with the index of its name token.
     header: Option<(&'static HeaderLines, usize)>,
+    /// The line start an error has ended the header at: the grammar cannot go on to it.
+    header_ended: Option<usize>,
     /// Brackets left unclosed by an error when the function that opened them returned.
     /// The line breaks after them count as being that much less deep.
     unwound: u16,
@@ -129,6 +131,7 @@ impl IndentedState {
             },
             statement_start: 0,
             header: None,
+            header_ended: None,
             unwound: 0,
             brackets: Vec::new(),
             line_search: None,
@@ -605,7 +608,11 @@ impl<'src> Parser<'src> {
 
     fn absorb_line_breaks(&mut self, across_blank: bool) -> bool {
         let line = self.indented.line;
-        if !line.saw_content || line.index != self.pos || line.next >= line.end {
+        if !line.saw_content
+            || line.index != self.pos
+            || line.next >= line.end
+            || self.indented.header_ended == Some(self.pos)
+        {
             return false;
         }
         if self.recovery_index().is_some_and(|sync| sync <= self.pos) {
@@ -658,10 +665,15 @@ impl<'src> Parser<'src> {
     /// Whether the header goes on over the line breaks before `line` because of how the
     /// line above ends. A variable's name is no end word: `through $to` ends with a value.
     fn header_goes_on_at_end_of_line(&self, line: &Line) -> bool {
+        self.header_goes_on_before(line.index)
+    }
+
+    /// [`Parser::header_goes_on_at_end_of_line`] for the line start at token `index`.
+    fn header_goes_on_before(&self, index: usize) -> bool {
         let Some((header, name)) = self.indented.header else {
             return false;
         };
-        let last = line.index - 1;
+        let last = index - 1;
         let variable = self.input.kind(last.wrapping_sub(1)) == SyntaxKind::DOLLAR
             && self.input.trivia_before(last).is_empty();
         (last == name && header.name_continues)
@@ -802,6 +814,41 @@ impl<'src> Parser<'src> {
                 self.find_line_start(from);
             }
         }
+        self.fence = self.locate_fence();
+    }
+
+    /// An error is about to be reported at the cursor. If its token starts a line that the
+    /// header went on to because the line above left it requiring more, that line does
+    /// not start what the header requires: the header ends above it, where the error is
+    /// reported, and the line is left to parse as a statement of its own or as the block.
+    /// A deeper line right below the header, with no blank line between, is rather the
+    /// rest of the header written on a line of its own, as `@mixin` / `  ($a)`, and the
+    /// header goes on there as before.
+    pub(super) fn end_header_before_error(&mut self) {
+        if self.indented.header.is_none()
+            || self.pos == 0
+            || self.pos >= self.fence.index
+            || self.indented.line.index <= self.pos
+        {
+            return;
+        }
+        let (next, end) = self.input.line_break_range(self.pos);
+        let unwound = self.indented.unwound;
+        let Some(last) = (next..end)
+            .rev()
+            .map(|i| self.input.line_break(i))
+            .find(|line_break| line_break.depth() <= unwound)
+        else {
+            return;
+        };
+        let top = *self.indented.columns.last().unwrap_or(&0);
+        let blank = (next..end).any(|i| self.input.line_break(i).is_blank_line());
+        if (last.column() > top && !blank) || !self.header_goes_on_before(self.pos) {
+            return;
+        }
+        self.indented.header = None;
+        self.indented.header_ended = Some(self.pos);
+        self.find_line_start(self.pos);
         self.fence = self.locate_fence();
     }
 
