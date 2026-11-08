@@ -73,10 +73,15 @@ pub(crate) enum Task {
 }
 
 pub(crate) enum ExternalEvent {
-    /// A file created or changed on disk.
+    /// A stylesheet created or changed on disk.
     Changed {
         uri: Uri,
         path: PathBuf,
+    },
+    /// A CSS file created on disk. An import may load it, but it is not a Sass
+    /// module of its own: it is indexed only once an import resolves to it.
+    CssCreated {
+        uri: Uri,
     },
     Deleted {
         uri: Uri,
@@ -366,7 +371,8 @@ impl LanguageServer for Backend {
         let cached = self.module_graph.cached_tree_count();
         tracing::info!(files, cached, "sass-analyzer server initialized");
 
-        // Register file watchers for SCSS/Sass files changed outside the editor.
+        // Register file watchers for SCSS/Sass files changed outside the editor, and
+        // for CSS files, which an import may load.
         let watch_options = tower_lsp_server::ls_types::DidChangeWatchedFilesRegistrationOptions {
             watchers: vec![
                 FileSystemWatcher {
@@ -375,6 +381,10 @@ impl LanguageServer for Backend {
                 },
                 FileSystemWatcher {
                     glob_pattern: GlobPattern::String("**/*.sass".to_owned()),
+                    kind: None,
+                },
+                FileSystemWatcher {
+                    glob_pattern: GlobPattern::String("**/*.css".to_owned()),
                     kind: None,
                 },
             ],
@@ -549,6 +559,11 @@ impl LanguageServer for Backend {
             .filter_map(|event| {
                 if event.typ == FileChangeType::DELETED {
                     return Some(ExternalEvent::Deleted { uri: event.uri });
+                }
+                // A change to a CSS file changes no Sass member.
+                if worker::is_css_file(&event.uri) {
+                    return (event.typ == FileChangeType::CREATED)
+                        .then_some(ExternalEvent::CssCreated { uri: event.uri });
                 }
                 // Created or Changed — the worker reads the file.
                 let path = event.uri.to_file_path()?.into_owned();

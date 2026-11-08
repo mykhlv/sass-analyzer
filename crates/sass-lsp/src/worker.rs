@@ -30,6 +30,15 @@ pub(crate) fn is_sass_file(uri: &Uri) -> bool {
     s[..path_end].ends_with(".sass")
 }
 
+/// Whether `uri` names a plain CSS file, which an import may load but which is no
+/// Sass module of its own. Case-sensitive, as [`is_sass_file`] is.
+#[allow(clippy::case_sensitive_file_extension_comparisons)]
+pub(crate) fn is_css_file(uri: &Uri) -> bool {
+    let s = uri.as_str();
+    let path_end = s.find(['?', '#']).unwrap_or(s.len());
+    s[..path_end].ends_with(".css")
+}
+
 pub(crate) fn parse_document(
     text: &str,
     sass: bool,
@@ -334,6 +343,7 @@ async fn apply_external_events(
                     }
                 }
             }
+            ExternalEvent::CssCreated { uri } => new_uris.push(uri),
             ExternalEvent::Deleted { uri } => {
                 let dependents = module_graph.dependents_of(&uri);
                 if apply_external_delete(documents, module_graph, &uri) {

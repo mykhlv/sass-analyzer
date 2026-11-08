@@ -50,6 +50,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the open files that use it. A new file was not seen by its importers until they were
   edited, and a deleted one was still treated as loaded. A change to a file already
   known re-checks only the files that import it
+- LSP: a `.css` file created or deleted on disk re-checks the open files as a new or
+  deleted stylesheet does, so creating `theme.css` clears the error of `@use "theme"`
+  without editing the importer. The CSS file itself is not read as a Sass module
 - LSP: "Check Workspace" no longer holds a lock on the open documents while it
   publishes their diagnostics, which could hang the server if a file was opened at
   that moment

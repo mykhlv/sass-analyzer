@@ -559,3 +559,99 @@ async fn a_burst_of_new_files_rechecks_a_document_once() {
     .expect("the probe's diagnostics");
     assert_eq!(publishes, 1, "the burst should re-check it once");
 }
+
+// ── CSS files ───────────────────────────────────────────────────────
+
+/// The globs the server registers for `workspace/didChangeWatchedFiles`.
+async fn watched_globs(
+    reader: &mut (impl AsyncReadExt + Unpin),
+    writer: &mut (impl AsyncWriteExt + Unpin),
+) -> Vec<String> {
+    let wait = async {
+        loop {
+            let msg = recv_msg_raw(reader).await;
+            if msg.get("id").is_some() && msg.get("method").is_some() {
+                send_msg(
+                    writer,
+                    &serde_json::json!({ "jsonrpc": "2.0", "id": msg["id"], "result": null }),
+                )
+                .await;
+            }
+            if msg["method"] == "client/registerCapability" {
+                return msg["params"]["registrations"][0]["registerOptions"]["watchers"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|w| w["globPattern"].as_str().unwrap().to_owned())
+                    .collect();
+            }
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(5), wait)
+        .await
+        .expect("no file watcher registered")
+}
+
+/// A `.css` file can be what an import loads, so its creation and deletion are
+/// watched like a stylesheet's.
+#[tokio::test]
+async fn css_files_are_watched() {
+    let (mut reader, mut writer) = spawn_server();
+    do_initialize(&mut reader, &mut writer).await;
+    let globs = watched_globs(&mut reader, &mut writer).await;
+    assert_eq!(globs, ["**/*.scss", "**/*.sass", "**/*.css"]);
+}
+
+/// A new `.css` file clears the error of an import that looked for it, without
+/// being read as a Sass module itself: one nothing imports adds no members.
+#[tokio::test]
+async fn creating_a_css_file_clears_the_error() {
+    let dir = TempDir::new("css_created");
+    let text = "@use \"foo\";\n";
+    let (mut reader, mut writer, uri, diags) = open_in(&dir, "main.scss", text).await;
+    assert_eq!(not_found(&diags).len(), 1, "{diags:#?}");
+
+    let stray = file_uri(&dir.write("stray.css", "$leak: 1;\n"));
+    let created = file_uri(&dir.write("foo.css", "a { b: c; }\n"));
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "workspace/didChangeWatchedFiles",
+            "params": { "changes": [
+                { "uri": stray, "type": 1 },
+                { "uri": created, "type": 1 },
+            ] }
+        }),
+    )
+    .await;
+    let diags = next_diagnostics(&mut reader, &mut writer, &uri).await;
+    assert!(diags.is_empty(), "{diags:#?}");
+
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0", "id": 901, "method": "workspace/symbol",
+            "params": { "query": "leak" }
+        }),
+    )
+    .await;
+    let symbols = recv_response(&mut reader, &mut writer, 901).await;
+    assert!(
+        symbols["result"].as_array().is_none_or(Vec::is_empty),
+        "{symbols}"
+    );
+}
+
+#[tokio::test]
+async fn deleting_an_imported_css_file_reports_the_error() {
+    let dir = TempDir::new("css_deleted");
+    let css = dir.write("foo.css", "a { b: c; }\n");
+    let (mut reader, mut writer, uri, diags) = open_in(&dir, "main.scss", "@use \"foo\";\n").await;
+    assert!(diags.is_empty(), "{diags:#?}");
+
+    std::fs::remove_file(&css).unwrap();
+    send_watched(&mut writer, &file_uri(&css), 3).await;
+    let diags = next_diagnostics(&mut reader, &mut writer, &uri).await;
+    assert_eq!(not_found(&diags).len(), 1, "{diags:#?}");
+}
