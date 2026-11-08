@@ -136,6 +136,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Indented Sass: `b: c !` / blank line / `important` is the declaration's `!important`,
   as in Dart Sass; it read `important` as a rule of its own. A `!` ending a line before a
   line that is not `important`, as `$a: 1 !` / `default`, is one error after the `!`
+- LSP: a `.css` file that an import loads, as `@use "theme"` finding `theme.css`, is
+  plain CSS, as in Dart Sass, which rejects Sass variables, mixins and functions there.
+  It was read as SCSS, so a `$v` defined in it was a member of the module, with a
+  definition and a workspace symbol. It now exports no members and adds no symbols; go to
+  definition and document links on the import still reach the file
 
 ## 0.4.0 — 2026-11-08
 

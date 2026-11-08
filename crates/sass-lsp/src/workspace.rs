@@ -1382,6 +1382,19 @@ impl ModuleGraph {
             );
             return;
         }
+        // Plain CSS, which Dart Sass loads as such: no Sass member is defined there, and
+        // its imports are left to the browser. Nothing reads its tree, so it is not even
+        // read; the module stays in the graph, as the target of the import's edge.
+        if path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("css"))
+        {
+            let (green, _) = sass_parser::parse_scss("");
+            let line_index = sass_parser::line_index::LineIndex::new("");
+            let symbols = Arc::new(FileSymbols::default());
+            self.index_file(uri, green, symbols, line_index, String::new());
+            return;
+        }
         let Ok(source) = std::fs::read_to_string(path) else {
             return;
         };
