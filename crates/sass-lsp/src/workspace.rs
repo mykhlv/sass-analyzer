@@ -437,8 +437,12 @@ impl ModuleGraph {
         }
     }
 
-    /// URL ranges of the file's imports that name a stylesheet that does not exist.
+    /// URL ranges of the file's imports that name a stylesheet that does not exist,
+    /// unless the settings turn that report off.
     pub fn missing_imports(&self, uri: &Uri) -> Vec<TextRange> {
+        if !self.runtime_config.report_unresolved_imports() {
+            return Vec::new();
+        }
         self.files
             .get(uri)
             .map(|info| info.missing_imports.clone())

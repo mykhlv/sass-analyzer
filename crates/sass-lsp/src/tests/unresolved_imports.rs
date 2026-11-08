@@ -410,3 +410,41 @@ async fn change_of_a_known_file_does_not_recheck_unrelated_documents() {
     .expect("the probe's diagnostics");
     assert!(!republished, "an unrelated document was re-checked");
 }
+
+#[tokio::test]
+async fn unresolved_imports_can_be_left_unreported() {
+    let dir = TempDir::new("report_off");
+    let text = "@use \"colrs\";\na { b: colrs.$x; c: $y; }\n";
+    let uri = file_uri(&dir.write("main.scss", text));
+    let (mut reader, mut writer) = spawn_server();
+    do_initialize_with(
+        &mut reader,
+        &mut writer,
+        serde_json::json!({ "reportUnresolvedImports": false }),
+    )
+    .await;
+    open_document(&mut writer, &uri, text).await;
+    let diags = next_diagnostics(&mut reader, &mut writer, &uri).await;
+    // The undefined names stay suppressed: their cause is the import.
+    assert!(diags.is_empty(), "{diags:#?}");
+}
+
+#[tokio::test]
+async fn turning_the_report_off_clears_the_error() {
+    let dir = TempDir::new("report_toggle");
+    let (mut reader, mut writer, uri, diags) =
+        open_in(&dir, "main.scss", "@use \"colrs\";\n").await;
+    assert_eq!(not_found(&diags).len(), 1, "{diags:#?}");
+
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "workspace/didChangeConfiguration",
+            "params": { "settings": { "sass-analyzer": { "reportUnresolvedImports": false } } }
+        }),
+    )
+    .await;
+    let diags = next_diagnostics(&mut reader, &mut writer, &uri).await;
+    assert!(diags.is_empty(), "{diags:#?}");
+}

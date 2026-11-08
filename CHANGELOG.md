@@ -17,7 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   schemes, the `~` prefix of bundlers, and a URL in an installed package that the
   server cannot follow. Neither are plain-CSS imports, which Dart Sass leaves to the
   browser: a URL ending in `.css`, starting with `http://`, `https://` or `//`, written
-  as `url(...)`, or followed by a media query or `supports(...)`
+  as `url(...)`, or followed by a media query or `supports(...)`. The
+  `sass-analyzer.reportUnresolvedImports` setting turns the report off, for a project
+  whose own importer loads what the server cannot
 
 ### Fixed
 - LSP: an open document's state, its diagnostics and the cross-file index now always come
