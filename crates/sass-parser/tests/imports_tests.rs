@@ -190,3 +190,101 @@ fn collect_multiple_imports() {
             Import "b" @ 0..17"#]],
     );
 }
+
+// ── URL ranges and plain-CSS imports ─────────────────────────────────
+
+fn import_urls(green: sass_parser::syntax::GreenNode) -> String {
+    let tree = SyntaxNode::new_root(green);
+    let mut buf = String::new();
+    for imp in collect_imports(&tree) {
+        use std::fmt::Write;
+        let url = &tree.text().to_string()[imp.path_range];
+        let css = if imp.plain_css { " plain-css" } else { "" };
+        let _ = writeln!(buf, "{:?} {url} @ {:?}{css}", imp.kind, imp.path_range);
+    }
+    buf.trim_end().to_owned()
+}
+
+#[allow(clippy::needless_pass_by_value)]
+fn check_import_urls(source: &str, expect: Expect) {
+    let (green, _) = sass_parser::parse_scss(source);
+    assert_eq!(
+        SyntaxNode::new_root(green.clone()).text().to_string(),
+        source
+    );
+    expect.assert_eq(&import_urls(green));
+}
+
+#[test]
+fn import_url_ranges_cover_the_string() {
+    check_import_urls(
+        "@use \"a\" as x;\n@forward 'b' show $c;\n@import \"d\", \"e\";\n",
+        expect![[r#"
+            Use "a" @ 5..8
+            Forward 'b' @ 24..27
+            Import "d" @ 45..48
+            Import "e" @ 50..53"#]],
+    );
+}
+
+#[test]
+fn plain_css_imports() {
+    check_import_urls(
+        concat!(
+            "@import \"a.css\";\n",
+            "@import \"http://x/a\";\n",
+            "@import \"https://x/a\";\n",
+            "@import \"//x/a\";\n",
+            "@import url(\"u\");\n",
+            "@import \"m\" screen;\n",
+            "@import \"s\" supports(display: grid);\n",
+        ),
+        expect![[r#"
+            Import "a.css" @ 8..15 plain-css
+            Import "http://x/a" @ 25..37 plain-css
+            Import "https://x/a" @ 47..60 plain-css
+            Import "//x/a" @ 70..77 plain-css
+            Import "u" @ 91..94 plain-css
+            Import "m" @ 105..108 plain-css
+            Import "s" @ 125..128 plain-css"#]],
+    );
+}
+
+#[test]
+fn plain_css_import_after_a_sass_import_in_one_rule() {
+    // Media queries belong to the URL they follow, as in Dart Sass.
+    check_import_urls(
+        "@import \"a\", \"b\" screen;\n",
+        expect![[r#"
+            Import "a" @ 8..11
+            Import "b" @ 13..16 plain-css"#]],
+    );
+}
+
+#[test]
+fn use_of_a_css_url_is_not_a_plain_css_import() {
+    check_import_urls(
+        "@use \"a.css\";\n",
+        expect![[r#"
+            Use "a.css" @ 5..12"#]],
+    );
+}
+
+#[test]
+fn plain_css_import_in_indented_sass() {
+    let source = "@import \"m\" screen\n@import \"n\"\n";
+    let (green, _) = sass_parser::parse_sass(source);
+    assert_eq!(
+        SyntaxNode::new_root(green.clone()).text().to_string(),
+        source
+    );
+    expect![[r#"
+        Import "m" @ 8..11 plain-css
+        Import "n" @ 27..30"#]]
+    .assert_eq(&import_urls(green));
+}
+
+#[test]
+fn use_without_url_has_no_import() {
+    check_import_urls("@use ;\n", expect![""]);
+}

@@ -134,6 +134,11 @@
           "default": [],
           "description": "Module paths to implicitly @use as * in every file (e.g. for Vite additionalData). Supports ${workspaceFolder}."
         },
+        "sass-analyzer.reportUnresolvedImports": {
+          "type": "boolean",
+          "default": true,
+          "description": "Report an error on a @use, @forward or @import whose stylesheet cannot be found. Turn off when a custom importer resolves URLs the server cannot."
+        },
         "sass-analyzer.maxFileSize": {
           "type": "integer",
           "default": 2000000,

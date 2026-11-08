@@ -31,6 +31,7 @@ Built for monorepos and large codebases where existing SCSS extensions slow down
 ### Diagnostics & highlighting
 
 - **Real-time diagnostics** -- syntax errors reported as you type, with error recovery that keeps the rest of the file valid
+- **Missing stylesheets** -- a `@use`, `@forward` or `@import` whose file cannot be found is reported as Dart Sass reports it
 - **Semantic highlighting** -- distinct token colors for variables, functions, mixins, parameters, properties, and placeholder selectors
 
 ### Performance
@@ -46,6 +47,7 @@ Built for monorepos and large codebases where existing SCSS extensions slow down
 | `sass-analyzer.loadPaths` | `[]` | Additional directories for `@use`/`@forward` resolution (relative to workspace root). |
 | `sass-analyzer.importAliases` | `{}` | Map of import prefixes to target directories. Arrays map one alias to multiple directories (monorepos). |
 | `sass-analyzer.prependImports` | `[]` | Modules implicitly `@use`d in every file (e.g. for Vite `additionalData`). |
+| `sass-analyzer.reportUnresolvedImports` | `true` | Report an error on a `@use`, `@forward` or `@import` whose stylesheet cannot be found. Turn off when a custom importer resolves URLs the server cannot. |
 | `sass-analyzer.maxFileSize` | `2000000` | Maximum file size in bytes the server will parse. |
 | `sass-analyzer.debounceMs` | `50` | Delay in ms before re-parsing after an edit. |
 | `sass-analyzer.maxCachedTrees` | `200` | Maximum number of parse trees kept in memory. |

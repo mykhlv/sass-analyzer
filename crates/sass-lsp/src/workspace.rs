@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use dashmap::DashMap;
 use sass_parser::imports::{self, ImportKind, ImportRef};
-use sass_parser::resolver::{ModuleResolver, ResolvedModule};
+use sass_parser::resolver::{ModuleResolver, ResolveError, ResolvedModule};
 use sass_parser::syntax::{GreenNode, NodeOrToken, SyntaxNode};
 use sass_parser::syntax_kind::SyntaxKind;
 use sass_parser::text_range::TextRange;
@@ -62,6 +62,9 @@ pub struct ModuleInfo {
     /// Distinct for every `index_file` call, so a tree re-parsed from an older
     /// source is never cached over a newer one.
     pub generation: u64,
+    /// URL ranges of the imports that do not resolve and that the resolver could
+    /// have found, so are reported as missing stylesheets.
+    pub missing_imports: Vec<TextRange>,
 }
 
 enum CachedGreen {
@@ -282,6 +285,11 @@ impl ModuleGraph {
         green
     }
 
+    /// Whether the file is indexed.
+    pub fn contains(&self, uri: &Uri) -> bool {
+        self.files.contains_key(uri)
+    }
+
     /// Total number of indexed files.
     pub fn file_count(&self) -> usize {
         self.files.len()
@@ -318,6 +326,7 @@ impl ModuleGraph {
                 has_legacy_import,
                 has_unresolved_use: false, // updated after resolution loop below
                 generation: self.next_generation.fetch_add(1, Ordering::Relaxed),
+                missing_imports: Vec::new(),
             },
         );
         self.touch_tree_lru(uri);
@@ -328,6 +337,7 @@ impl ModuleGraph {
 
         let mut resolved_edges = Vec::new();
         let mut has_unresolved_use = false;
+        let mut missing_imports = Vec::new();
 
         for import_ref in &import_refs {
             if import_ref.kind == ImportKind::LoadCss {
@@ -338,13 +348,7 @@ impl ModuleGraph {
             // Scope the guard to the resolve call: index_dependency below recurses
             // into index_file, and a recursive read lock can deadlock against
             // set_resolver waiting to write.
-            let resolved = {
-                let resolver = self
-                    .resolver
-                    .read()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                resolver.resolve(&import_ref.path, base)
-            };
+            let resolved = self.resolve_url(&import_ref.path, base, import_ref.kind);
 
             if let Ok(ResolvedModule::File(target_path)) = resolved {
                 let target_uri = path_to_uri(&target_path);
@@ -376,8 +380,22 @@ impl ModuleGraph {
                         visibility: ForwardVisibility::default(),
                     });
                 }
-            } else if import_ref.kind == ImportKind::Use || import_ref.kind == ImportKind::Forward {
-                has_unresolved_use = true;
+            } else {
+                if import_ref.kind == ImportKind::Use || import_ref.kind == ImportKind::Forward {
+                    has_unresolved_use = true;
+                }
+                let missing = match resolved {
+                    Err(ResolveError::UnknownBuiltin(_)) => true,
+                    Err(ResolveError::NotFound(_)) => {
+                        !import_ref.plain_css
+                            && is_resolvable_url(&import_ref.path)
+                            && self.lookup_package(&import_ref.path, base) == PackageLookup::Absent
+                    }
+                    Ok(_) => false,
+                };
+                if missing {
+                    missing_imports.push(import_ref.path_range);
+                }
             }
         }
 
@@ -411,9 +429,32 @@ impl ModuleGraph {
 
         self.edges.insert(uri.clone(), resolved_edges);
 
-        if has_unresolved_use && let Some(mut info) = self.files.get_mut(uri) {
-            info.has_unresolved_use = true;
+        if (has_unresolved_use || !missing_imports.is_empty())
+            && let Some(mut info) = self.files.get_mut(uri)
+        {
+            info.has_unresolved_use = has_unresolved_use;
+            info.missing_imports = missing_imports;
         }
+    }
+
+    /// URL ranges of the file's imports that name a stylesheet that does not exist,
+    /// unless the settings turn that report off.
+    pub fn missing_imports(&self, uri: &Uri) -> Vec<TextRange> {
+        if !self.runtime_config.report_unresolved_imports() {
+            return Vec::new();
+        }
+        self.files
+            .get(uri)
+            .map(|info| info.missing_imports.clone())
+            .unwrap_or_default()
+    }
+
+    /// Whether some `@use`, `@forward` or `@import` of the file does not resolve,
+    /// so a new file or a settings change may change what it loads.
+    pub fn has_unresolved_paths(&self, uri: &Uri) -> bool {
+        self.files
+            .get(uri)
+            .is_some_and(|info| info.has_unresolved_use || !info.missing_imports.is_empty())
     }
 
     /// Check if a file has `@import` or `meta.load-css()` — these can provide
@@ -776,16 +817,98 @@ impl ModuleGraph {
 
     /// Resolve an import specifier from a given file URI.
     /// Returns the target file URI if resolution succeeds.
-    pub fn resolve_import(&self, from: &Uri, spec: &str) -> Option<Uri> {
+    pub fn resolve_import(&self, from: &Uri, spec: &str, kind: ImportKind) -> Option<Uri> {
         let base = uri_to_path(from)?;
-        let resolver = self
-            .resolver
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        match resolver.resolve(spec, &base) {
+        match self.resolve_url(spec, &base, kind) {
             Ok(ResolvedModule::File(path)) => Some(path_to_uri(&path)),
             _ => None,
         }
+    }
+
+    /// Resolve the URL of an import of `kind` in the file at `base`. Beyond what the
+    /// resolver finds, a bare package name loads the stylesheet its `package.json`
+    /// names, as bundlers do.
+    fn resolve_url(
+        &self,
+        url: &str,
+        base: &Path,
+        kind: ImportKind,
+    ) -> Result<ResolvedModule, ResolveError> {
+        // Scoped: index_dependency recurses into index_file, and a recursive read
+        // lock can deadlock against set_resolver waiting to write.
+        let resolved = {
+            let resolver = self
+                .resolver
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if kind == ImportKind::Import {
+                resolver.resolve_for_import(url, base)
+            } else {
+                resolver.resolve(url, base)
+            }
+        };
+        if matches!(resolved, Err(ResolveError::NotFound(_)))
+            && let PackageLookup::Entry(path) = self.lookup_package(url, base)
+        {
+            return Ok(ResolvedModule::File(path));
+        }
+        resolved
+    }
+
+    /// Look `url` up as a package in the nearest `node_modules` holding its first
+    /// segment (two for a scoped `@scope/name`). For the bare name, the entry is the
+    /// `sass` or `style` condition of `exports`, else the `sass` or `style` field.
+    fn lookup_package(&self, url: &str, base: &Path) -> PackageLookup {
+        let Some((name, subpath)) = package_name(url) else {
+            return PackageLookup::Absent;
+        };
+        let mut dir = base.parent();
+        while let Some(current) = dir {
+            let package_dir = current.join("node_modules").join(name);
+            if package_dir.is_dir() {
+                if !subpath.is_empty() || !self.is_path_allowed(&package_dir) {
+                    return PackageLookup::Installed;
+                }
+                return self
+                    .package_entry(&package_dir, base)
+                    .map_or(PackageLookup::Installed, PackageLookup::Entry);
+            }
+            dir = current.parent();
+        }
+        PackageLookup::Absent
+    }
+
+    fn package_entry(&self, package_dir: &Path, base: &Path) -> Option<PathBuf> {
+        let manifest = std::fs::read_to_string(package_dir.join("package.json")).ok()?;
+        let manifest: serde_json::Value = serde_json::from_str(&manifest).ok()?;
+        let exports = manifest.get("exports");
+        let exports = exports.and_then(|e| e.get(".")).or(exports);
+        let entries = ["sass", "style"]
+            .into_iter()
+            .filter_map(|c| exports.and_then(|e| e.get(c)))
+            .chain(
+                ["sass", "style"]
+                    .into_iter()
+                    .filter_map(|f| manifest.get(f)),
+            )
+            .filter_map(serde_json::Value::as_str);
+        for entry in entries {
+            let path = package_dir.join(entry.trim_start_matches("./"));
+            if path.is_file() {
+                return Some(path);
+            }
+            let resolved = {
+                let resolver = self
+                    .resolver
+                    .read()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                resolver.resolve(path.to_str()?, base)
+            };
+            if let Ok(ResolvedModule::File(found)) = resolved {
+                return Some(found);
+            }
+        }
+        None
     }
 
     /// Provide completion items for `@use "` / `@forward "` import paths.
@@ -1435,6 +1558,47 @@ fn find_name_in_forward_clauses(
     results
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum PackageLookup {
+    /// The stylesheet the package's manifest names.
+    Entry(PathBuf),
+    /// The package is installed, but the server cannot tell what loads from it.
+    Installed,
+    Absent,
+}
+
+/// Split a bare package URL into its package name and the rest of the path.
+fn package_name(url: &str) -> Option<(&str, &str)> {
+    if url.is_empty() || url.starts_with(['.', '/', '\\']) {
+        return None;
+    }
+    let segments = if url.starts_with('@') { 2 } else { 1 };
+    let end = url
+        .match_indices('/')
+        .nth(segments - 1)
+        .map_or(url.len(), |(i, _)| i);
+    let (name, rest) = url.split_at(end);
+    if segments == 2 && !name.contains('/') {
+        return None;
+    }
+    Some((name, rest.trim_start_matches('/')))
+}
+
+/// Whether `url` is one the resolver looks up on disk: not a URL with a scheme, as
+/// `pkg:` or `https:`, which only a custom importer loads, nor a bundler's `~` prefix.
+fn is_resolvable_url(url: &str) -> bool {
+    if url.starts_with('~') {
+        return false;
+    }
+    let scheme_len = url
+        .find(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.')))
+        .unwrap_or(url.len());
+    let has_scheme = scheme_len > 0
+        && url.starts_with(|c: char| c.is_ascii_alphabetic())
+        && url[scheme_len..].starts_with(':');
+    !has_scheme
+}
+
 fn is_scss_sass_or_css(name: &str) -> bool {
     Path::new(name).extension().is_some_and(|ext| {
         ext.eq_ignore_ascii_case("scss")
@@ -1589,6 +1753,7 @@ mod tests {
             has_legacy_import: false,
             has_unresolved_use: false,
             generation: 0,
+            missing_imports: Vec::new(),
         }
     }
 
@@ -2479,6 +2644,22 @@ mod tests {
             matches!(graph.cached_green(&uri), Some(CachedGreen::Tree(_))),
             "the re-parsed tree should be cached"
         );
+    }
+
+    #[test]
+    fn resolvable_urls() {
+        for url in ["colors", "../a/b", "@alias/x", "a/b:c", "_x.scss"] {
+            assert!(is_resolvable_url(url), "{url}");
+        }
+        for url in [
+            "pkg:x",
+            "https://x/y",
+            "file:///a",
+            "~bootstrap/x",
+            "a+b.c-d:e",
+        ] {
+            assert!(!is_resolvable_url(url), "{url}");
+        }
     }
 
     #[test]

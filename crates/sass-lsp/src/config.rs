@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 use serde::Deserialize;
 
@@ -35,6 +35,7 @@ pub struct SassAnalyzerConfig {
     pub debounce_ms: Option<u64>,
     pub max_cached_trees: Option<usize>,
     pub max_cached_sources: Option<usize>,
+    pub report_unresolved_imports: Option<bool>,
 }
 
 /// A single alias target: either one path or an array of paths.
@@ -63,6 +64,7 @@ pub struct RuntimeConfig {
     debounce_ms: AtomicU64,
     max_cached_trees: AtomicUsize,
     max_cached_sources: AtomicUsize,
+    report_unresolved_imports: AtomicBool,
 }
 
 impl Default for RuntimeConfig {
@@ -72,6 +74,7 @@ impl Default for RuntimeConfig {
             debounce_ms: AtomicU64::new(DEFAULT_DEBOUNCE_MS),
             max_cached_trees: AtomicUsize::new(DEFAULT_MAX_CACHED_TREES),
             max_cached_sources: AtomicUsize::new(DEFAULT_MAX_CACHED_SOURCES),
+            report_unresolved_imports: AtomicBool::new(true),
         }
     }
 }
@@ -91,6 +94,10 @@ impl RuntimeConfig {
 
     pub fn max_cached_sources(&self) -> usize {
         self.max_cached_sources.load(Ordering::Relaxed)
+    }
+
+    pub fn report_unresolved_imports(&self) -> bool {
+        self.report_unresolved_imports.load(Ordering::Relaxed)
     }
 
     /// Apply values from a deserialized config, using defaults for unset fields.
@@ -121,6 +128,10 @@ impl RuntimeConfig {
                 .max_cached_sources
                 .unwrap_or(DEFAULT_MAX_CACHED_SOURCES)
                 .max(MIN_CACHED_SOURCES),
+            Ordering::Relaxed,
+        );
+        self.report_unresolved_imports.store(
+            config.report_unresolved_imports.unwrap_or(true),
             Ordering::Relaxed,
         );
     }

@@ -66,6 +66,7 @@ function buildSettings(
     prependImports: rawPrependImports.map((p) =>
       resolveVariables(p, primaryRoot),
     ),
+    reportUnresolvedImports: config.get<boolean>("reportUnresolvedImports"),
     maxFileSize: config.get<number>("maxFileSize"),
     debounceMs: config.get<number>("debounceMs"),
     maxCachedTrees: config.get<number>("maxCachedTrees"),

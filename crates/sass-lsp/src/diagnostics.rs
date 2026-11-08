@@ -27,6 +27,7 @@ pub(crate) fn check_file(
     let mut result = Vec::new();
     let suppress_undefined = has_parse_errors || should_suppress_undefined(uri, module_graph);
 
+    check_missing_imports(uri, module_graph, &mut result);
     check_arg_count(&root, symbols, module_graph, uri, &mut result);
     if !suppress_undefined {
         check_undefined(&root, symbols, module_graph, uri, &mut result);
@@ -36,6 +37,27 @@ pub(crate) fn check_file(
     }
 
     result
+}
+
+// ── Missing stylesheets ─────────────────────────────────────────────
+
+/// An import of a stylesheet that does not exist, reported as Dart Sass reports it.
+/// The undefined-name warnings it would cause stay suppressed, so the one cause gives
+/// one diagnostic.
+fn check_missing_imports(
+    uri: &Uri,
+    module_graph: &workspace::ModuleGraph,
+    out: &mut Vec<SemanticDiagnostic>,
+) {
+    for range in module_graph.missing_imports(uri) {
+        out.push(SemanticDiagnostic {
+            range,
+            message: "Can't find stylesheet to import.".to_owned(),
+            severity: DiagnosticSeverity::ERROR,
+            code: "unresolved-import",
+            data: None,
+        });
+    }
 }
 
 // ── Colon rules in indented Sass ────────────────────────────────────
