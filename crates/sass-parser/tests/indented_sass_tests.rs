@@ -5801,3 +5801,105 @@ fn silent_comment_continues_over_crlf_line_breaks() {
         "#]],
     );
 }
+
+// ── Recovery inside a bracket ────────────────────────────────────────
+
+#[test]
+fn use_with_namespaced_variable_is_one_error_in_the_indented_syntax() {
+    check_tree(
+        "@use \"other\" with (a.$b: c)\n.a\n  b: c\n",
+        expect![[r#"
+        SOURCE_FILE@0..38
+          USE_RULE@0..27
+            AT@0..1 "@"
+            IDENT@1..4 "use"
+            WHITESPACE@4..5 " "
+            QUOTED_STRING@5..12 "\"other\""
+            WHITESPACE@12..13 " "
+            IDENT@13..17 "with"
+            WHITESPACE@17..18 " "
+            LPAREN@18..19 "("
+            ERROR@19..26
+              IDENT@19..20 "a"
+              DOT@20..21 "."
+              DOLLAR@21..22 "$"
+              IDENT@22..23 "b"
+              COLON@23..24 ":"
+              WHITESPACE@24..25 " "
+              IDENT@25..26 "c"
+            RPAREN@26..27 ")"
+            SEMICOLON@27..27 ""
+          RULE_SET@27..37
+            SELECTOR_LIST@27..30
+              SELECTOR@27..30
+                SIMPLE_SELECTOR@27..30
+                  WHITESPACE@27..28 "\n"
+                  DOT@28..29 "."
+                  IDENT@29..30 "a"
+            BLOCK@30..37
+              LBRACE@30..30 ""
+              DECLARATION@30..37
+                PROPERTY@30..34
+                  WHITESPACE@30..33 "\n  "
+                  IDENT@33..34 "b"
+                COLON@34..35 ":"
+                VALUE@35..37
+                  VALUE@35..37
+                    WHITESPACE@35..36 " "
+                    IDENT@36..37 "c"
+                SEMICOLON@37..37 ""
+              RBRACE@37..37 ""
+          WHITESPACE@37..38 "\n"
+        errors:
+          19..20: expected DOLLAR
+    "#]],
+    );
+}
+
+#[test]
+fn bad_token_in_parens_spanning_lines_is_one_error() {
+    check_tree(
+        "$a: f((b c. d\n  e))\n$f: g\n",
+        expect![[r#"
+        SOURCE_FILE@0..26
+          VARIABLE_DECL@0..19
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "a"
+            COLON@2..3 ":"
+            FUNCTION_CALL@3..19
+              WHITESPACE@3..4 " "
+              IDENT@4..5 "f"
+              ARG_LIST@5..19
+                LPAREN@5..6 "("
+                ARG@6..18
+                  PAREN_EXPR@6..18
+                    LPAREN@6..7 "("
+                    VALUE@7..8
+                      IDENT@7..8 "b"
+                    VALUE@8..10
+                      WHITESPACE@8..9 " "
+                      IDENT@9..10 "c"
+                    ERROR@10..17
+                      DOT@10..11 "."
+                      WHITESPACE@11..12 " "
+                      IDENT@12..13 "d"
+                      WHITESPACE@13..16 "\n  "
+                      IDENT@16..17 "e"
+                    RPAREN@17..18 ")"
+                RPAREN@18..19 ")"
+            SEMICOLON@19..19 ""
+          VARIABLE_DECL@19..25
+            WHITESPACE@19..20 "\n"
+            DOLLAR@20..21 "$"
+            IDENT@21..22 "f"
+            COLON@22..23 ":"
+            VALUE@23..25
+              WHITESPACE@23..24 " "
+              IDENT@24..25 "g"
+            SEMICOLON@25..25 ""
+          WHITESPACE@25..26 "\n"
+        errors:
+          10..11: expected expression
+    "#]],
+    );
+}

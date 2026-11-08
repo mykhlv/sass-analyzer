@@ -125,6 +125,7 @@ fn with_config(p: &mut Parser<'_>) {
         return;
     }
     let p = &mut *p.transparent_guard();
+    let errors = p.error_count();
     p.bump(); // (
 
     if p.at(RPAREN) {
@@ -138,12 +139,15 @@ fn with_config(p: &mut Parser<'_>) {
         }
     }
 
-    p.expect(RPAREN);
+    super::super::close_bracket(p, RPAREN, errors);
 }
 
 /// Parse `$var: value` or `$var: value !default` inside `with()`.
 fn with_config_entry(p: &mut Parser<'_>) {
-    p.expect(DOLLAR);
+    if !p.expect(DOLLAR) {
+        super::super::skip_rest_of_item(p, RPAREN);
+        return;
+    }
     p.expect(IDENT);
     p.expect(COLON);
     super::expressions::sass_value(p, super::ParseContext::SassScript);

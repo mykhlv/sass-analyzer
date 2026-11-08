@@ -232,6 +232,7 @@ pub fn interpolation(p: &mut Parser<'_>) -> CompletedMarker {
     let unclosed_strings = p.unclosed_strings();
     {
         let mut g = p.transparent_guard();
+        let errors = g.error_count();
         g.bump(); // #{
         if g.at(RBRACE) {
             g.error("expected expression");
@@ -240,7 +241,7 @@ pub fn interpolation(p: &mut Parser<'_>) -> CompletedMarker {
         }
         // A string left unclosed inside ended the interpolation too, already reported.
         if g.unclosed_strings() == unclosed_strings {
-            g.expect(RBRACE);
+            crate::grammar::close_bracket(&mut g, RBRACE, errors);
         }
     }
     m.complete(p, INTERPOLATION)

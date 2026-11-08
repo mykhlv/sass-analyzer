@@ -4011,3 +4011,303 @@ fn nonascii_snowman_identifier() {
         "#]],
     );
 }
+
+// ── Recovery inside a bracket ───────────────────────────────────────
+
+#[test]
+fn paren_list_with_a_map_entry_is_one_error_through_the_paren() {
+    // Dart Sass: `expected ")"` at the colon.
+    check(
+        "$id: f((a,b:c)...);\n$e: g;\n",
+        expect![[r#"
+        SOURCE_FILE@0..27
+          VARIABLE_DECL@0..19
+            DOLLAR@0..1 "$"
+            IDENT@1..3 "id"
+            COLON@3..4 ":"
+            FUNCTION_CALL@4..18
+              WHITESPACE@4..5 " "
+              IDENT@5..6 "f"
+              ARG_LIST@6..18
+                LPAREN@6..7 "("
+                ARG@7..17
+                  LIST_EXPR@7..14
+                    LPAREN@7..8 "("
+                    VALUE@8..9
+                      IDENT@8..9 "a"
+                    COMMA@9..10 ","
+                    VALUE@10..11
+                      IDENT@10..11 "b"
+                    ERROR@11..13
+                      COLON@11..12 ":"
+                      IDENT@12..13 "c"
+                    RPAREN@13..14 ")"
+                  DOT_DOT_DOT@14..17 "..."
+                RPAREN@17..18 ")"
+            SEMICOLON@18..19 ";"
+          VARIABLE_DECL@19..26
+            WHITESPACE@19..20 "\n"
+            DOLLAR@20..21 "$"
+            IDENT@21..22 "e"
+            COLON@22..23 ":"
+            VALUE@23..25
+              WHITESPACE@23..24 " "
+              IDENT@24..25 "g"
+            SEMICOLON@25..26 ";"
+          WHITESPACE@26..27 "\n"
+        errors:
+          11..12: expected RPAREN
+    "#]],
+    );
+}
+
+#[test]
+fn bad_token_in_parens_is_one_error_through_both_parens() {
+    // Dart Sass: `Expected identifier.` at the `.`.
+    check(
+        "$a: f((b c. d e));\n$f: g;\n",
+        expect![[r#"
+        SOURCE_FILE@0..26
+          VARIABLE_DECL@0..18
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "a"
+            COLON@2..3 ":"
+            FUNCTION_CALL@3..17
+              WHITESPACE@3..4 " "
+              IDENT@4..5 "f"
+              ARG_LIST@5..17
+                LPAREN@5..6 "("
+                ARG@6..16
+                  PAREN_EXPR@6..16
+                    LPAREN@6..7 "("
+                    VALUE@7..8
+                      IDENT@7..8 "b"
+                    VALUE@8..10
+                      WHITESPACE@8..9 " "
+                      IDENT@9..10 "c"
+                    ERROR@10..15
+                      DOT@10..11 "."
+                      WHITESPACE@11..12 " "
+                      IDENT@12..13 "d"
+                      WHITESPACE@13..14 " "
+                      IDENT@14..15 "e"
+                    RPAREN@15..16 ")"
+                RPAREN@16..17 ")"
+            SEMICOLON@17..18 ";"
+          VARIABLE_DECL@18..25
+            WHITESPACE@18..19 "\n"
+            DOLLAR@19..20 "$"
+            IDENT@20..21 "f"
+            COLON@21..22 ":"
+            VALUE@22..24
+              WHITESPACE@22..23 " "
+              IDENT@23..24 "g"
+            SEMICOLON@24..25 ";"
+          WHITESPACE@25..26 "\n"
+        errors:
+          10..11: expected expression
+    "#]],
+    );
+}
+
+#[test]
+fn bad_token_in_brackets_is_one_error_through_the_bracket() {
+    check(
+        "a { b: [c, ) d]; e: f; }\n",
+        expect![[r#"
+        SOURCE_FILE@0..25
+          RULE_SET@0..24
+            SELECTOR_LIST@0..1
+              SELECTOR@0..1
+                SIMPLE_SELECTOR@0..1
+                  IDENT@0..1 "a"
+            BLOCK@1..24
+              WHITESPACE@1..2 " "
+              LBRACE@2..3 "{"
+              DECLARATION@3..16
+                PROPERTY@3..5
+                  WHITESPACE@3..4 " "
+                  IDENT@4..5 "b"
+                COLON@5..6 ":"
+                VALUE@6..15
+                  BRACKETED_LIST@6..15
+                    WHITESPACE@6..7 " "
+                    LBRACKET@7..8 "["
+                    VALUE@8..9
+                      IDENT@8..9 "c"
+                    COMMA@9..10 ","
+                    ERROR@10..14
+                      WHITESPACE@10..11 " "
+                      RPAREN@11..12 ")"
+                      WHITESPACE@12..13 " "
+                      IDENT@13..14 "d"
+                    RBRACKET@14..15 "]"
+                SEMICOLON@15..16 ";"
+              DECLARATION@16..22
+                PROPERTY@16..18
+                  WHITESPACE@16..17 " "
+                  IDENT@17..18 "e"
+                COLON@18..19 ":"
+                VALUE@19..21
+                  VALUE@19..21
+                    WHITESPACE@19..20 " "
+                    IDENT@20..21 "f"
+                SEMICOLON@21..22 ";"
+              WHITESPACE@22..23 " "
+              RBRACE@23..24 "}"
+          WHITESPACE@24..25 "\n"
+        errors:
+          11..12: expected expression
+    "#]],
+    );
+}
+
+#[test]
+fn error_in_interpolation_skips_to_its_brace() {
+    check(
+        "a { b: #{c ) d} e; f: g; }\n",
+        expect![[r##"
+        SOURCE_FILE@0..27
+          RULE_SET@0..26
+            SELECTOR_LIST@0..1
+              SELECTOR@0..1
+                SIMPLE_SELECTOR@0..1
+                  IDENT@0..1 "a"
+            BLOCK@1..26
+              WHITESPACE@1..2 " "
+              LBRACE@2..3 "{"
+              DECLARATION@3..18
+                PROPERTY@3..5
+                  WHITESPACE@3..4 " "
+                  IDENT@4..5 "b"
+                COLON@5..6 ":"
+                VALUE@6..17
+                  INTERPOLATION@6..15
+                    WHITESPACE@6..7 " "
+                    HASH_LBRACE@7..9 "#{"
+                    VALUE@9..10
+                      IDENT@9..10 "c"
+                    ERROR@10..14
+                      WHITESPACE@10..11 " "
+                      RPAREN@11..12 ")"
+                      WHITESPACE@12..13 " "
+                      IDENT@13..14 "d"
+                    RBRACE@14..15 "}"
+                  VALUE@15..17
+                    WHITESPACE@15..16 " "
+                    IDENT@16..17 "e"
+                SEMICOLON@17..18 ";"
+              DECLARATION@18..24
+                PROPERTY@18..20
+                  WHITESPACE@18..19 " "
+                  IDENT@19..20 "f"
+                COLON@20..21 ":"
+                VALUE@21..23
+                  VALUE@21..23
+                    WHITESPACE@21..22 " "
+                    IDENT@22..23 "g"
+                SEMICOLON@23..24 ";"
+              WHITESPACE@24..25 " "
+              RBRACE@25..26 "}"
+          WHITESPACE@26..27 "\n"
+        errors:
+          11..12: expected RBRACE
+    "##]],
+    );
+}
+
+#[test]
+fn bracket_left_unclosed_still_ends_at_the_statement() {
+    // No closer before the `;`: nothing is skipped, the bracket is reported unclosed.
+    check(
+        "a { b: f(c d; e: f; }\n",
+        expect![[r#"
+        SOURCE_FILE@0..22
+          RULE_SET@0..21
+            SELECTOR_LIST@0..1
+              SELECTOR@0..1
+                SIMPLE_SELECTOR@0..1
+                  IDENT@0..1 "a"
+            BLOCK@1..21
+              WHITESPACE@1..2 " "
+              LBRACE@2..3 "{"
+              DECLARATION@3..13
+                PROPERTY@3..5
+                  WHITESPACE@3..4 " "
+                  IDENT@4..5 "b"
+                COLON@5..6 ":"
+                VALUE@6..12
+                  FUNCTION_CALL@6..12
+                    WHITESPACE@6..7 " "
+                    IDENT@7..8 "f"
+                    ARG_LIST@8..12
+                      LPAREN@8..9 "("
+                      ARG@9..12
+                        VALUE@9..10
+                          IDENT@9..10 "c"
+                        VALUE@10..12
+                          WHITESPACE@10..11 " "
+                          IDENT@11..12 "d"
+                SEMICOLON@12..13 ";"
+              DECLARATION@13..19
+                PROPERTY@13..15
+                  WHITESPACE@13..14 " "
+                  IDENT@14..15 "e"
+                COLON@15..16 ":"
+                VALUE@16..18
+                  VALUE@16..18
+                    WHITESPACE@16..17 " "
+                    IDENT@17..18 "f"
+                SEMICOLON@18..19 ";"
+              WHITESPACE@19..20 " "
+              RBRACE@20..21 "}"
+          WHITESPACE@21..22 "\n"
+        errors:
+          12..13: expected RPAREN
+    "#]],
+    );
+}
+
+#[test]
+fn error_in_interpolation_ends_at_the_string_that_swallowed_its_brace() {
+    // Dart Sass: `Expected expression.` The string opened after `)` takes the rest of
+    // the line, the interpolation's `}` with it.
+    check(
+        "'#{)'{\na { b: c }\n",
+        expect![[r##"
+        SOURCE_FILE@0..18
+          ERROR@0..1
+            STRING_START@0..1 "'"
+          RULE_SET@1..17
+            SELECTOR_LIST@1..8
+              SELECTOR@1..8
+                INTERPOLATION@1..6
+                  HASH_LBRACE@1..3 "#{"
+                  ERROR@3..6
+                    RPAREN@3..4 ")"
+                    QUOTED_STRING@4..6 "'{"
+                SIMPLE_SELECTOR@6..8
+                  WHITESPACE@6..7 "\n"
+                  IDENT@7..8 "a"
+            BLOCK@8..17
+              WHITESPACE@8..9 " "
+              LBRACE@9..10 "{"
+              DECLARATION@10..15
+                PROPERTY@10..12
+                  WHITESPACE@10..11 " "
+                  IDENT@11..12 "b"
+                COLON@12..13 ":"
+                VALUE@13..15
+                  VALUE@13..15
+                    WHITESPACE@13..14 " "
+                    IDENT@14..15 "c"
+              WHITESPACE@15..16 " "
+              RBRACE@16..17 "}"
+          WHITESPACE@17..18 "\n"
+        errors:
+          0..1: expected rule
+          3..4: expected expression
+          4..6: unterminated string
+    "##]],
+    );
+}

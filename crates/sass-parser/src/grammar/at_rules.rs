@@ -230,6 +230,7 @@ pub fn param_list(p: &mut Parser<'_>) {
     assert!(p.at(LPAREN));
     let p = &mut *p.transparent_guard();
     let m = p.start();
+    let errors = p.error_count();
     p.bump(); // (
 
     if !p.at(RPAREN) && !p.at_end() {
@@ -241,13 +242,17 @@ pub fn param_list(p: &mut Parser<'_>) {
         }
     }
 
-    p.expect(RPAREN);
+    super::close_bracket(p, RPAREN, errors);
     let _ = m.complete(p, PARAM_LIST);
 }
 
 fn param(p: &mut Parser<'_>) {
     let m = p.start();
-    p.expect(DOLLAR);
+    if !p.expect(DOLLAR) {
+        super::skip_rest_of_item(p, RPAREN);
+        let _ = m.complete(p, PARAM);
+        return;
+    }
     p.expect(IDENT);
 
     // Optional default value: $name: expr (can be space-separated, stops at `,`/`)`)

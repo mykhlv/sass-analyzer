@@ -304,6 +304,65 @@ impl<'src> Parser<'src> {
         unclosed
     }
 
+    /// Where the contents of the innermost bracket end, read on from the cursor, when an
+    /// error has left them unread: the number of tokens through the end, and what ends
+    /// them. That is its closer `close`, once every bracket opened before it has closed in
+    /// kind, or with `items` a `,` outside those brackets first, which ends the item at
+    /// the cursor; or a string left unclosed, which swallowed the closer with the rest of
+    /// its line. `None` if a `;`, a `{` outside interpolation, a `}` of no interpolation,
+    /// a closer that does not match a bracket opened since the cursor, or the next fence
+    /// comes first, or nothing within reach: the bracket is left unclosed instead.
+    pub fn rest_of_bracket(&self, close: SyntaxKind, items: bool) -> Option<(usize, BracketRest)> {
+        const REACH: usize = 4096;
+        let mut open: Vec<SyntaxKind> = Vec::new();
+        let mut string_starts: Vec<TextSize> = Vec::new();
+        let end = self.fence.index.min(self.pos.saturating_add(REACH));
+        for index in self.pos..end {
+            let count = index - self.pos + 1;
+            let range = self.input.range(index);
+            let kind = self.input.kind(index);
+            let string = match kind {
+                SyntaxKind::SEMICOLON | SyntaxKind::LBRACE => return None,
+                SyntaxKind::COMMA if items && open.is_empty() => {
+                    return Some((count, BracketRest::Comma));
+                }
+                SyntaxKind::QUOTED_STRING => Some((range.start(), &self.source[range][1..])),
+                SyntaxKind::STRING_START => {
+                    string_starts.push(range.start());
+                    None
+                }
+                SyntaxKind::STRING_END => string_starts
+                    .pop()
+                    .map(|start| (start, &self.source[range])),
+                _ => None,
+            };
+            if let Some((start, end_text)) = string
+                && self.string_left_unclosed(start, end_text)
+            {
+                return Some((count, BracketRest::UnclosedString));
+            }
+            if let Some(closer) = bracket_closer(kind) {
+                open.push(closer);
+            } else if matches!(
+                kind,
+                SyntaxKind::RPAREN | SyntaxKind::RBRACKET | SyntaxKind::RBRACE
+            ) {
+                match open.last() {
+                    Some(&closer) if closer == kind => {
+                        open.pop();
+                    }
+                    Some(_) => return None,
+                    None if kind == close => return Some((count, BracketRest::Closer)),
+                    // A stray `)` or `]` is more of what could not be read; a `}` closes
+                    // the block.
+                    None if kind == SyntaxKind::RBRACE => return None,
+                    None => {}
+                }
+            }
+        }
+        None
+    }
+
     /// Whether the string starting at `start`, whose text ends in `end_text`, lacks its
     /// closing quote.
     fn string_left_unclosed(&self, start: TextSize, end_text: &str) -> bool {
@@ -821,6 +880,14 @@ impl<'src> Parser<'src> {
             outer_start,
         }
     }
+}
+
+/// What ends the contents of a bracket in [`Parser::rest_of_bracket`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BracketRest {
+    Closer,
+    Comma,
+    UnclosedString,
 }
 
 /// How the text of a string left unclosed ends, before the line break that ended it.

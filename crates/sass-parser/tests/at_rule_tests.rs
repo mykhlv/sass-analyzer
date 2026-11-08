@@ -7407,3 +7407,190 @@ fn at_root_query_quoted_string() {
         "#]],
     );
 }
+
+// ── Recovery inside a bracket ───────────────────────────────────────────
+
+#[test]
+fn use_with_namespaced_variable_is_one_error_through_the_paren() {
+    // Dart Sass: `expected "$"`.
+    check(
+        "@use \"other\" with (a.$b: c);\na { b: c }\n",
+        expect![[r#"
+            SOURCE_FILE@0..40
+              USE_RULE@0..28
+                AT@0..1 "@"
+                IDENT@1..4 "use"
+                WHITESPACE@4..5 " "
+                QUOTED_STRING@5..12 "\"other\""
+                WHITESPACE@12..13 " "
+                IDENT@13..17 "with"
+                WHITESPACE@17..18 " "
+                LPAREN@18..19 "("
+                ERROR@19..26
+                  IDENT@19..20 "a"
+                  DOT@20..21 "."
+                  DOLLAR@21..22 "$"
+                  IDENT@22..23 "b"
+                  COLON@23..24 ":"
+                  WHITESPACE@24..25 " "
+                  IDENT@25..26 "c"
+                RPAREN@26..27 ")"
+                SEMICOLON@27..28 ";"
+              RULE_SET@28..39
+                SELECTOR_LIST@28..30
+                  SELECTOR@28..30
+                    SIMPLE_SELECTOR@28..30
+                      WHITESPACE@28..29 "\n"
+                      IDENT@29..30 "a"
+                BLOCK@30..39
+                  WHITESPACE@30..31 " "
+                  LBRACE@31..32 "{"
+                  DECLARATION@32..37
+                    PROPERTY@32..34
+                      WHITESPACE@32..33 " "
+                      IDENT@33..34 "b"
+                    COLON@34..35 ":"
+                    VALUE@35..37
+                      VALUE@35..37
+                        WHITESPACE@35..36 " "
+                        IDENT@36..37 "c"
+                  WHITESPACE@37..38 " "
+                  RBRACE@38..39 "}"
+              WHITESPACE@39..40 "\n"
+            errors:
+              19..20: expected DOLLAR
+        "#]],
+    );
+}
+
+#[test]
+fn use_with_double_comma_is_one_error() {
+    // Dart Sass: `expected ")"`.
+    check(
+        "@use \"other\" with ($a: b,,);\n",
+        expect![[r#"
+        SOURCE_FILE@0..29
+          USE_RULE@0..28
+            AT@0..1 "@"
+            IDENT@1..4 "use"
+            WHITESPACE@4..5 " "
+            QUOTED_STRING@5..12 "\"other\""
+            WHITESPACE@12..13 " "
+            IDENT@13..17 "with"
+            WHITESPACE@17..18 " "
+            LPAREN@18..19 "("
+            DOLLAR@19..20 "$"
+            IDENT@20..21 "a"
+            COLON@21..22 ":"
+            VALUE@22..24
+              WHITESPACE@22..23 " "
+              IDENT@23..24 "b"
+            COMMA@24..25 ","
+            COMMA@25..26 ","
+            RPAREN@26..27 ")"
+            SEMICOLON@27..28 ";"
+          WHITESPACE@28..29 "\n"
+        errors:
+          25..26: expected DOLLAR
+    "#]],
+    );
+}
+
+#[test]
+fn forward_with_namespaced_variable_keeps_the_next_entry() {
+    check(
+        "@forward \"other\" with (a.$b: c !default, $d: e);\n$f: g;\n",
+        expect![[r#"
+            SOURCE_FILE@0..56
+              FORWARD_RULE@0..48
+                AT@0..1 "@"
+                IDENT@1..8 "forward"
+                WHITESPACE@8..9 " "
+                QUOTED_STRING@9..16 "\"other\""
+                WHITESPACE@16..17 " "
+                IDENT@17..21 "with"
+                WHITESPACE@21..22 " "
+                LPAREN@22..23 "("
+                ERROR@23..39
+                  IDENT@23..24 "a"
+                  DOT@24..25 "."
+                  DOLLAR@25..26 "$"
+                  IDENT@26..27 "b"
+                  COLON@27..28 ":"
+                  WHITESPACE@28..29 " "
+                  IDENT@29..30 "c"
+                  WHITESPACE@30..31 " "
+                  BANG@31..32 "!"
+                  IDENT@32..39 "default"
+                COMMA@39..40 ","
+                WHITESPACE@40..41 " "
+                DOLLAR@41..42 "$"
+                IDENT@42..43 "d"
+                COLON@43..44 ":"
+                VALUE@44..46
+                  WHITESPACE@44..45 " "
+                  IDENT@45..46 "e"
+                RPAREN@46..47 ")"
+                SEMICOLON@47..48 ";"
+              VARIABLE_DECL@48..55
+                WHITESPACE@48..49 "\n"
+                DOLLAR@49..50 "$"
+                IDENT@50..51 "f"
+                COLON@51..52 ":"
+                VALUE@52..54
+                  WHITESPACE@52..53 " "
+                  IDENT@53..54 "g"
+                SEMICOLON@54..55 ";"
+              WHITESPACE@55..56 "\n"
+            errors:
+              23..24: expected DOLLAR
+        "#]],
+    );
+}
+
+#[test]
+fn param_without_dollar_is_one_error_and_keeps_the_body() {
+    check(
+        "@mixin m(a.$b, $c) { d: e; }\n",
+        expect![[r#"
+        SOURCE_FILE@0..29
+          MIXIN_RULE@0..28
+            AT@0..1 "@"
+            IDENT@1..6 "mixin"
+            WHITESPACE@6..7 " "
+            IDENT@7..8 "m"
+            PARAM_LIST@8..18
+              LPAREN@8..9 "("
+              PARAM@9..13
+                ERROR@9..13
+                  IDENT@9..10 "a"
+                  DOT@10..11 "."
+                  DOLLAR@11..12 "$"
+                  IDENT@12..13 "b"
+              COMMA@13..14 ","
+              PARAM@14..17
+                WHITESPACE@14..15 " "
+                DOLLAR@15..16 "$"
+                IDENT@16..17 "c"
+              RPAREN@17..18 ")"
+            BLOCK@18..28
+              WHITESPACE@18..19 " "
+              LBRACE@19..20 "{"
+              DECLARATION@20..26
+                PROPERTY@20..22
+                  WHITESPACE@20..21 " "
+                  IDENT@21..22 "d"
+                COLON@22..23 ":"
+                VALUE@23..25
+                  VALUE@23..25
+                    WHITESPACE@23..24 " "
+                    IDENT@24..25 "e"
+                SEMICOLON@25..26 ";"
+              WHITESPACE@26..27 " "
+              RBRACE@27..28 "}"
+          WHITESPACE@28..29 "\n"
+        errors:
+          9..10: expected DOLLAR
+    "#]],
+    );
+}

@@ -69,6 +69,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   missing its space after `:` is no longer given for a pseudo selector, as an empty
   `a:hover`, `li:first-child`, `a:not(.b)` or `input:-webkit-autofill`. It is now given
   for an interpolated name, as `margin-#{$side}:auto`
+- Parser: a mistake inside a bracket — an argument list, a parameter list, the
+  configuration of `@use` or `@forward ... with (...)`, a parenthesized list or map, a
+  bracketed list or an interpolation — is one error, and what could not be read up to
+  the bracket's closer is skipped with it. The statement went on from the inside of the
+  bracket instead, which reported up to a dozen errors for one, as for
+  `@use "a" with (b.$c: d)` or `f((a, b: c)...)`. A parameter or a configured variable
+  missing its `$` no longer takes the ones after it with it
 
 ## 0.4.0 — 2026-11-08
 
