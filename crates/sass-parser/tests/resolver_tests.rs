@@ -130,11 +130,50 @@ fn resolve_unknown_builtin() {
 // ── CSS imports ─────────────────────────────────────────────────────
 
 #[test]
-fn resolve_css_import() {
-    let r = resolver_with(&[]);
+fn resolve_css_url_to_its_file() {
+    let r = resolver_with(&["/project/src/reset.css", "/project/src/_theme.css"]);
+    let base = Path::new("/project/src/main.scss");
     assert_eq!(
-        r.resolve("reset.css", Path::new("/project/src/main.scss")),
+        r.resolve("reset.css", base),
+        Ok(ResolvedModule::File("/project/src/reset.css".into())),
+    );
+    assert_eq!(
+        r.resolve("theme.css", base),
+        Ok(ResolvedModule::File("/project/src/_theme.css".into())),
+    );
+    assert_eq!(
+        r.resolve_for_import("reset.css", base),
+        Ok(ResolvedModule::File("/project/src/reset.css".into())),
+    );
+}
+
+#[test]
+fn missing_css_file_is_not_found_for_use_and_plain_css_for_import() {
+    let r = resolver_with(&[]);
+    let base = Path::new("/project/src/main.scss");
+    assert_eq!(
+        r.resolve("reset.css", base),
+        Err(ResolveError::NotFound("reset.css".into())),
+    );
+    assert_eq!(
+        r.resolve_for_import("reset.css", base),
         Ok(ResolvedModule::Css("reset.css".into())),
+    );
+}
+
+/// Dart Sass compares extensions case-sensitively: `x.CSS` is not a CSS URL, and is
+/// looked up as `x.CSS.scss` and the like.
+#[test]
+fn css_extension_is_case_sensitive() {
+    let r = resolver_with(&["/project/src/x.CSS", "/project/src/y.CSS.scss"]);
+    let base = Path::new("/project/src/main.scss");
+    assert_eq!(
+        r.resolve_for_import("x.CSS", base),
+        Err(ResolveError::NotFound("x.CSS".into())),
+    );
+    assert_eq!(
+        r.resolve("y.CSS", base),
+        Ok(ResolvedModule::File("/project/src/y.CSS.scss".into())),
     );
 }
 
@@ -560,4 +599,25 @@ fn ambiguous_candidates_still_resolve() {
 fn file_before_directory_index() {
     let r = resolver_with(&["/p/a.scss", "/p/a/_index.scss"]);
     assert_eq!(resolves(&r, "a"), file("/p/a.scss"));
+}
+
+/// A URL ending in `/` names a directory, as in Dart Sass, which appends the
+/// extension to the URL as written: `d/` is `d/.scss`, then `d/index.scss`, never
+/// `d.scss`.
+#[test]
+fn trailing_slash_names_a_directory() {
+    let r = resolver_with(&["/p/d.scss", "/p/d/index.scss", "/p/e/_index.sass"]);
+    assert_eq!(resolves(&r, "d/"), file("/p/d/index.scss"));
+    assert_eq!(resolves(&r, "./d/"), file("/p/d/index.scss"));
+    assert_eq!(resolves(&r, "d//"), file("/p/d/index.scss"));
+    assert_eq!(resolves(&r, "e/"), file("/p/e/_index.sass"));
+    assert_eq!(resolves_for_import(&r, "d/"), file("/p/d/index.scss"));
+
+    let r = resolver_with(&["/p/q.scss", "/p/x.css", "/p/w/.scss"]);
+    assert_eq!(resolves(&r, "q/"), Err(ResolveError::NotFound("q/".into())));
+    assert_eq!(
+        resolves(&r, "x.css/"),
+        Err(ResolveError::NotFound("x.css/".into()))
+    );
+    assert_eq!(resolves(&r, "w/"), file("/p/w/.scss"));
 }

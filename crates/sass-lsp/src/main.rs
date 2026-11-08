@@ -62,15 +62,29 @@ pub(crate) enum Task {
     Close {
         uri: Uri,
     },
-    ExternalChange {
-        uri: Uri,
-        path: PathBuf,
-    },
-    ExternalDelete {
-        uri: Uri,
+    /// The file-watcher events of one `didChangeWatchedFiles` notification, handled
+    /// together so that the documents they affect are re-checked once.
+    External {
+        events: Vec<ExternalEvent>,
     },
     CheckWorkspace {
         root: PathBuf,
+    },
+}
+
+pub(crate) enum ExternalEvent {
+    /// A stylesheet created or changed on disk.
+    Changed {
+        uri: Uri,
+        path: PathBuf,
+    },
+    /// A CSS file created on disk. An import may load it, but it is not a Sass
+    /// module of its own: it is indexed only once an import resolves to it.
+    CssCreated {
+        uri: Uri,
+    },
+    Deleted {
+        uri: Uri,
     },
 }
 
@@ -357,7 +371,8 @@ impl LanguageServer for Backend {
         let cached = self.module_graph.cached_tree_count();
         tracing::info!(files, cached, "sass-analyzer server initialized");
 
-        // Register file watchers for SCSS/Sass files changed outside the editor.
+        // Register file watchers for SCSS/Sass files changed outside the editor, and
+        // for CSS files, which an import may load.
         let watch_options = tower_lsp_server::ls_types::DidChangeWatchedFilesRegistrationOptions {
             watchers: vec![
                 FileSystemWatcher {
@@ -366,6 +381,10 @@ impl LanguageServer for Backend {
                 },
                 FileSystemWatcher {
                     glob_pattern: GlobPattern::String("**/*.sass".to_owned()),
+                    kind: None,
+                },
+                FileSystemWatcher {
+                    glob_pattern: GlobPattern::String("**/*.css".to_owned()),
                     kind: None,
                 },
             ],
@@ -531,38 +550,31 @@ impl LanguageServer for Backend {
     async fn did_save(&self, _params: DidSaveTextDocumentParams) {}
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
-        for event in params.changes {
+        let events: Vec<ExternalEvent> = params
+            .changes
+            .into_iter()
             // Skip files that are open in the editor — those are tracked
             // by did_open/did_change and have fresher content.
-            if self.source_texts.contains_key(&event.uri) {
-                continue;
-            }
-
-            if event.typ == FileChangeType::DELETED {
-                if self
-                    .task_tx
-                    .send(Task::ExternalDelete { uri: event.uri })
-                    .is_err()
-                {
-                    tracing::error!("worker channel closed, external delete task dropped");
+            .filter(|event| !self.source_texts.contains_key(&event.uri))
+            .filter_map(|event| {
+                if event.typ == FileChangeType::DELETED {
+                    return Some(ExternalEvent::Deleted { uri: event.uri });
                 }
-            } else {
-                // Created or Changed — send path to worker for async I/O.
-                let path = match event.uri.to_file_path() {
-                    Some(p) => p.into_owned(),
-                    None => continue,
-                };
-                if self
-                    .task_tx
-                    .send(Task::ExternalChange {
-                        uri: event.uri,
-                        path,
-                    })
-                    .is_err()
-                {
-                    tracing::error!("worker channel closed, external change task dropped");
+                // A change to a CSS file changes no Sass member.
+                if worker::is_css_file(&event.uri) {
+                    return (event.typ == FileChangeType::CREATED)
+                        .then_some(ExternalEvent::CssCreated { uri: event.uri });
                 }
-            }
+                // Created or Changed — the worker reads the file.
+                let path = event.uri.to_file_path()?.into_owned();
+                Some(ExternalEvent::Changed {
+                    uri: event.uri,
+                    path,
+                })
+            })
+            .collect();
+        if !events.is_empty() && self.task_tx.send(Task::External { events }).is_err() {
+            tracing::error!("worker channel closed, file-watcher events dropped");
         }
     }
 

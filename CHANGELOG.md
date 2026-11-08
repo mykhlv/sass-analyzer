@@ -15,9 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   warning in the file went silent, which it still does, so the one cause gives one
   diagnostic. URLs the server does not resolve itself are not reported: `pkg:` and other
   schemes, the `~` prefix of bundlers, and a URL in an installed package that the
-  server cannot follow. Neither are plain-CSS imports, which Dart Sass leaves to the
+  server cannot follow. Neither are plain-CSS `@import`s, which Dart Sass leaves to the
   browser: a URL ending in `.css`, starting with `http://`, `https://` or `//`, written
-  as `url(...)`, or followed by a media query or `supports(...)`. The
+  as `url(...)`, or followed by a media query or `supports(...)`. A `@use` or `@forward`
+  of a `.css` URL loads that file, so a missing one is reported. The
   `sass-analyzer.reportUnresolvedImports` setting turns the report off, for a project
   whose own importer loads what the server cannot
 
@@ -37,14 +38,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stylesheet its `package.json` names in `exports` (the `sass` or `style` condition) or
   in its `sass` or `style` field, as bundlers do. Go to definition and document links
   reached none of these, and their members were not found
+- LSP: a `.css` URL, as in `@use "reset.css"`, resolves to its file, or to the partial
+  `_reset.css`, so go to definition and document links reach it. As in Dart Sass, the
+  extension is matched case-sensitively: `@import "a.CSS"` is not plain CSS, and
+  `@use "a.SCSS"` does not load `a.scss`
+- LSP: a URL ending in `/`, as `@use "theme/" as t`, loads the directory's `index`
+  file, as in Dart Sass; it loaded `theme.scss` beside the directory, and reported
+  nothing when only that existed
 - LSP: a file that appears, created on disk or opened in the editor, re-checks the open
   files whose imports did not resolve, and deleting a file re-resolves the imports of
   the open files that use it. A new file was not seen by its importers until they were
   edited, and a deleted one was still treated as loaded. A change to a file already
   known re-checks only the files that import it
+- LSP: a `.css` file created or deleted on disk re-checks the open files as a new or
+  deleted stylesheet does, so creating `theme.css` clears the error of `@use "theme"`
+  without editing the importer. A watcher event alone does not index a CSS file as a Sass
+  module; only an import that resolves to it does
 - LSP: "Check Workspace" no longer holds a lock on the open documents while it
   publishes their diagnostics, which could hang the server if a file was opened at
   that moment
+- LSP: the auto-import, extract-to-variable and extract-to-mixin code actions write
+  their lines with the document's own line breaks. In a file with `\r\n` line endings
+  they inserted bare `\n` breaks, and auto-import added a stray empty line after an
+  existing `@use`
+- Indented Sass: extract to mixin is no longer offered for lines whose indentation does
+  not continue the first selected line's, as tabs below a line indented with spaces. It
+  moved such a line flush with the mixin's body, which could take a nested declaration
+  out of its rule
+- Indented Sass: the warning that a nested `name:value` rule is likely a declaration
+  missing its space after `:` is no longer given for a pseudo selector, as an empty
+  `a:hover`, `li:first-child`, `a:not(.b)` or `input:-webkit-autofill`. It is now given
+  for an interpolated name, as `margin-#{$side}:auto`
 
 ## 0.4.0 — 2026-11-08
 

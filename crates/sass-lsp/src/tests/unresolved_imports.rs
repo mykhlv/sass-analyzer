@@ -132,7 +132,6 @@ async fn builtin_scheme_and_plain_css_urls_are_not_errors() {
     let text = concat!(
         "@use \"sass:math\";\n",
         "@use \"pkg:bootstrap\";\n",
-        "@use \"other.css\";\n",
         "@import \"a.css\";\n",
         "@import url(b);\n",
         "@import url(\"c\");\n",
@@ -447,4 +446,212 @@ async fn turning_the_report_off_clears_the_error() {
     .await;
     let diags = next_diagnostics(&mut reader, &mut writer, &uri).await;
     assert!(diags.is_empty(), "{diags:#?}");
+}
+
+#[tokio::test]
+async fn css_url_resolves_to_its_file() {
+    let dir = TempDir::new("css_url");
+    let reset = dir.write("reset.css", "a { b: c; }\n");
+    let theme = dir.write("_theme.css", "a { b: c; }\n");
+    let text = "@use \"reset.css\";\n@forward \"theme.css\";\n";
+    let (mut reader, mut writer, uri, diags) = open_in(&dir, "main.scss", text).await;
+    assert!(diags.is_empty(), "{diags:#?}");
+    let def = definition_of(&mut reader, &mut writer, &uri, 0, 8).await;
+    assert_eq!(def["uri"], file_uri(&reset), "{def}");
+    let def = definition_of(&mut reader, &mut writer, &uri, 1, 12).await;
+    assert_eq!(def["uri"], file_uri(&theme), "{def}");
+}
+
+/// Dart Sass loads the file a `@use` or `@forward` of a `.css` URL names, and fails
+/// when there is none; an `@import` of one is left to the browser. `x.CSS` is not a
+/// CSS URL to Dart Sass, so an `@import` of it is looked up and reported too.
+#[tokio::test]
+async fn missing_css_file_is_an_error_for_use_and_forward_only() {
+    let dir = TempDir::new("css_missing");
+    let text = concat!(
+        "@use \"nope.css\";\n",
+        "@forward \"gone.css\";\n",
+        "@import \"plain.css\";\n",
+        "@import \"upper.CSS\";\n",
+    );
+    let (_r, _w, _uri, diags) = open_in(&dir, "main.scss", text).await;
+    let ranges: Vec<_> = not_found(&diags).into_iter().map(range_of).collect();
+    assert_eq!(
+        ranges,
+        [(0, 5, 0, 15), (1, 9, 1, 19), (3, 8, 3, 19)],
+        "{diags:#?}"
+    );
+}
+
+#[tokio::test]
+async fn url_with_trailing_slash_loads_the_directory_index() {
+    let dir = TempDir::new("trailing_slash");
+    dir.write("d.scss", "$x: 1;\n");
+    let index = dir.write("d/_index.scss", "$x: 2;\n");
+    dir.write("q.scss", "$x: 3;\n");
+    let text = "@use \"d/\" as d;\n@use \"q/\" as q;\n";
+    let (mut reader, mut writer, uri, diags) = open_in(&dir, "main.scss", text).await;
+    let ranges: Vec<_> = not_found(&diags).into_iter().map(range_of).collect();
+    assert_eq!(ranges, [(1, 5, 1, 9)], "{diags:#?}");
+    let def = definition_of(&mut reader, &mut writer, &uri, 0, 7).await;
+    assert_eq!(def["uri"], file_uri(&index), "{def}");
+}
+
+/// Many files appearing at once, as on a `git checkout`, re-check an open document
+/// whose import does not resolve once, not once per file.
+#[tokio::test]
+async fn a_burst_of_new_files_rechecks_a_document_once() {
+    const NEW_FILES: usize = 5;
+    let dir = TempDir::new("burst");
+    let (mut reader, mut writer) = spawn_server();
+    do_initialize_with_root(&mut reader, &mut writer, &file_uri(&dir.0)).await;
+    let probe = file_uri(&dir.write("probe.scss", "$p: 1;\n"));
+    open_document(&mut writer, &probe, "$p: 1;\n").await;
+    next_diagnostics(&mut reader, &mut writer, &probe).await;
+    let main = "@use \"later\";\n";
+    let uri = file_uri(&dir.write("main.scss", main));
+    open_document(&mut writer, &uri, main).await;
+    let diags = next_diagnostics(&mut reader, &mut writer, &uri).await;
+    assert_eq!(not_found(&diags).len(), 1, "{diags:#?}");
+
+    let changes: Vec<Value> = (0..NEW_FILES)
+        .map(|i| {
+            let created = dir.write(&format!("_new{i}.scss"), "$x: 1;\n");
+            serde_json::json!({ "uri": file_uri(&created), "type": 1 })
+        })
+        .collect();
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "workspace/didChangeWatchedFiles",
+            "params": { "changes": changes }
+        }),
+    )
+    .await;
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didChange",
+            "params": {
+                "textDocument": { "uri": probe, "version": 2 },
+                "contentChanges": [{ "text": "$p: 2;\n" }]
+            }
+        }),
+    )
+    .await;
+    // The worker handles the watcher events before the debounced parse.
+    let publishes = tokio::time::timeout(Duration::from_secs(5), async {
+        let mut publishes = 0;
+        loop {
+            let msg = recv_msg(&mut reader, &mut writer).await;
+            if msg["method"] == "textDocument/publishDiagnostics" {
+                if msg["params"]["uri"] == uri {
+                    publishes += 1;
+                } else if msg["params"]["uri"] == probe {
+                    return publishes;
+                }
+            }
+        }
+    })
+    .await
+    .expect("the probe's diagnostics");
+    assert_eq!(publishes, 1, "the burst should re-check it once");
+}
+
+// ── CSS files ───────────────────────────────────────────────────────
+
+/// The globs the server registers for `workspace/didChangeWatchedFiles`.
+async fn watched_globs(
+    reader: &mut (impl AsyncReadExt + Unpin),
+    writer: &mut (impl AsyncWriteExt + Unpin),
+) -> Vec<String> {
+    let wait = async {
+        loop {
+            let msg = recv_msg_raw(reader).await;
+            if msg.get("id").is_some() && msg.get("method").is_some() {
+                send_msg(
+                    writer,
+                    &serde_json::json!({ "jsonrpc": "2.0", "id": msg["id"], "result": null }),
+                )
+                .await;
+            }
+            if msg["method"] == "client/registerCapability" {
+                return msg["params"]["registrations"][0]["registerOptions"]["watchers"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|w| w["globPattern"].as_str().unwrap().to_owned())
+                    .collect();
+            }
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(5), wait)
+        .await
+        .expect("no file watcher registered")
+}
+
+/// A `.css` file can be what an import loads, so its creation and deletion are
+/// watched like a stylesheet's.
+#[tokio::test]
+async fn css_files_are_watched() {
+    let (mut reader, mut writer) = spawn_server();
+    do_initialize(&mut reader, &mut writer).await;
+    let globs = watched_globs(&mut reader, &mut writer).await;
+    assert_eq!(globs, ["**/*.scss", "**/*.sass", "**/*.css"]);
+}
+
+/// A new `.css` file clears the error of an import that looked for it, without
+/// being read as a Sass module itself: one nothing imports adds no members.
+#[tokio::test]
+async fn creating_a_css_file_clears_the_error() {
+    let dir = TempDir::new("css_created");
+    let text = "@use \"foo\";\n";
+    let (mut reader, mut writer, uri, diags) = open_in(&dir, "main.scss", text).await;
+    assert_eq!(not_found(&diags).len(), 1, "{diags:#?}");
+
+    let stray = file_uri(&dir.write("stray.css", "$leak: 1;\n"));
+    let created = file_uri(&dir.write("foo.css", "a { b: c; }\n"));
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "workspace/didChangeWatchedFiles",
+            "params": { "changes": [
+                { "uri": stray, "type": 1 },
+                { "uri": created, "type": 1 },
+            ] }
+        }),
+    )
+    .await;
+    let diags = next_diagnostics(&mut reader, &mut writer, &uri).await;
+    assert!(diags.is_empty(), "{diags:#?}");
+
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0", "id": 901, "method": "workspace/symbol",
+            "params": { "query": "leak" }
+        }),
+    )
+    .await;
+    let symbols = recv_response(&mut reader, &mut writer, 901).await;
+    assert!(
+        symbols["result"].as_array().is_none_or(Vec::is_empty),
+        "{symbols}"
+    );
+}
+
+#[tokio::test]
+async fn deleting_an_imported_css_file_reports_the_error() {
+    let dir = TempDir::new("css_deleted");
+    let css = dir.write("foo.css", "a { b: c; }\n");
+    let (mut reader, mut writer, uri, diags) = open_in(&dir, "main.scss", "@use \"foo\";\n").await;
+    assert!(diags.is_empty(), "{diags:#?}");
+
+    std::fs::remove_file(&css).unwrap();
+    send_watched(&mut writer, &file_uri(&css), 3).await;
+    let diags = next_diagnostics(&mut reader, &mut writer, &uri).await;
+    assert_eq!(not_found(&diags).len(), 1, "{diags:#?}");
 }

@@ -1,4 +1,4 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
@@ -87,6 +87,12 @@ pub struct ModuleGraph {
     source_lru: Mutex<VecDeque<Uri>>,
     next_generation: AtomicU64,
     runtime_config: Arc<RuntimeConfig>,
+    /// The stylesheet entries of each `package.json` read so far, with the
+    /// modification time and length they were read at.
+    package_manifests: Mutex<HashMap<PathBuf, CachedManifest>>,
+    /// How many times a `package.json` was read and parsed.
+    #[cfg(test)]
+    manifest_reads: std::sync::atomic::AtomicUsize,
 }
 
 impl ModuleGraph {
@@ -102,6 +108,9 @@ impl ModuleGraph {
             source_lru: Mutex::new(VecDeque::new()),
             next_generation: AtomicU64::new(0),
             runtime_config,
+            package_manifests: Mutex::new(HashMap::new()),
+            #[cfg(test)]
+            manifest_reads: std::sync::atomic::AtomicUsize::new(0),
         }
     }
 
@@ -348,7 +357,8 @@ impl ModuleGraph {
             // Scope the guard to the resolve call: index_dependency below recurses
             // into index_file, and a recursive read lock can deadlock against
             // set_resolver waiting to write.
-            let resolved = self.resolve_url(&import_ref.path, base, import_ref.kind);
+            let (resolved, package) =
+                self.resolve_url_with_package(&import_ref.path, base, import_ref.kind);
 
             if let Ok(ResolvedModule::File(target_path)) = resolved {
                 let target_uri = path_to_uri(&target_path);
@@ -389,7 +399,7 @@ impl ModuleGraph {
                     Err(ResolveError::NotFound(_)) => {
                         !import_ref.plain_css
                             && is_resolvable_url(&import_ref.path)
-                            && self.lookup_package(&import_ref.path, base) == PackageLookup::Absent
+                            && package == PackageLookup::Absent
                     }
                     Ok(_) => false,
                 };
@@ -834,6 +844,17 @@ impl ModuleGraph {
         base: &Path,
         kind: ImportKind,
     ) -> Result<ResolvedModule, ResolveError> {
+        self.resolve_url_with_package(url, base, kind).0
+    }
+
+    /// [`Self::resolve_url`], and the package lookup made for a URL the resolver did
+    /// not find, `Absent` if none was made, so that a caller need not repeat it.
+    fn resolve_url_with_package(
+        &self,
+        url: &str,
+        base: &Path,
+        kind: ImportKind,
+    ) -> (Result<ResolvedModule, ResolveError>, PackageLookup) {
         // Scoped: index_dependency recurses into index_file, and a recursive read
         // lock can deadlock against set_resolver waiting to write.
         let resolved = {
@@ -847,12 +868,16 @@ impl ModuleGraph {
                 resolver.resolve(url, base)
             }
         };
-        if matches!(resolved, Err(ResolveError::NotFound(_)))
-            && let PackageLookup::Entry(path) = self.lookup_package(url, base)
-        {
-            return Ok(ResolvedModule::File(path));
+        if !matches!(resolved, Err(ResolveError::NotFound(_))) {
+            return (resolved, PackageLookup::Absent);
         }
-        resolved
+        match self.lookup_package(url, base) {
+            PackageLookup::Entry(path) => (
+                Ok(ResolvedModule::File(path.clone())),
+                PackageLookup::Entry(path),
+            ),
+            package => (resolved, package),
+        }
     }
 
     /// Look `url` up as a package in the nearest `node_modules` holding its first
@@ -879,20 +904,8 @@ impl ModuleGraph {
     }
 
     fn package_entry(&self, package_dir: &Path, base: &Path) -> Option<PathBuf> {
-        let manifest = std::fs::read_to_string(package_dir.join("package.json")).ok()?;
-        let manifest: serde_json::Value = serde_json::from_str(&manifest).ok()?;
-        let exports = manifest.get("exports");
-        let exports = exports.and_then(|e| e.get(".")).or(exports);
-        let entries = ["sass", "style"]
-            .into_iter()
-            .filter_map(|c| exports.and_then(|e| e.get(c)))
-            .chain(
-                ["sass", "style"]
-                    .into_iter()
-                    .filter_map(|f| manifest.get(f)),
-            )
-            .filter_map(serde_json::Value::as_str);
-        for entry in entries {
+        let entries = self.manifest_entries(&package_dir.join("package.json"))?;
+        for entry in entries.iter() {
             let path = package_dir.join(entry.trim_start_matches("./"));
             if path.is_file() {
                 return Some(path);
@@ -909,6 +922,69 @@ impl ModuleGraph {
             }
         }
         None
+    }
+
+    /// The stylesheet entries `manifest` names, in the order they are tried: the
+    /// `sass` and `style` conditions of `exports`, then the `sass` and `style`
+    /// fields. Cached until the file's modification time or length changes, since
+    /// the editor's file watcher does not report changes inside `node_modules`.
+    fn manifest_entries(&self, manifest: &Path) -> Option<Arc<[String]>> {
+        const MAX_CACHED_MANIFESTS: usize = 1024;
+
+        let stamp = std::fs::metadata(manifest)
+            .ok()
+            .map(|meta| (meta.modified().ok(), meta.len()));
+        let mut cache = self
+            .package_manifests
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(stamp) = stamp else {
+            cache.remove(manifest);
+            return None;
+        };
+        if let Some(cached) = cache.get(manifest)
+            && cached.stamp == stamp
+        {
+            return cached.entries.clone();
+        }
+        drop(cache);
+
+        #[cfg(test)]
+        self.manifest_reads.fetch_add(1, Ordering::Relaxed);
+        let entries = std::fs::read_to_string(manifest)
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+            .map(|manifest| {
+                let exports = manifest.get("exports");
+                let exports = exports.and_then(|e| e.get(".")).or(exports);
+                ["sass", "style"]
+                    .into_iter()
+                    .filter_map(|c| exports.and_then(|e| e.get(c)))
+                    .chain(
+                        ["sass", "style"]
+                            .into_iter()
+                            .filter_map(|f| manifest.get(f)),
+                    )
+                    .filter_map(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                    .collect::<Arc<[String]>>()
+            });
+
+        let mut cache = self
+            .package_manifests
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if cache.len() >= MAX_CACHED_MANIFESTS {
+            cache.clear();
+        }
+        cache.insert(
+            manifest.to_path_buf(),
+            CachedManifest {
+                stamp,
+                entries: entries.clone(),
+            },
+        );
+        entries
     }
 
     /// Provide completion items for `@use "` / `@forward "` import paths.
@@ -1556,6 +1632,13 @@ fn find_name_in_forward_clauses(
     }
 
     results
+}
+
+/// A `package.json`'s stylesheet entries (`None` if it does not parse), and the
+/// modification time and length of the file they were read from.
+struct CachedManifest {
+    stamp: (Option<std::time::SystemTime>, u64),
+    entries: Option<Arc<[String]>>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -2723,6 +2806,62 @@ mod tests {
              (file_count = {indexed_count}, {INDEXED} files were indexed directly); \
              the @use \"other\" import must not have resolved"
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Index `src` as `dir/main.scss`.
+    fn index_main(graph: &ModuleGraph, dir: &Path, src: &str) -> Uri {
+        let (green, _) = sass_parser::parse_scss(src);
+        let syms = Arc::new(symbols::collect_symbols(&SyntaxNode::new_root(
+            green.clone(),
+        )));
+        let uri = path_to_uri(&dir.join("main.scss"));
+        let line_index = sass_parser::line_index::LineIndex::new(src);
+        graph.index_file(&uri, green, syms, line_index, src.to_owned());
+        uri
+    }
+
+    /// A package's manifest is read once per import while it is unchanged, and again
+    /// once it changes.
+    #[test]
+    fn package_manifest_is_read_once_until_it_changes() {
+        let dir =
+            std::env::temp_dir().join(format!("sass-analyzer-manifest-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let package = dir.join("node_modules").join("pkg");
+        std::fs::create_dir_all(&package).unwrap();
+        let manifest = package.join("package.json");
+        std::fs::write(&manifest, r#"{ "sass": "missing.scss" }"#).unwrap();
+        let reads = |graph: &ModuleGraph| graph.manifest_reads.load(Ordering::Relaxed);
+
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
+        let src = "@use \"pkg\";\n";
+        let uri = index_main(&graph, &dir, src);
+        assert_eq!(reads(&graph), 1);
+        assert!(
+            graph.missing_imports(&uri).is_empty(),
+            "an installed package is not missing"
+        );
+        index_main(&graph, &dir, src);
+        assert_eq!(reads(&graph), 1);
+
+        std::fs::write(package.join("_entry.scss"), "$x: 1;\n").unwrap();
+        std::fs::write(&manifest, r#"{ "sass": "entry" }"#).unwrap();
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
+        std::fs::File::options()
+            .write(true)
+            .open(&manifest)
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+        index_main(&graph, &dir, src);
+        assert_eq!(reads(&graph), 2);
+        assert_eq!(
+            graph.resolve_import(&uri, "pkg", ImportKind::Use),
+            Some(path_to_uri(&package.join("_entry.scss")))
+        );
+        assert_eq!(reads(&graph), 2);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

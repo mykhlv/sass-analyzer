@@ -8,7 +8,8 @@ use crate::vfs::{OsFileSystem, Vfs};
 pub enum ResolvedModule {
     /// A file on disk (absolute path).
     File(PathBuf),
-    /// A plain CSS import — no file lookup needed.
+    /// A plain CSS `@import` of a `.css` URL with no file behind it, left to the
+    /// browser as Dart Sass leaves it.
     Css(String),
     /// A built-in Sass module (`sass:math`, etc.).
     Builtin(BuiltinModule),
@@ -161,6 +162,7 @@ impl<V: Vfs> ModuleResolver<V> {
         self.resolve_in_context(spec, base, true)
     }
 
+    #[allow(clippy::case_sensitive_file_extension_comparisons)]
     fn resolve_in_context(
         &self,
         spec: &str,
@@ -174,42 +176,40 @@ impl<V: Vfs> ModuleResolver<V> {
                 .ok_or_else(|| ResolveError::UnknownBuiltin(name.to_owned()));
         }
 
-        // 2. Plain CSS imports
-        if Path::new(spec)
-            .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("css"))
-        {
-            return Ok(ResolvedModule::Css(spec.to_owned()));
-        }
-
         // The URL names a path the way a URL does: `%20` is a space.
         let decoded = percent_decode(spec);
 
-        // 3. Import aliases
+        // 2. Import aliases
         if let Some(path) = self.resolve_alias(&decoded, base, for_import) {
             return Ok(ResolvedModule::File(path));
         }
 
-        // 4. Resolve relative to the base file's directory
+        // 3. Resolve relative to the base file's directory
         let base_dir = base.parent().unwrap_or(Path::new("."));
         if let Some(path) = self.resolve_in_dir(base_dir, &decoded, for_import) {
             return Ok(ResolvedModule::File(path));
         }
 
-        // 5. Try each load path
+        // 4. Try each load path
         for load_path in &self.load_paths {
             if let Some(path) = self.resolve_in_dir(load_path, &decoded, for_import) {
                 return Ok(ResolvedModule::File(path));
             }
         }
 
-        // 6. Walk up node_modules
+        // 5. Walk up node_modules
         if self.node_modules_enabled
             && let Some(path) = self.resolve_node_modules(&decoded, base, for_import)
         {
             return Ok(ResolvedModule::File(path));
         }
 
+        // 6. A `.css` URL that names no file: an `@import` of it is plain CSS, while
+        // `@use` and `@forward` load the file and fail without one. The extension is
+        // compared case-sensitively, as Dart Sass compares it.
+        if for_import && spec.ends_with(".css") {
+            return Ok(ResolvedModule::Css(spec.to_owned()));
+        }
         Err(ResolveError::NotFound(spec.to_owned()))
     }
 
@@ -218,38 +218,42 @@ impl<V: Vfs> ModuleResolver<V> {
     /// and `.sass` before `.css`; then the directory's `index` file. In an `@import`,
     /// each step tries the import-only file (`name.import.scss`) first. Where Dart
     /// Sass reports several candidates as ambiguous, the first is picked, a
-    /// non-partial `.scss` file first, so the import does not look missing.
+    /// non-partial `.scss` file first, so the import does not look missing. Extensions
+    /// are compared case-sensitively, as Dart Sass compares them.
     fn resolve_in_dir(&self, dir: &Path, spec: &str, for_import: bool) -> Option<PathBuf> {
         let path = dir.join(spec);
-        let name = path.file_name()?.to_str()?;
+        // A URL ending in `/` names a directory: Dart Sass appends the extension to
+        // the URL as written, so `d/` is `d/.scss` and then `d/index.scss`. A
+        // `Path` drops the trailing slash, which would make it `d.scss`.
+        let (parent, name) = if spec.ends_with('/') {
+            (path.as_path(), "")
+        } else {
+            (path.parent()?, path.file_name()?.to_str()?)
+        };
 
         if let Some((stem, ext)) = name.rsplit_once('.')
-            && ["scss", "sass", "css"]
-                .iter()
-                .any(|known| ext.eq_ignore_ascii_case(known))
+            && ["scss", "sass", "css"].contains(&ext)
         {
             if for_import
                 && let Some(found) =
-                    self.existing_file(&path.with_file_name(format!("{stem}.import.{ext}")))
+                    self.existing_file(&parent.join(format!("{stem}.import.{ext}")))
             {
                 return Some(found);
             }
             return self.existing_file(&path);
         }
 
-        if for_import
-            && let Some(found) =
-                self.with_extensions(&path.with_file_name(format!("{name}.import")))
-        {
+        if for_import && let Some(found) = self.with_extensions(parent, &format!("{name}.import")) {
             return Some(found);
         }
-        if let Some(found) = self.with_extensions(&path) {
+        if let Some(found) = self.with_extensions(parent, name) {
             return Some(found);
         }
-        if for_import && let Some(found) = self.with_extensions(&path.join("index.import")) {
+        let dir = parent.join(name);
+        if for_import && let Some(found) = self.with_extensions(&dir, "index.import") {
             return Some(found);
         }
-        self.with_extensions(&path.join("index"))
+        self.with_extensions(&dir, "index")
     }
 
     /// `path` itself or its partial (`_name`).
@@ -260,12 +264,12 @@ impl<V: Vfs> ModuleResolver<V> {
             .find(|candidate| self.vfs.file_exists(candidate))
     }
 
-    /// `path` with a stylesheet extension, `.scss` before `.sass`, then with `.css`.
-    fn with_extensions(&self, path: &Path) -> Option<PathBuf> {
-        let name = path.file_name()?.to_str()?;
+    /// `name` in `dir` with a stylesheet extension, `.scss` before `.sass`, then
+    /// with `.css`.
+    fn with_extensions(&self, dir: &Path, name: &str) -> Option<PathBuf> {
         ["scss", "sass", "css"]
             .iter()
-            .find_map(|ext| self.existing_file(&path.with_file_name(format!("{name}.{ext}"))))
+            .find_map(|ext| self.existing_file(&dir.join(format!("{name}.{ext}"))))
     }
 
     fn resolve_alias(&self, spec: &str, base: &Path, for_import: bool) -> Option<PathBuf> {
