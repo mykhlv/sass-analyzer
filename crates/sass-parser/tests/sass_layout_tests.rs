@@ -147,11 +147,11 @@ fn pinned_inputs_keep_their_trees() {
         6 0/1/1 91b829e84a6296dd "$||{z:\u{c},,"
         0 0/0/0 4395014d94f85cb0 "//\n\n //\n 4"
         3 0/0/0 6d4bef7e27410221 "$0*\n"
-        4 0/0/0 5f254e93c53cd367 "$||:\u{c}"
+        3 0/0/0 5c13d1b5a94482e8 "$||:\u{c}"
         1 1/0/0 837a7e16c16fb00b ":*\n"
         1 0/0/0 ee072256d86b4eaa "=\n\n\t//\n"
         4 0/0/0 d200374b7fef73eb "$+*//\n"
-        5 0/0/1 ba4b05b7bc932812 "$@\n ''"
+        3 0/0/0 43c9e105550fa33a "$@\n ''"
         5 1/0/0 b1b365469fd5b620 "$\n\t //\n #\n"
         1 0/0/1 0302966426c00a7a "=\u{8}\n\t //\n //\u{8}\n"
         0 0/0/0 141ae63eba4b2fae "@:*\n"
@@ -1888,6 +1888,110 @@ fn for_from_after_a_blank_line_goes_on() {
                   RBRACE@42..42 ""
               RBRACE@42..42 ""
           WHITESPACE@42..43 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn map_left_unclosed_before_a_rule_is_one_error() {
+    check(
+        "$m: (\na: 1\nb: 2\n.c\n  d: e\n",
+        expect![[r#"
+        SOURCE_FILE@0..26
+          VARIABLE_DECL@0..15
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "m"
+            COLON@2..3 ":"
+            MAP_EXPR@3..12
+              WHITESPACE@3..4 " "
+              LPAREN@4..5 "("
+              MAP_ENTRY@5..12
+                VALUE@5..7
+                  WHITESPACE@5..6 "\n"
+                  IDENT@6..7 "a"
+                COLON@7..8 ":"
+                NUMBER_LITERAL@8..10
+                  WHITESPACE@8..9 " "
+                  NUMBER@9..10 "1"
+                VALUE@10..12
+                  WHITESPACE@10..11 "\n"
+                  IDENT@11..12 "b"
+            ERROR@12..15
+              COLON@12..13 ":"
+              WHITESPACE@13..14 " "
+              NUMBER@14..15 "2"
+            SEMICOLON@15..15 ""
+          RULE_SET@15..25
+            SELECTOR_LIST@15..18
+              SELECTOR@15..18
+                SIMPLE_SELECTOR@15..18
+                  WHITESPACE@15..16 "\n"
+                  DOT@16..17 "."
+                  IDENT@17..18 "c"
+            BLOCK@18..25
+              LBRACE@18..18 ""
+              DECLARATION@18..25
+                PROPERTY@18..22
+                  WHITESPACE@18..21 "\n  "
+                  IDENT@21..22 "d"
+                COLON@22..23 ":"
+                VALUE@23..25
+                  VALUE@23..25
+                    WHITESPACE@23..24 " "
+                    IDENT@24..25 "e"
+                SEMICOLON@25..25 ""
+              RBRACE@25..25 ""
+          WHITESPACE@25..26 "\n"
+        error 12..13: expected RPAREN
+    "#]],
+    );
+}
+
+#[test]
+fn list_left_unclosed_before_a_rule_is_one_error() {
+    check(
+        "$l: (1,\n2 3\n.c\n  d: e\n",
+        expect![[r#"
+        SOURCE_FILE@0..22
+          VARIABLE_DECL@0..11
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "l"
+            COLON@2..3 ":"
+            LIST_EXPR@3..11
+              WHITESPACE@3..4 " "
+              LPAREN@4..5 "("
+              NUMBER_LITERAL@5..6
+                NUMBER@5..6 "1"
+              COMMA@6..7 ","
+              NUMBER_LITERAL@7..9
+                WHITESPACE@7..8 "\n"
+                NUMBER@8..9 "2"
+              NUMBER_LITERAL@9..11
+                WHITESPACE@9..10 " "
+                NUMBER@10..11 "3"
+            SEMICOLON@11..11 ""
+          RULE_SET@11..21
+            SELECTOR_LIST@11..14
+              SELECTOR@11..14
+                SIMPLE_SELECTOR@11..14
+                  WHITESPACE@11..12 "\n"
+                  DOT@12..13 "."
+                  IDENT@13..14 "c"
+            BLOCK@14..21
+              LBRACE@14..14 ""
+              DECLARATION@14..21
+                PROPERTY@14..18
+                  WHITESPACE@14..17 "\n  "
+                  IDENT@17..18 "d"
+                COLON@18..19 ":"
+                VALUE@19..21
+                  VALUE@19..21
+                    WHITESPACE@19..20 " "
+                    IDENT@20..21 "e"
+                SEMICOLON@21..21 ""
+              RBRACE@21..21 ""
+          WHITESPACE@21..22 "\n"
+        error 12..13: expected RPAREN
     "#]],
     );
 }

@@ -288,9 +288,12 @@ pub fn variable_declaration(p: &mut Parser<'_>) {
 
     let value_errors = p.error_count();
     sass_value_list(p, ParseContext::SassScript);
-    if p.error_count() > value_errors && skip_rest_of_line(p) {
-        let _ = m.complete(p, VARIABLE_DECL);
-        return;
+    if p.error_count() > value_errors {
+        if skip_rest_of_line(p) {
+            let _ = m.complete(p, VARIABLE_DECL);
+            return;
+        }
+        skip_rest_of_indented_line(p);
     }
 
     // Parse flags: !default, !global (can co-occur)
@@ -349,6 +352,35 @@ fn skip_rest_of_line(p: &mut Parser<'_>) -> bool {
         let _ = m.complete(p, ERROR);
     }
     to_line
+}
+
+/// [`skip_rest_of_line`] for the indented layout, where the statement ends with its line:
+/// after a value that reported an error, the rest of the line as part of that error, up
+/// to a flag, `$m: (` / `a: 1` / `b: 2`, whose `: 2` would report the line's end missing
+/// at the same place. A line that goes on with brackets or braces of its own is left to
+/// the recovery the statement's end makes.
+fn skip_rest_of_indented_line(p: &mut Parser<'_>) {
+    if p.braced() || !p.reported_here() {
+        return;
+    }
+    let mut count = 0;
+    loop {
+        match p.nth(count) {
+            SEMICOLON | LBRACE | RBRACE if p.nth_text(count).is_empty() => break,
+            BANG | EOF => break,
+            SEMICOLON | LBRACE | RBRACE | LPAREN | LBRACKET | HASH_LBRACE | STRING_START => {
+                return;
+            }
+            _ => count += 1,
+        }
+    }
+    if count > 0 {
+        let m = p.start();
+        for _ in 0..count {
+            p.bump();
+        }
+        let _ = m.complete(p, ERROR);
+    }
 }
 
 // ── Interpolation (Phase 3 upgrade) ────────────────────────────────

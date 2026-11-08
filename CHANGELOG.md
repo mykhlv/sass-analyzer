@@ -107,7 +107,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SCSS: a variable's value that reports an error, as a map missing its commas and
   left unclosed, `$m: (` / `a: 1` / `b: 2` / `.c { ... }`, takes the rest of its line
   with that one error. The rest was left to the next statement, with up to three more
-  errors, and the rule on the next line was read into it
+  errors, and the rule on the next line was read into it. The indented syntax does the
+  same, `$m: (` / `a: 1` / `b: 2` / `.c`, which reported the line's end missing as well
 - Indented Sass: a file with many brackets left unclosed, line after line, parses in time
   linear in its size. Each line searched on to the end of the file for the next line
   start, and each erroring bracket for the next line at its column, so the time grew with
