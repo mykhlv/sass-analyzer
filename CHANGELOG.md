@@ -153,6 +153,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parts after it were reported missing too, three errors at one place. In the indented
   syntax, `@for $i` goes on across blank lines only to a word, its `from`, so a rule
   below stays a rule
+- Indented Sass: a written `;` that ends no statement is one error per line, as in Dart
+  Sass: after a selector, `.x;` or `b:c;`, "expected newline", and the lines beneath it
+  are still the rule's block; a second `;`, `b: c;;`, or a second statement after one,
+  `b: c; d: e`, reports that multiple statements on one line are not supported in the
+  indented syntax, Dart Sass's message. Such `;` were accepted. A `;` that ends a
+  statement, or sits in a string or `url()`, stays valid
 
 ## 0.4.0 — 2026-11-08
 

@@ -2273,6 +2273,317 @@ fn a_return_missing_its_value_ends_before_the_next_rule() {
     );
 }
 
+/// A written `;` that ends a statement is valid in the indented syntax, as in Dart Sass,
+/// and so is one inside a string, `url()` or the arguments of an at-rule it reads as
+/// text.
+#[test]
+fn a_semicolon_ending_a_statement_is_valid() {
+    for source in [
+        ".a\n  b: c;\n",
+        ".a\n  b: c; \n",
+        ".a\n  b: c;\n  d: e\n",
+        ".a\n  b: c; // x\n",
+        "$a: 1;\n.a\n  b: $a\n",
+        "@use \"sass:math\";\n.a\n  b: math.$pi\n",
+        ".a\n  b: \"x;y\"\n",
+        ".a\n  b: url(a;b)\n",
+        "@mixin m\n  c: d\n.a\n  @include m;\n  +m;\n",
+        ".x\n  c: d\n.a\n  @extend .x;\n",
+        "@foo bar;\n",
+    ] {
+        assert_eq!(
+            error_count(source),
+            0,
+            "{source:?}:\n{}",
+            render(parse_sass, source)
+        );
+    }
+}
+
+#[test]
+fn a_second_statement_after_a_semicolon_is_one_error() {
+    check(
+        ".a\n  b: c; d: e\n",
+        expect![[r#"
+        SOURCE_FILE@0..16
+          RULE_SET@0..15
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            BLOCK@2..15
+              LBRACE@2..2 ""
+              DECLARATION@2..10
+                PROPERTY@2..6
+                  WHITESPACE@2..5 "\n  "
+                  IDENT@5..6 "b"
+                COLON@6..7 ":"
+                VALUE@7..9
+                  VALUE@7..9
+                    WHITESPACE@7..8 " "
+                    IDENT@8..9 "c"
+                SEMICOLON@9..10 ";"
+              ERROR@10..15
+                WHITESPACE@10..11 " "
+                IDENT@11..12 "d"
+                COLON@12..13 ":"
+                WHITESPACE@13..14 " "
+                IDENT@14..15 "e"
+              SEMICOLON@15..15 ""
+              RBRACE@15..15 ""
+          WHITESPACE@15..16 "\n"
+        error 11..12: multiple statements on one line are not supported in the indented syntax
+    "#]],
+    );
+}
+
+#[test]
+fn a_selector_before_a_semicolon_is_one_error() {
+    check(
+        ".a\n  .x;\n",
+        expect![[r#"
+        SOURCE_FILE@0..9
+          RULE_SET@0..8
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            BLOCK@2..8
+              LBRACE@2..2 ""
+              RULE_SET@2..8
+                SELECTOR_LIST@2..7
+                  SELECTOR@2..7
+                    SIMPLE_SELECTOR@2..7
+                      WHITESPACE@2..5 "\n  "
+                      DOT@5..6 "."
+                      IDENT@6..7 "x"
+                ERROR@7..8
+                  SEMICOLON@7..8 ";"
+              SEMICOLON@8..8 ""
+              RBRACE@8..8 ""
+          WHITESPACE@8..9 "\n"
+        error 7..8: expected newline
+    "#]],
+    );
+}
+
+#[test]
+fn a_colon_selector_before_a_semicolon_is_one_error() {
+    check(
+        ".a\n  b:c;\n",
+        expect![[r#"
+        SOURCE_FILE@0..10
+          RULE_SET@0..9
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            BLOCK@2..9
+              LBRACE@2..2 ""
+              RULE_SET@2..9
+                SELECTOR_LIST@2..8
+                  SELECTOR@2..8
+                    SIMPLE_SELECTOR@2..6
+                      WHITESPACE@2..5 "\n  "
+                      IDENT@5..6 "b"
+                    PSEUDO_SELECTOR@6..8
+                      COLON@6..7 ":"
+                      IDENT@7..8 "c"
+                ERROR@8..9
+                  SEMICOLON@8..9 ";"
+              SEMICOLON@9..9 ""
+              RBRACE@9..9 ""
+          WHITESPACE@9..10 "\n"
+        error 8..9: expected newline
+    "#]],
+    );
+}
+
+#[test]
+fn a_colon_selector_before_a_semicolon_and_more_is_one_error() {
+    check(
+        ".a\n  b:c; d:e\n",
+        expect![[r#"
+        SOURCE_FILE@0..14
+          RULE_SET@0..13
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            BLOCK@2..13
+              LBRACE@2..2 ""
+              RULE_SET@2..13
+                SELECTOR_LIST@2..8
+                  SELECTOR@2..8
+                    SIMPLE_SELECTOR@2..6
+                      WHITESPACE@2..5 "\n  "
+                      IDENT@5..6 "b"
+                    PSEUDO_SELECTOR@6..8
+                      COLON@6..7 ":"
+                      IDENT@7..8 "c"
+                ERROR@8..13
+                  SEMICOLON@8..9 ";"
+                  WHITESPACE@9..10 " "
+                  IDENT@10..11 "d"
+                  COLON@11..12 ":"
+                  IDENT@12..13 "e"
+              SEMICOLON@13..13 ""
+              RBRACE@13..13 ""
+          WHITESPACE@13..14 "\n"
+        error 8..9: expected newline
+    "#]],
+    );
+}
+
+#[test]
+fn a_selector_before_a_semicolon_keeps_its_block() {
+    check(
+        ".a;\n  b: c\n",
+        expect![[r#"
+        SOURCE_FILE@0..11
+          RULE_SET@0..10
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            ERROR@2..3
+              SEMICOLON@2..3 ";"
+            BLOCK@3..10
+              LBRACE@3..3 ""
+              DECLARATION@3..10
+                PROPERTY@3..7
+                  WHITESPACE@3..6 "\n  "
+                  IDENT@6..7 "b"
+                COLON@7..8 ":"
+                VALUE@8..10
+                  VALUE@8..10
+                    WHITESPACE@8..9 " "
+                    IDENT@9..10 "c"
+                SEMICOLON@10..10 ""
+              RBRACE@10..10 ""
+          WHITESPACE@10..11 "\n"
+        error 2..3: expected newline
+    "#]],
+    );
+}
+
+#[test]
+fn a_second_semicolon_is_one_error() {
+    check(
+        ".a\n  b: c;;\n  d: e\n",
+        expect![[r#"
+        SOURCE_FILE@0..19
+          RULE_SET@0..18
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            BLOCK@2..18
+              LBRACE@2..2 ""
+              DECLARATION@2..10
+                PROPERTY@2..6
+                  WHITESPACE@2..5 "\n  "
+                  IDENT@5..6 "b"
+                COLON@6..7 ":"
+                VALUE@7..9
+                  VALUE@7..9
+                    WHITESPACE@7..8 " "
+                    IDENT@8..9 "c"
+                SEMICOLON@9..10 ";"
+              ERROR@10..11
+                SEMICOLON@10..11 ";"
+              SEMICOLON@11..11 ""
+              DECLARATION@11..18
+                PROPERTY@11..15
+                  WHITESPACE@11..14 "\n  "
+                  IDENT@14..15 "d"
+                COLON@15..16 ":"
+                VALUE@16..18
+                  VALUE@16..18
+                    WHITESPACE@16..17 " "
+                    IDENT@17..18 "e"
+                SEMICOLON@18..18 ""
+              RBRACE@18..18 ""
+          WHITESPACE@18..19 "\n"
+        error 10..11: multiple statements on one line are not supported in the indented syntax
+    "#]],
+    );
+}
+
+#[test]
+fn a_second_semicolon_after_a_variable_is_one_error() {
+    check(
+        "$a: 1;;\n",
+        expect![[r#"
+        SOURCE_FILE@0..8
+          VARIABLE_DECL@0..6
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "a"
+            COLON@2..3 ":"
+            NUMBER_LITERAL@3..5
+              WHITESPACE@3..4 " "
+              NUMBER@4..5 "1"
+            SEMICOLON@5..6 ";"
+          ERROR@6..7
+            SEMICOLON@6..7 ";"
+          SEMICOLON@7..7 ""
+          WHITESPACE@7..8 "\n"
+        error 6..7: multiple statements on one line are not supported in the indented syntax
+    "#]],
+    );
+}
+
+#[test]
+fn a_semicolon_on_a_line_of_its_own_is_one_error() {
+    check(
+        ".a\n  b: c\n  ;\n  d: e\n",
+        expect![[r#"
+        SOURCE_FILE@0..21
+          RULE_SET@0..20
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            BLOCK@2..20
+              LBRACE@2..2 ""
+              DECLARATION@2..9
+                PROPERTY@2..6
+                  WHITESPACE@2..5 "\n  "
+                  IDENT@5..6 "b"
+                COLON@6..7 ":"
+                VALUE@7..9
+                  VALUE@7..9
+                    WHITESPACE@7..8 " "
+                    IDENT@8..9 "c"
+                SEMICOLON@9..9 ""
+              ERROR@9..13
+                WHITESPACE@9..12 "\n  "
+                SEMICOLON@12..13 ";"
+              SEMICOLON@13..13 ""
+              DECLARATION@13..20
+                PROPERTY@13..17
+                  WHITESPACE@13..16 "\n  "
+                  IDENT@16..17 "d"
+                COLON@17..18 ":"
+                VALUE@18..20
+                  VALUE@18..20
+                    WHITESPACE@18..19 " "
+                    IDENT@19..20 "e"
+                SEMICOLON@20..20 ""
+              RBRACE@20..20 ""
+          WHITESPACE@20..21 "\n"
+        error 12..13: expected end of rule
+    "#]],
+    );
+}
+
 // ── Line endings ─────────────────────────────────────────────────────
 
 /// The tree of `source` with its ranges and token texts left out, and its errors' messages:
