@@ -122,6 +122,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `expression` and `element`, is one error on the name, "invalid function name", as in
   Dart Sass, and `@function type(...)` reports that the name is reserved for the
   plain-CSS function. `url(...)` in values is read as before
+- Parser: `and` and `or` where an operand starts are identifiers, as in Dart Sass:
+  `$a: and;`, `f(and, or)`, `$a: and and and` and `@if not and` are no longer errors.
+  After an operand they stay operators, and one missing its right operand, as
+  `$a: 1 and;`, is still reported. In the indented syntax, an `@if` or `@while` line ending
+  with such an operand, `@if and`, no longer reads the lines beneath it as more of its
+  condition
 
 ## 0.4.0 — 2026-11-08
 

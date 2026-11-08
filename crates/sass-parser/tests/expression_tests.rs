@@ -3132,6 +3132,245 @@ fn calc_space_separated_values_past_nesting_limit() {
 }
 
 #[test]
+fn and_operand_is_an_identifier() {
+    check(
+        "$a: and;",
+        expect![[r#"
+        SOURCE_FILE@0..8
+          VARIABLE_DECL@0..8
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "a"
+            COLON@2..3 ":"
+            VALUE@3..7
+              WHITESPACE@3..4 " "
+              IDENT@4..7 "and"
+            SEMICOLON@7..8 ";"
+    "#]],
+    );
+}
+
+#[test]
+fn or_operand_is_an_identifier() {
+    check(
+        "$a: or 1;",
+        expect![[r#"
+        SOURCE_FILE@0..9
+          VARIABLE_DECL@0..9
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "a"
+            COLON@2..3 ":"
+            VALUE@3..6
+              WHITESPACE@3..4 " "
+              IDENT@4..6 "or"
+            NUMBER_LITERAL@6..8
+              WHITESPACE@6..7 " "
+              NUMBER@7..8 "1"
+            SEMICOLON@8..9 ";"
+    "#]],
+    );
+}
+
+#[test]
+fn and_between_and_operands() {
+    check(
+        "$a: and and and;",
+        expect![[r#"
+        SOURCE_FILE@0..16
+          VARIABLE_DECL@0..16
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "a"
+            COLON@2..3 ":"
+            BINARY_EXPR@3..15
+              VALUE@3..7
+                WHITESPACE@3..4 " "
+                IDENT@4..7 "and"
+              WHITESPACE@7..8 " "
+              IDENT@8..11 "and"
+              VALUE@11..15
+                WHITESPACE@11..12 " "
+                IDENT@12..15 "and"
+            SEMICOLON@15..16 ";"
+    "#]],
+    );
+}
+
+#[test]
+fn and_or_as_arguments_and_in_parens() {
+    check(
+        "$a: f(and, or) (and);",
+        expect![[r#"
+        SOURCE_FILE@0..21
+          VARIABLE_DECL@0..21
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "a"
+            COLON@2..3 ":"
+            FUNCTION_CALL@3..14
+              WHITESPACE@3..4 " "
+              IDENT@4..5 "f"
+              ARG_LIST@5..14
+                LPAREN@5..6 "("
+                ARG@6..9
+                  VALUE@6..9
+                    IDENT@6..9 "and"
+                COMMA@9..10 ","
+                ARG@10..13
+                  VALUE@10..13
+                    WHITESPACE@10..11 " "
+                    IDENT@11..13 "or"
+                RPAREN@13..14 ")"
+            PAREN_EXPR@14..20
+              WHITESPACE@14..15 " "
+              LPAREN@15..16 "("
+              VALUE@16..19
+                IDENT@16..19 "and"
+              RPAREN@19..20 ")"
+            SEMICOLON@20..21 ";"
+    "#]],
+    );
+}
+
+#[test]
+fn not_applies_to_an_and_operand() {
+    check(
+        "@if not and { }",
+        expect![[r#"
+        SOURCE_FILE@0..15
+          IF_RULE@0..15
+            AT@0..1 "@"
+            IDENT@1..3 "if"
+            UNARY_EXPR@3..11
+              WHITESPACE@3..4 " "
+              IDENT@4..7 "not"
+              VALUE@7..11
+                WHITESPACE@7..8 " "
+                IDENT@8..11 "and"
+            BLOCK@11..15
+              WHITESPACE@11..12 " "
+              LBRACE@12..13 "{"
+              WHITESPACE@13..14 " "
+              RBRACE@14..15 "}"
+    "#]],
+    );
+}
+
+#[test]
+fn if_condition_and_is_an_identifier() {
+    check(
+        "@if and { }",
+        expect![[r#"
+        SOURCE_FILE@0..11
+          IF_RULE@0..11
+            AT@0..1 "@"
+            IDENT@1..3 "if"
+            VALUE@3..7
+              WHITESPACE@3..4 " "
+              IDENT@4..7 "and"
+            BLOCK@7..11
+              WHITESPACE@7..8 " "
+              LBRACE@8..9 "{"
+              WHITESPACE@9..10 " "
+              RBRACE@10..11 "}"
+    "#]],
+    );
+}
+
+#[test]
+fn and_missing_its_right_operand_is_one_error() {
+    check(
+        "$a: 1 and; $b: c;",
+        expect![[r#"
+        SOURCE_FILE@0..17
+          VARIABLE_DECL@0..10
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "a"
+            COLON@2..3 ":"
+            BINARY_EXPR@3..9
+              NUMBER_LITERAL@3..5
+                WHITESPACE@3..4 " "
+                NUMBER@4..5 "1"
+              WHITESPACE@5..6 " "
+              IDENT@6..9 "and"
+            SEMICOLON@9..10 ";"
+          VARIABLE_DECL@10..17
+            WHITESPACE@10..11 " "
+            DOLLAR@11..12 "$"
+            IDENT@12..13 "b"
+            COLON@13..14 ":"
+            VALUE@14..16
+              WHITESPACE@14..15 " "
+              IDENT@15..16 "c"
+            SEMICOLON@16..17 ";"
+        errors:
+          9..10: expected expression
+    "#]],
+    );
+}
+
+#[test]
+fn or_missing_its_right_operand_in_brackets_is_one_error() {
+    check(
+        "$a: [and or]; $b: c;",
+        expect![[r#"
+        SOURCE_FILE@0..20
+          VARIABLE_DECL@0..13
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "a"
+            COLON@2..3 ":"
+            BRACKETED_LIST@3..12
+              WHITESPACE@3..4 " "
+              LBRACKET@4..5 "["
+              BINARY_EXPR@5..11
+                VALUE@5..8
+                  IDENT@5..8 "and"
+                WHITESPACE@8..9 " "
+                IDENT@9..11 "or"
+              RBRACKET@11..12 "]"
+            SEMICOLON@12..13 ";"
+          VARIABLE_DECL@13..20
+            WHITESPACE@13..14 " "
+            DOLLAR@14..15 "$"
+            IDENT@15..16 "b"
+            COLON@16..17 ":"
+            VALUE@17..19
+              WHITESPACE@17..18 " "
+              IDENT@18..19 "c"
+            SEMICOLON@19..20 ";"
+        errors:
+          11..12: expected expression
+    "#]],
+    );
+}
+
+#[test]
+fn not_missing_its_operand_is_one_error() {
+    check(
+        "$a: not; $b: c;",
+        expect![[r#"
+        SOURCE_FILE@0..15
+          VARIABLE_DECL@0..8
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "a"
+            COLON@2..3 ":"
+            UNARY_EXPR@3..7
+              WHITESPACE@3..4 " "
+              IDENT@4..7 "not"
+            SEMICOLON@7..8 ";"
+          VARIABLE_DECL@8..15
+            WHITESPACE@8..9 " "
+            DOLLAR@9..10 "$"
+            IDENT@10..11 "b"
+            COLON@11..12 ":"
+            VALUE@12..14
+              WHITESPACE@12..13 " "
+              IDENT@13..14 "c"
+            SEMICOLON@14..15 ";"
+        errors:
+          7..8: expected expression
+    "#]],
+    );
+}
+
+#[test]
 fn css_value_not_is_plain_ident() {
     // Regression: `not` was always parsed as unary prefix, even in CssValue context
     check(

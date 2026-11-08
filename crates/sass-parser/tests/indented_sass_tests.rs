@@ -3148,6 +3148,306 @@ fn function_named_url_in_another_case() {
 }
 
 #[test]
+fn if_condition_and_at_end_of_line_is_its_operand() {
+    check_tree(
+        "@if and\n  a\n    b: c\n",
+        expect![[r#"
+        SOURCE_FILE@0..21
+          IF_RULE@0..20
+            AT@0..1 "@"
+            IDENT@1..3 "if"
+            VALUE@3..7
+              WHITESPACE@3..4 " "
+              IDENT@4..7 "and"
+            BLOCK@7..20
+              LBRACE@7..7 ""
+              RULE_SET@7..20
+                SELECTOR_LIST@7..11
+                  SELECTOR@7..11
+                    SIMPLE_SELECTOR@7..11
+                      WHITESPACE@7..10 "\n  "
+                      IDENT@10..11 "a"
+                BLOCK@11..20
+                  LBRACE@11..11 ""
+                  DECLARATION@11..20
+                    PROPERTY@11..17
+                      WHITESPACE@11..16 "\n    "
+                      IDENT@16..17 "b"
+                    COLON@17..18 ":"
+                    VALUE@18..20
+                      VALUE@18..20
+                        WHITESPACE@18..19 " "
+                        IDENT@19..20 "c"
+                    SEMICOLON@20..20 ""
+                  RBRACE@20..20 ""
+              RBRACE@20..20 ""
+          WHITESPACE@20..21 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn if_condition_or_on_its_own_line() {
+    check_tree(
+        "@if\n  or\n  a\n    b: c\n",
+        expect![[r#"
+        SOURCE_FILE@0..22
+          IF_RULE@0..21
+            AT@0..1 "@"
+            IDENT@1..3 "if"
+            VALUE@3..8
+              WHITESPACE@3..6 "\n  "
+              IDENT@6..8 "or"
+            BLOCK@8..21
+              LBRACE@8..8 ""
+              RULE_SET@8..21
+                SELECTOR_LIST@8..12
+                  SELECTOR@8..12
+                    SIMPLE_SELECTOR@8..12
+                      WHITESPACE@8..11 "\n  "
+                      IDENT@11..12 "a"
+                BLOCK@12..21
+                  LBRACE@12..12 ""
+                  DECLARATION@12..21
+                    PROPERTY@12..18
+                      WHITESPACE@12..17 "\n    "
+                      IDENT@17..18 "b"
+                    COLON@18..19 ":"
+                    VALUE@19..21
+                      VALUE@19..21
+                        WHITESPACE@19..20 " "
+                        IDENT@20..21 "c"
+                    SEMICOLON@21..21 ""
+                  RBRACE@21..21 ""
+              RBRACE@21..21 ""
+          WHITESPACE@21..22 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn not_and_at_end_of_line_is_complete() {
+    check_tree(
+        "@if not and\n  a\n    b: c\n",
+        expect![[r#"
+        SOURCE_FILE@0..25
+          IF_RULE@0..24
+            AT@0..1 "@"
+            IDENT@1..3 "if"
+            UNARY_EXPR@3..11
+              WHITESPACE@3..4 " "
+              IDENT@4..7 "not"
+              VALUE@7..11
+                WHITESPACE@7..8 " "
+                IDENT@8..11 "and"
+            BLOCK@11..24
+              LBRACE@11..11 ""
+              RULE_SET@11..24
+                SELECTOR_LIST@11..15
+                  SELECTOR@11..15
+                    SIMPLE_SELECTOR@11..15
+                      WHITESPACE@11..14 "\n  "
+                      IDENT@14..15 "a"
+                BLOCK@15..24
+                  LBRACE@15..15 ""
+                  DECLARATION@15..24
+                    PROPERTY@15..21
+                      WHITESPACE@15..20 "\n    "
+                      IDENT@20..21 "b"
+                    COLON@21..22 ":"
+                    VALUE@22..24
+                      VALUE@22..24
+                        WHITESPACE@22..23 " "
+                        IDENT@23..24 "c"
+                    SEMICOLON@24..24 ""
+                  RBRACE@24..24 ""
+              RBRACE@24..24 ""
+          WHITESPACE@24..25 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn and_after_an_operand_still_goes_on() {
+    check_tree(
+        "@if $b and\n  $b\n  a\n    b: c\n",
+        expect![[r#"
+        SOURCE_FILE@0..29
+          IF_RULE@0..28
+            AT@0..1 "@"
+            IDENT@1..3 "if"
+            BINARY_EXPR@3..15
+              VARIABLE_REF@3..6
+                WHITESPACE@3..4 " "
+                DOLLAR@4..5 "$"
+                IDENT@5..6 "b"
+              WHITESPACE@6..7 " "
+              IDENT@7..10 "and"
+              VARIABLE_REF@10..15
+                WHITESPACE@10..13 "\n  "
+                DOLLAR@13..14 "$"
+                IDENT@14..15 "b"
+            BLOCK@15..28
+              LBRACE@15..15 ""
+              RULE_SET@15..28
+                SELECTOR_LIST@15..19
+                  SELECTOR@15..19
+                    SIMPLE_SELECTOR@15..19
+                      WHITESPACE@15..18 "\n  "
+                      IDENT@18..19 "a"
+                BLOCK@19..28
+                  LBRACE@19..19 ""
+                  DECLARATION@19..28
+                    PROPERTY@19..25
+                      WHITESPACE@19..24 "\n    "
+                      IDENT@24..25 "b"
+                    COLON@25..26 ":"
+                    VALUE@26..28
+                      VALUE@26..28
+                        WHITESPACE@26..27 " "
+                        IDENT@27..28 "c"
+                    SEMICOLON@28..28 ""
+                  RBRACE@28..28 ""
+              RBRACE@28..28 ""
+          WHITESPACE@28..29 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn variable_value_and_is_an_identifier() {
+    check_tree(
+        "$a: and\na\n  b: $a\n",
+        expect![[r#"
+        SOURCE_FILE@0..18
+          VARIABLE_DECL@0..7
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "a"
+            COLON@2..3 ":"
+            VALUE@3..7
+              WHITESPACE@3..4 " "
+              IDENT@4..7 "and"
+            SEMICOLON@7..7 ""
+          RULE_SET@7..17
+            SELECTOR_LIST@7..9
+              SELECTOR@7..9
+                SIMPLE_SELECTOR@7..9
+                  WHITESPACE@7..8 "\n"
+                  IDENT@8..9 "a"
+            BLOCK@9..17
+              LBRACE@9..9 ""
+              DECLARATION@9..17
+                PROPERTY@9..13
+                  WHITESPACE@9..12 "\n  "
+                  IDENT@12..13 "b"
+                COLON@13..14 ":"
+                VALUE@14..17
+                  VARIABLE_REF@14..17
+                    WHITESPACE@14..15 " "
+                    DOLLAR@15..16 "$"
+                    IDENT@16..17 "a"
+                SEMICOLON@17..17 ""
+              RBRACE@17..17 ""
+          WHITESPACE@17..18 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn and_after_a_percentage_goes_on() {
+    check_tree(
+        "@if 10% and\n  $b\n  a\n    b: c\n",
+        expect![[r#"
+        SOURCE_FILE@0..30
+          IF_RULE@0..29
+            AT@0..1 "@"
+            IDENT@1..3 "if"
+            BINARY_EXPR@3..16
+              DIMENSION@3..7
+                WHITESPACE@3..4 " "
+                NUMBER@4..6 "10"
+                PERCENT@6..7 "%"
+              WHITESPACE@7..8 " "
+              IDENT@8..11 "and"
+              VARIABLE_REF@11..16
+                WHITESPACE@11..14 "\n  "
+                DOLLAR@14..15 "$"
+                IDENT@15..16 "b"
+            BLOCK@16..29
+              LBRACE@16..16 ""
+              RULE_SET@16..29
+                SELECTOR_LIST@16..20
+                  SELECTOR@16..20
+                    SIMPLE_SELECTOR@16..20
+                      WHITESPACE@16..19 "\n  "
+                      IDENT@19..20 "a"
+                BLOCK@20..29
+                  LBRACE@20..20 ""
+                  DECLARATION@20..29
+                    PROPERTY@20..26
+                      WHITESPACE@20..25 "\n    "
+                      IDENT@25..26 "b"
+                    COLON@26..27 ":"
+                    VALUE@27..29
+                      VALUE@27..29
+                        WHITESPACE@27..28 " "
+                        IDENT@28..29 "c"
+                    SEMICOLON@29..29 ""
+                  RBRACE@29..29 ""
+              RBRACE@29..29 ""
+          WHITESPACE@29..30 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn and_after_a_variable_named_like_an_end_word_goes_on() {
+    check_tree(
+        "@if $from and\n  $b\n  a\n    b: c\n",
+        expect![[r#"
+        SOURCE_FILE@0..32
+          IF_RULE@0..31
+            AT@0..1 "@"
+            IDENT@1..3 "if"
+            BINARY_EXPR@3..18
+              VARIABLE_REF@3..9
+                WHITESPACE@3..4 " "
+                DOLLAR@4..5 "$"
+                IDENT@5..9 "from"
+              WHITESPACE@9..10 " "
+              IDENT@10..13 "and"
+              VARIABLE_REF@13..18
+                WHITESPACE@13..16 "\n  "
+                DOLLAR@16..17 "$"
+                IDENT@17..18 "b"
+            BLOCK@18..31
+              LBRACE@18..18 ""
+              RULE_SET@18..31
+                SELECTOR_LIST@18..22
+                  SELECTOR@18..22
+                    SIMPLE_SELECTOR@18..22
+                      WHITESPACE@18..21 "\n  "
+                      IDENT@21..22 "a"
+                BLOCK@22..31
+                  LBRACE@22..22 ""
+                  DECLARATION@22..31
+                    PROPERTY@22..28
+                      WHITESPACE@22..27 "\n    "
+                      IDENT@27..28 "b"
+                    COLON@28..29 ":"
+                    VALUE@29..31
+                      VALUE@29..31
+                        WHITESPACE@29..30 " "
+                        IDENT@30..31 "c"
+                    SEMICOLON@31..31 ""
+                  RBRACE@31..31 ""
+              RBRACE@31..31 ""
+          WHITESPACE@31..32 "\n"
+    "#]],
+    );
+}
+
+#[test]
 fn page_rule_selector_list() {
     check_tree(
         "@page toc, index:blank\n  margin: 1in\n",
