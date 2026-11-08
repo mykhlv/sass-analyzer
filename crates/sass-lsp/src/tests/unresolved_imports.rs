@@ -132,7 +132,6 @@ async fn builtin_scheme_and_plain_css_urls_are_not_errors() {
     let text = concat!(
         "@use \"sass:math\";\n",
         "@use \"pkg:bootstrap\";\n",
-        "@use \"other.css\";\n",
         "@import \"a.css\";\n",
         "@import url(b);\n",
         "@import url(\"c\");\n",
@@ -447,4 +446,39 @@ async fn turning_the_report_off_clears_the_error() {
     .await;
     let diags = next_diagnostics(&mut reader, &mut writer, &uri).await;
     assert!(diags.is_empty(), "{diags:#?}");
+}
+
+#[tokio::test]
+async fn css_url_resolves_to_its_file() {
+    let dir = TempDir::new("css_url");
+    let reset = dir.write("reset.css", "a { b: c; }\n");
+    let theme = dir.write("_theme.css", "a { b: c; }\n");
+    let text = "@use \"reset.css\";\n@forward \"theme.css\";\n";
+    let (mut reader, mut writer, uri, diags) = open_in(&dir, "main.scss", text).await;
+    assert!(diags.is_empty(), "{diags:#?}");
+    let def = definition_of(&mut reader, &mut writer, &uri, 0, 8).await;
+    assert_eq!(def["uri"], file_uri(&reset), "{def}");
+    let def = definition_of(&mut reader, &mut writer, &uri, 1, 12).await;
+    assert_eq!(def["uri"], file_uri(&theme), "{def}");
+}
+
+/// Dart Sass loads the file a `@use` or `@forward` of a `.css` URL names, and fails
+/// when there is none; an `@import` of one is left to the browser. `x.CSS` is not a
+/// CSS URL to Dart Sass, so an `@import` of it is looked up and reported too.
+#[tokio::test]
+async fn missing_css_file_is_an_error_for_use_and_forward_only() {
+    let dir = TempDir::new("css_missing");
+    let text = concat!(
+        "@use \"nope.css\";\n",
+        "@forward \"gone.css\";\n",
+        "@import \"plain.css\";\n",
+        "@import \"upper.CSS\";\n",
+    );
+    let (_r, _w, _uri, diags) = open_in(&dir, "main.scss", text).await;
+    let ranges: Vec<_> = not_found(&diags).into_iter().map(range_of).collect();
+    assert_eq!(
+        ranges,
+        [(0, 5, 0, 15), (1, 9, 1, 19), (3, 8, 3, 19)],
+        "{diags:#?}"
+    );
 }

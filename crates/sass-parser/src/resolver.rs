@@ -8,7 +8,8 @@ use crate::vfs::{OsFileSystem, Vfs};
 pub enum ResolvedModule {
     /// A file on disk (absolute path).
     File(PathBuf),
-    /// A plain CSS import — no file lookup needed.
+    /// A plain CSS `@import` of a `.css` URL with no file behind it, left to the
+    /// browser as Dart Sass leaves it.
     Css(String),
     /// A built-in Sass module (`sass:math`, etc.).
     Builtin(BuiltinModule),
@@ -161,6 +162,7 @@ impl<V: Vfs> ModuleResolver<V> {
         self.resolve_in_context(spec, base, true)
     }
 
+    #[allow(clippy::case_sensitive_file_extension_comparisons)]
     fn resolve_in_context(
         &self,
         spec: &str,
@@ -174,42 +176,40 @@ impl<V: Vfs> ModuleResolver<V> {
                 .ok_or_else(|| ResolveError::UnknownBuiltin(name.to_owned()));
         }
 
-        // 2. Plain CSS imports
-        if Path::new(spec)
-            .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("css"))
-        {
-            return Ok(ResolvedModule::Css(spec.to_owned()));
-        }
-
         // The URL names a path the way a URL does: `%20` is a space.
         let decoded = percent_decode(spec);
 
-        // 3. Import aliases
+        // 2. Import aliases
         if let Some(path) = self.resolve_alias(&decoded, base, for_import) {
             return Ok(ResolvedModule::File(path));
         }
 
-        // 4. Resolve relative to the base file's directory
+        // 3. Resolve relative to the base file's directory
         let base_dir = base.parent().unwrap_or(Path::new("."));
         if let Some(path) = self.resolve_in_dir(base_dir, &decoded, for_import) {
             return Ok(ResolvedModule::File(path));
         }
 
-        // 5. Try each load path
+        // 4. Try each load path
         for load_path in &self.load_paths {
             if let Some(path) = self.resolve_in_dir(load_path, &decoded, for_import) {
                 return Ok(ResolvedModule::File(path));
             }
         }
 
-        // 6. Walk up node_modules
+        // 5. Walk up node_modules
         if self.node_modules_enabled
             && let Some(path) = self.resolve_node_modules(&decoded, base, for_import)
         {
             return Ok(ResolvedModule::File(path));
         }
 
+        // 6. A `.css` URL that names no file: an `@import` of it is plain CSS, while
+        // `@use` and `@forward` load the file and fail without one. The extension is
+        // compared case-sensitively, as Dart Sass compares it.
+        if for_import && spec.ends_with(".css") {
+            return Ok(ResolvedModule::Css(spec.to_owned()));
+        }
         Err(ResolveError::NotFound(spec.to_owned()))
     }
 
@@ -218,15 +218,14 @@ impl<V: Vfs> ModuleResolver<V> {
     /// and `.sass` before `.css`; then the directory's `index` file. In an `@import`,
     /// each step tries the import-only file (`name.import.scss`) first. Where Dart
     /// Sass reports several candidates as ambiguous, the first is picked, a
-    /// non-partial `.scss` file first, so the import does not look missing.
+    /// non-partial `.scss` file first, so the import does not look missing. Extensions
+    /// are compared case-sensitively, as Dart Sass compares them.
     fn resolve_in_dir(&self, dir: &Path, spec: &str, for_import: bool) -> Option<PathBuf> {
         let path = dir.join(spec);
         let name = path.file_name()?.to_str()?;
 
         if let Some((stem, ext)) = name.rsplit_once('.')
-            && ["scss", "sass", "css"]
-                .iter()
-                .any(|known| ext.eq_ignore_ascii_case(known))
+            && ["scss", "sass", "css"].contains(&ext)
         {
             if for_import
                 && let Some(found) =
