@@ -2584,6 +2584,54 @@ fn a_semicolon_on_a_line_of_its_own_is_one_error() {
     );
 }
 
+#[test]
+fn a_semicolon_after_a_line_already_reported_is_not_reported_again() {
+    check(
+        "a\n  k: a,\n    b;\n  d: e\n",
+        expect![[r#"
+        SOURCE_FILE@0..24
+          RULE_SET@0..23
+            SELECTOR_LIST@0..1
+              SELECTOR@0..1
+                SIMPLE_SELECTOR@0..1
+                  IDENT@0..1 "a"
+            BLOCK@1..23
+              LBRACE@1..1 ""
+              NESTED_PROPERTY@1..16
+                PROPERTY@1..5
+                  WHITESPACE@1..4 "\n  "
+                  IDENT@4..5 "k"
+                COLON@5..6 ":"
+                VALUE@6..9
+                  VALUE@6..8
+                    WHITESPACE@6..7 " "
+                    IDENT@7..8 "a"
+                  COMMA@8..9 ","
+                BLOCK@9..16
+                  LBRACE@9..9 ""
+                  ERROR@9..16
+                    WHITESPACE@9..14 "\n    "
+                    IDENT@14..15 "b"
+                    SEMICOLON@15..16 ";"
+                  SEMICOLON@16..16 ""
+                  RBRACE@16..16 ""
+              DECLARATION@16..23
+                PROPERTY@16..20
+                  WHITESPACE@16..19 "\n  "
+                  IDENT@19..20 "d"
+                COLON@20..21 ":"
+                VALUE@21..23
+                  VALUE@21..23
+                    WHITESPACE@21..22 " "
+                    IDENT@22..23 "e"
+                SEMICOLON@23..23 ""
+              RBRACE@23..23 ""
+          WHITESPACE@23..24 "\n"
+        error 14..15: expected declaration
+    "#]],
+    );
+}
+
 // ── Line endings ─────────────────────────────────────────────────────
 
 /// The tree of `source` with its ranges and token texts left out, and its errors' messages:

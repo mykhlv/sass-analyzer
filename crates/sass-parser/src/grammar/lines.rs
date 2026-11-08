@@ -154,6 +154,9 @@ pub(crate) fn err_line(p: &mut Parser<'_>, message: &str, report: bool) {
         p.error(message);
     }
     skip_line(p);
+    if !p.braced() && p.at(SEMICOLON) && !p.current_text().is_empty() {
+        p.bump();
+    }
     if p.at(LBRACE) {
         super::block(p);
     }
