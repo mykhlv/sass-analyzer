@@ -68,8 +68,9 @@ fn check_missing_imports(
 ///
 /// A `value` that names a pseudo-class or a legacy single-colon pseudo-element, as in
 /// `a:hover` or `a:not(.b)`, is a selector written as one and is left alone, and so is
-/// `::`. A vendor-prefixed value is taken as a pseudo-class unless `name` is a CSS
-/// property, as `-webkit-autofill` after `input` but not `-webkit-box` after `display`.
+/// `::`, unless `name` is a CSS property: `cursor:default` warns, `input:default` does
+/// not. A vendor-prefixed value is taken as a pseudo-class on the same terms, as
+/// `-webkit-autofill` after `input` but not `-webkit-box` after `display`.
 /// Parentheses alone prove nothing: `width:calc(1px)` is a declaration.
 fn check_colon_selectors(root: &SyntaxNode, out: &mut Vec<SemanticDiagnostic>) {
     for rule in root
@@ -159,32 +160,34 @@ fn names_pseudo_selector(name: &str, pseudo: &SyntaxNode) -> bool {
         return false;
     };
     let value = value.text().to_ascii_lowercase();
-    if value.starts_with('-') {
-        return crate::css_properties::CSS_PROPERTIES
-            .binary_search(&name.to_ascii_lowercase().as_str())
-            .is_err();
-    }
-    PSEUDO_SELECTORS.binary_search(&value.as_str()).is_ok()
+    // `cursor:default`: a CSS property's name before the colon makes a declaration far
+    // more likely, in an empty rule, than an element of that name.
+    let property = crate::css_properties::CSS_PROPERTIES
+        .binary_search(&name.to_ascii_lowercase().as_str())
+        .is_ok();
+    !property && (value.starts_with('-') || PSEUDO_SELECTORS.binary_search(&value.as_str()).is_ok())
 }
 
 /// Pseudo-classes, and the pseudo-elements browsers also accept after a single colon.
 /// Sorted. The `@page` ones (`:left`, `:right`, `:first`) are left out: in a style
 /// rule they read as `float:left` with its space missing.
+/// Those of CSS Modules (`:export`, `:import`, `:global`, `:local`) and Vue's `:deep` too.
 #[rustfmt::skip]
 const PSEUDO_SELECTORS: &[&str] = &[
-    "active", "after", "any", "any-link", "autofill", "backdrop", "before", "blank",
-    "buffering", "checked", "closed", "current", "default", "defined", "dir", "disabled",
-    "empty", "enabled", "first-child", "first-letter", "first-line", "first-of-type",
-    "focus", "focus-visible", "focus-within", "fullscreen", "future", "global", "has",
-    "host", "host-context", "hover", "in-range", "indeterminate", "invalid", "is", "lang",
-    "last-child", "last-of-type", "link", "local", "local-link", "marker", "matches",
-    "modal", "muted", "not", "nth-child", "nth-col", "nth-last-child", "nth-last-col",
-    "nth-last-of-type", "nth-of-type", "only-child", "only-of-type", "open", "optional",
-    "out-of-range", "part", "past", "paused", "picture-in-picture", "placeholder",
-    "placeholder-shown", "playing", "popover-open", "read-only", "read-write", "required",
-    "root", "scope", "seeking", "selection", "slotted", "stalled", "state", "target",
-    "target-within", "user-invalid", "user-valid", "valid", "visited", "volume-locked",
-    "where",
+    "active", "active-view-transition", "active-view-transition-type", "after", "any",
+    "any-link", "autofill", "backdrop", "before", "blank", "buffering", "checked", "closed",
+    "current", "deep", "default", "defined", "dir", "disabled", "empty", "enabled",
+    "export", "first-child", "first-letter", "first-line", "first-of-type", "focus",
+    "focus-visible", "focus-within", "fullscreen", "future", "global", "has",
+    "has-slotted", "heading", "host", "host-context", "hover", "import", "in-range",
+    "indeterminate", "invalid", "is", "lang", "last-child", "last-of-type", "link", "local",
+    "local-link", "marker", "matches", "modal", "muted", "not", "nth-child", "nth-col",
+    "nth-last-child", "nth-last-col", "nth-last-of-type", "nth-of-type", "only-child",
+    "only-of-type", "open", "optional", "out-of-range", "part", "past", "paused",
+    "picture-in-picture", "placeholder", "placeholder-shown", "playing", "popover-open",
+    "read-only", "read-write", "required", "root", "scope", "seeking", "selection",
+    "slotted", "stalled", "state", "target", "target-within", "user-invalid", "user-valid",
+    "valid", "visited", "volume-locked", "where", "xr-overlay",
 ];
 
 // ── Argument count checking ─────────────────────────────────────────

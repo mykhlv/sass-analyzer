@@ -646,6 +646,15 @@ async fn semantic_colon_rule_not_reported_for_pseudo_selectors() {
         "p:before",
         "input:-webkit-autofill",
         "a:HOVER",
+        "input:default",
+        "div:deep(.x)",
+        "a:export",
+        ":import(\"a\")",
+        "html:active-view-transition",
+        "html:active-view-transition-type(slide)",
+        "div:heading",
+        "div:xr-overlay",
+        "slot:has-slotted",
     ]
     .into_iter()
     .enumerate()
@@ -666,6 +675,9 @@ async fn semantic_colon_rule_reported_for_values() {
         "color:red",
         "width:calc(100% - 1px)",
         "display:-webkit-box",
+        "cursor:default",
+        "cursor:pointer",
+        "content:empty",
         "margin-#{$s}:red",
         "#{$p}-top:red",
     ]

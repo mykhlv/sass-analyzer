@@ -67,8 +67,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   out of its rule
 - Indented Sass: the warning that a nested `name:value` rule is likely a declaration
   missing its space after `:` is no longer given for a pseudo selector, as an empty
-  `a:hover`, `li:first-child`, `a:not(.b)` or `input:-webkit-autofill`. It is now given
-  for an interpolated name, as `margin-#{$side}:auto`
+  `a:hover`, `li:first-child`, `a:not(.b)` or `input:-webkit-autofill`, nor for those of
+  CSS Modules and Vue, as `:export` or `div:deep(.x)`, `:active-view-transition`,
+  `:heading` or `:xr-overlay`. It is now given for an interpolated name, as
+  `margin-#{$side}:auto`, and for a CSS property's name before a pseudo-class's, as
+  `cursor:default`, while `input:default` stays silent
 - Parser: a mistake inside a bracket — an argument list, a parameter list, the
   configuration of `@use` or `@forward ... with (...)`, a parenthesized list or map, a
   bracketed list or an interpolation — is one error, and what could not be read up to
