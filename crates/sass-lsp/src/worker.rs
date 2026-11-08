@@ -31,12 +31,13 @@ pub(crate) fn is_sass_file(uri: &Uri) -> bool {
 }
 
 /// Whether `uri` names a plain CSS file, which an import may load but which is no
-/// Sass module of its own. Case-sensitive, as [`is_sass_file`] is.
-#[allow(clippy::case_sensitive_file_extension_comparisons)]
+/// Sass module of its own. In any case, as the watcher's `**/*.css` may match on a
+/// case-insensitive file system: `Foo.CSS` is no Sass module either. An import URL's
+/// `.css` is matched case-sensitively, as Dart Sass does, by the resolver.
 pub(crate) fn is_css_file(uri: &Uri) -> bool {
     let s = uri.as_str();
-    let path_end = s.find(['?', '#']).unwrap_or(s.len());
-    s[..path_end].ends_with(".css")
+    let path = &s[..s.find(['?', '#']).unwrap_or(s.len())];
+    path.len() >= 4 && path.as_bytes()[path.len() - 4..].eq_ignore_ascii_case(b".css")
 }
 
 pub(crate) fn parse_document(
@@ -649,6 +650,20 @@ mod tests {
     fn is_sass_file_css_extension() {
         let uri: Uri = "file:///project/styles.css".parse().unwrap();
         assert!(!is_sass_file(&uri));
+    }
+
+    #[test]
+    fn is_css_file_in_any_case() {
+        for uri in [
+            "file:///p/a.css",
+            "file:///p/Foo.CSS",
+            "file:///p/b.Css?x=1",
+        ] {
+            let uri: Uri = uri.parse().unwrap();
+            assert!(is_css_file(&uri), "{uri:?}");
+        }
+        let uri: Uri = "file:///p/a.scss".parse().unwrap();
+        assert!(!is_css_file(&uri));
     }
 
     #[test]

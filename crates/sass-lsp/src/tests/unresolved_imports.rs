@@ -680,6 +680,47 @@ async fn creating_a_css_file_clears_the_error() {
     );
 }
 
+/// A watcher may match `**/*.css` regardless of case, as on macOS and Windows: a change
+/// to `Foo.CSS` is a CSS file's too, and is not read as a Sass module.
+#[tokio::test]
+async fn changed_css_file_in_upper_case_is_not_indexed() {
+    let dir = TempDir::new("css_upper");
+    let text = "@use \"later\";\n";
+    let (mut reader, mut writer, uri, diags) = open_in(&dir, "main.scss", text).await;
+    assert_eq!(not_found(&diags).len(), 1, "{diags:#?}");
+    let css = file_uri(&dir.write("Foo.CSS", "$leak: 1;\n"));
+    let later = file_uri(&dir.write("_later.scss", "a { b: c; }\n"));
+    // Handled in order: once the error clears, the change to `Foo.CSS` has been too.
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "workspace/didChangeWatchedFiles",
+            "params": { "changes": [
+                { "uri": css, "type": 2 },
+                { "uri": later, "type": 1 },
+            ] }
+        }),
+    )
+    .await;
+    let diags = next_diagnostics(&mut reader, &mut writer, &uri).await;
+    assert!(diags.is_empty(), "{diags:#?}");
+
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0", "id": 903, "method": "workspace/symbol",
+            "params": { "query": "leak" }
+        }),
+    )
+    .await;
+    let symbols = recv_response(&mut reader, &mut writer, 903).await;
+    assert!(
+        symbols["result"].as_array().is_none_or(Vec::is_empty),
+        "{symbols}"
+    );
+}
+
 #[tokio::test]
 async fn deleting_an_imported_css_file_reports_the_error() {
     let dir = TempDir::new("css_deleted");
