@@ -161,16 +161,35 @@ impl<'src> Parser<'src> {
     }
 
     /// [`Parser::continue_line`], across blank lines too if the line after them starts
-    /// with one of `starts`, as an operator's operand does.
+    /// with one of `starts`, as an operator's operand does, and not like a declaration
+    /// (`name:`), which is no operand.
     #[inline]
     pub fn continue_line_to(&mut self, starts: TokenSet) -> bool {
         if self.layout != super::Layout::Indented {
             return false;
         }
-        let line = self.indented.line;
-        let across_blank =
-            line.index < self.input.len() && starts.contains(self.input.kind(line.index));
+        let index = self.indented.line.index;
+        let across_blank = index < self.input.len()
+            && starts.contains(self.input.kind(index))
+            && !self.starts_declaration(index);
         self.absorb_line_breaks(across_blank)
+    }
+
+    /// When the token at the cursor ends its line: whether the line that
+    /// [`Parser::continue_line_to`] goes on to after it, past any blank lines, starts like
+    /// a declaration (`name:`). Always false when braced.
+    pub fn next_line_starts_declaration(&self) -> bool {
+        let line = self.indented.line;
+        self.layout == super::Layout::Indented
+            && line.index == self.pos + 1
+            && line.next < line.end
+            && self.starts_declaration(line.index)
+    }
+
+    fn starts_declaration(&self, index: usize) -> bool {
+        index + 1 < self.input.len()
+            && self.input.kind(index) == SyntaxKind::IDENT
+            && self.input.kind(index + 1) == SyntaxKind::COLON
     }
 
     /// Declare how the header of the statement being parsed goes on across lines (see

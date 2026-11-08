@@ -109,8 +109,8 @@ pub(crate) enum WordOperator {
     /// At the end of its line: Dart takes the next line as its operand.
     GoesOn,
     /// At the end of its line, before a line that starts like a declaration (`name:`),
-    /// which cannot be its operand — Dart rejects it. The line is left a statement of its
-    /// own, and the operator is missing its operand.
+    /// blank lines between or not, which cannot be its operand — Dart rejects it. The
+    /// line is left a statement of its own, and the operator is missing its operand.
     NoOperand,
 }
 
@@ -126,8 +126,7 @@ pub(crate) fn word_operator(p: &Parser<'_>, operand_before: bool) -> WordOperato
     if !operator || !matches!(p.nth(1), SEMICOLON | LBRACE | RBRACE | EOF) {
         return WordOperator::No;
     }
-    let joined = p.joined(TokenSet::new(&[IDENT]));
-    if p.nth_joined(joined, 1) == IDENT && p.nth_joined(joined, 2) == COLON {
+    if p.next_line_starts_declaration() {
         WordOperator::NoOperand
     } else {
         WordOperator::GoesOn

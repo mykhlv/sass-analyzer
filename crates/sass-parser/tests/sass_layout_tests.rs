@@ -1267,6 +1267,9 @@ fn an_operator_goes_on_across_a_blank_line() {
         ".x\n  b: 1 -\n\n    2\n",
         ".x\n  b: c and\n\n    d\n",
         ".x\n  b: not\n\n    c\n",
+        ".x\n  b: c and\n\n  d\n",
+        ".x\n  b: not\n\n  c\n",
+        ".x\n  $a: 1 +\n\n  2\n  d: $a\n",
         "$i: 6\n@while $i >\n\n  5\n  $i: $i - 1\n",
     ] {
         let tree = render(parse_sass, source);
@@ -1543,6 +1546,120 @@ fn a_word_operator_before_a_declaration_is_one_error() {
                   RBRACE@24..24 ""
               WHITESPACE@24..25 "\n"
             error 17..17: expected expression after `not`
+        "#]],
+    );
+}
+
+/// Whether `source` has a declaration whose text is `text`, after its indentation.
+fn has_declaration(source: &str, text: &str) -> bool {
+    use sass_parser::syntax_kind::SyntaxKind;
+    let root = sass_parser::syntax::SyntaxNode::new_root(parse_sass(source).0);
+    root.descendants().any(|node| {
+        node.kind() == SyntaxKind::DECLARATION && node.text().to_string().trim() == text
+    })
+}
+
+/// The line an operator at the end of its line goes on to is the one after any blank
+/// lines: one that starts like a declaration is no operand there either. Dart Sass takes
+/// it in and reports `expected newline.` at its colon.
+#[test]
+fn an_operator_before_a_declaration_past_a_blank_line_is_one_error() {
+    for source in [
+        ".a\n  content: not\n\n  b: c\n",
+        ".a\n  content: 1 and\n\n  b: c\n",
+        ".a\n  content: 1 or\n\n  b: c\n",
+        ".a\n  content: not\n\n\n  b: c\n",
+        ".a\n  a: 1 +\n\n  b: c\n",
+        ".a\n  a: 1 -\n\n  b: c\n",
+        ".a\n  $a: 1 +\n\n  b: c\n",
+        ".a\n  $a: 1 *\n\n  b: c\n",
+    ] {
+        let tree = render(parse_sass, source);
+        assert_eq!(error_count(source), 1, "{source:?}:\n{tree}");
+        assert!(has_declaration(source, "b: c"), "{source:?}:\n{tree}");
+    }
+}
+
+#[test]
+fn a_word_operator_before_a_declaration_past_a_blank_line_is_one_error() {
+    check(
+        ".a\n  content: not\n\n  b: c\n",
+        expect![[r#"
+            SOURCE_FILE@0..26
+              RULE_SET@0..25
+                SELECTOR_LIST@0..2
+                  SELECTOR@0..2
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "a"
+                BLOCK@2..25
+                  LBRACE@2..2 ""
+                  DECLARATION@2..17
+                    PROPERTY@2..12
+                      WHITESPACE@2..5 "\n  "
+                      IDENT@5..12 "content"
+                    COLON@12..13 ":"
+                    VALUE@13..17
+                      VALUE@13..17
+                        WHITESPACE@13..14 " "
+                        IDENT@14..17 "not"
+                    SEMICOLON@17..17 ""
+                  DECLARATION@17..25
+                    PROPERTY@17..22
+                      WHITESPACE@17..21 "\n\n  "
+                      IDENT@21..22 "b"
+                    COLON@22..23 ":"
+                    VALUE@23..25
+                      VALUE@23..25
+                        WHITESPACE@23..24 " "
+                        IDENT@24..25 "c"
+                    SEMICOLON@25..25 ""
+                  RBRACE@25..25 ""
+              WHITESPACE@25..26 "\n"
+            error 17..17: expected expression after `not`
+        "#]],
+    );
+}
+
+#[test]
+fn an_operator_before_a_declaration_past_a_blank_line_leaves_it_a_statement() {
+    check(
+        ".a\n  $a: 1 +\n\n  b: c\n",
+        expect![[r#"
+            SOURCE_FILE@0..21
+              RULE_SET@0..20
+                SELECTOR_LIST@0..2
+                  SELECTOR@0..2
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "a"
+                BLOCK@2..20
+                  LBRACE@2..2 ""
+                  VARIABLE_DECL@2..12
+                    WHITESPACE@2..5 "\n  "
+                    DOLLAR@5..6 "$"
+                    IDENT@6..7 "a"
+                    COLON@7..8 ":"
+                    NUMBER_LITERAL@8..10
+                      WHITESPACE@8..9 " "
+                      NUMBER@9..10 "1"
+                    UNARY_EXPR@10..12
+                      WHITESPACE@10..11 " "
+                      PLUS@11..12 "+"
+                    SEMICOLON@12..12 ""
+                  DECLARATION@12..20
+                    PROPERTY@12..17
+                      WHITESPACE@12..16 "\n\n  "
+                      IDENT@16..17 "b"
+                    COLON@17..18 ":"
+                    VALUE@18..20
+                      VALUE@18..20
+                        WHITESPACE@18..19 " "
+                        IDENT@19..20 "c"
+                    SEMICOLON@20..20 ""
+                  RBRACE@20..20 ""
+              WHITESPACE@20..21 "\n"
+            error 12..12: expected expression
         "#]],
     );
 }

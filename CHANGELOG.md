@@ -24,12 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a condition after `@if`, and an argument after a word such as `in` or `as`. Each of
   these reported an error when a blank line came first. An operator's operand may also
   follow it after a blank line, as in `$a: 1 +` / (blank) / `2`, when that line starts
-  like an expression; before a line that does not, as a rule's `.b`, the operand is
-  still reported missing and the rule below is left alone
+  like an expression; before a line that does not, as a rule's `.b` or a declaration's
+  `b: c`, the operand is still reported missing and the line below is left alone
 - Indented Sass: a declaration value ending in `and`, `or` or `not` before a line that is
-  a declaration of its own, as `content: not` / `b: c`, reports the operator's missing
-  operand, as Dart Sass reports the form. It was accepted with no diagnostic. `and` or
-  `or` with nothing before it, as in `content: and`, is still a plain word
+  a declaration of its own, as `content: not` / `b: c`, blank lines between or not,
+  reports the operator's missing operand, as Dart Sass reports the form. It was accepted
+  with no diagnostic. `and` or `or` with nothing before it, as in `content: and`, is
+  still a plain word
 - Indented Sass: a nested property below a value that ends in a comma, as in `font: bold,`
   / `family: x`, is read as one, as in Dart Sass; it was silently taken into the value. A
   variable's value may follow its colon after a blank line, as in `$a:` / (blank) / `b`,
