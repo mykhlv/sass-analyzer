@@ -147,6 +147,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Parser: `@extend .b ! optional`, or `!` and `optional` on lines of their own, is one
   error after the `!`, as in Dart Sass, which takes the flag only when it is joined to its
   `!`. The braced syntax accepted it
+- Parser: an `@for` missing a part where its header ends, as `@for $i from {` or, in the
+  indented syntax, `@for $i from` / blank line / `.z`, is one error, as in Dart Sass; the
+  parts after it were reported missing too, three errors at one place. In the indented
+  syntax, `@for $i` goes on across blank lines only to a word, its `from`, so a rule
+  below stays a rule
 
 ## 0.4.0 — 2026-11-08
 

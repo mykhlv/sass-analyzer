@@ -1640,6 +1640,259 @@ fn extend_optional_after_a_space_is_one_error() {
 }
 
 #[test]
+fn for_missing_its_start_before_a_blank_line_is_one_error() {
+    check(
+        "@for $i from\n\n.z\n  a: b\n",
+        expect![[r#"
+        SOURCE_FILE@0..24
+          FOR_RULE@0..12
+            AT@0..1 "@"
+            IDENT@1..4 "for"
+            WHITESPACE@4..5 " "
+            DOLLAR@5..6 "$"
+            IDENT@6..7 "i"
+            WHITESPACE@7..8 " "
+            IDENT@8..12 "from"
+          SEMICOLON@12..12 ""
+          RULE_SET@12..23
+            SELECTOR_LIST@12..16
+              SELECTOR@12..16
+                SIMPLE_SELECTOR@12..16
+                  WHITESPACE@12..14 "\n\n"
+                  DOT@14..15 "."
+                  IDENT@15..16 "z"
+            BLOCK@16..23
+              LBRACE@16..16 ""
+              DECLARATION@16..23
+                PROPERTY@16..20
+                  WHITESPACE@16..19 "\n  "
+                  IDENT@19..20 "a"
+                COLON@20..21 ":"
+                VALUE@21..23
+                  VALUE@21..23
+                    WHITESPACE@21..22 " "
+                    IDENT@22..23 "b"
+                SEMICOLON@23..23 ""
+              RBRACE@23..23 ""
+          WHITESPACE@23..24 "\n"
+        error 12..12: expected expression
+    "#]],
+    );
+}
+
+#[test]
+fn for_missing_its_start_before_a_rule_is_one_error() {
+    check(
+        "@for $i from\n.z\n  a: b\n",
+        expect![[r#"
+        SOURCE_FILE@0..23
+          FOR_RULE@0..12
+            AT@0..1 "@"
+            IDENT@1..4 "for"
+            WHITESPACE@4..5 " "
+            DOLLAR@5..6 "$"
+            IDENT@6..7 "i"
+            WHITESPACE@7..8 " "
+            IDENT@8..12 "from"
+          SEMICOLON@12..12 ""
+          RULE_SET@12..22
+            SELECTOR_LIST@12..15
+              SELECTOR@12..15
+                SIMPLE_SELECTOR@12..15
+                  WHITESPACE@12..13 "\n"
+                  DOT@13..14 "."
+                  IDENT@14..15 "z"
+            BLOCK@15..22
+              LBRACE@15..15 ""
+              DECLARATION@15..22
+                PROPERTY@15..19
+                  WHITESPACE@15..18 "\n  "
+                  IDENT@18..19 "a"
+                COLON@19..20 ":"
+                VALUE@20..22
+                  VALUE@20..22
+                    WHITESPACE@20..21 " "
+                    IDENT@21..22 "b"
+                SEMICOLON@22..22 ""
+              RBRACE@22..22 ""
+          WHITESPACE@22..23 "\n"
+        error 12..12: expected expression
+    "#]],
+    );
+}
+
+#[test]
+fn for_missing_from_before_a_blank_line_is_one_error() {
+    check(
+        "@for $i\n\n.z\n  a: b\n",
+        expect![[r#"
+        SOURCE_FILE@0..19
+          FOR_RULE@0..7
+            AT@0..1 "@"
+            IDENT@1..4 "for"
+            WHITESPACE@4..5 " "
+            DOLLAR@5..6 "$"
+            IDENT@6..7 "i"
+          SEMICOLON@7..7 ""
+          RULE_SET@7..18
+            SELECTOR_LIST@7..11
+              SELECTOR@7..11
+                SIMPLE_SELECTOR@7..11
+                  WHITESPACE@7..9 "\n\n"
+                  DOT@9..10 "."
+                  IDENT@10..11 "z"
+            BLOCK@11..18
+              LBRACE@11..11 ""
+              DECLARATION@11..18
+                PROPERTY@11..15
+                  WHITESPACE@11..14 "\n  "
+                  IDENT@14..15 "a"
+                COLON@15..16 ":"
+                VALUE@16..18
+                  VALUE@16..18
+                    WHITESPACE@16..17 " "
+                    IDENT@17..18 "b"
+                SEMICOLON@18..18 ""
+              RBRACE@18..18 ""
+          WHITESPACE@18..19 "\n"
+        error 7..7: expected `from`
+    "#]],
+    );
+}
+
+#[test]
+fn for_missing_its_end_before_a_blank_line_is_one_error() {
+    check(
+        "@for $i from 1 through\n\n.z\n  a: b\n",
+        expect![[r#"
+        SOURCE_FILE@0..34
+          FOR_RULE@0..22
+            AT@0..1 "@"
+            IDENT@1..4 "for"
+            WHITESPACE@4..5 " "
+            DOLLAR@5..6 "$"
+            IDENT@6..7 "i"
+            WHITESPACE@7..8 " "
+            IDENT@8..12 "from"
+            NUMBER_LITERAL@12..14
+              WHITESPACE@12..13 " "
+              NUMBER@13..14 "1"
+            WHITESPACE@14..15 " "
+            IDENT@15..22 "through"
+          SEMICOLON@22..22 ""
+          RULE_SET@22..33
+            SELECTOR_LIST@22..26
+              SELECTOR@22..26
+                SIMPLE_SELECTOR@22..26
+                  WHITESPACE@22..24 "\n\n"
+                  DOT@24..25 "."
+                  IDENT@25..26 "z"
+            BLOCK@26..33
+              LBRACE@26..26 ""
+              DECLARATION@26..33
+                PROPERTY@26..30
+                  WHITESPACE@26..29 "\n  "
+                  IDENT@29..30 "a"
+                COLON@30..31 ":"
+                VALUE@31..33
+                  VALUE@31..33
+                    WHITESPACE@31..32 " "
+                    IDENT@32..33 "b"
+                SEMICOLON@33..33 ""
+              RBRACE@33..33 ""
+          WHITESPACE@33..34 "\n"
+        error 22..22: expected expression
+    "#]],
+    );
+}
+
+#[test]
+fn for_missing_from_before_a_rule_is_one_error() {
+    check(
+        "@for $i\n.z\n  a: b\n",
+        expect![[r#"
+        SOURCE_FILE@0..18
+          FOR_RULE@0..7
+            AT@0..1 "@"
+            IDENT@1..4 "for"
+            WHITESPACE@4..5 " "
+            DOLLAR@5..6 "$"
+            IDENT@6..7 "i"
+          ERROR@7..17
+            WHITESPACE@7..8 "\n"
+            DOT@8..9 "."
+            IDENT@9..10 "z"
+            BLOCK@10..17
+              LBRACE@10..10 ""
+              DECLARATION@10..17
+                PROPERTY@10..14
+                  WHITESPACE@10..13 "\n  "
+                  IDENT@13..14 "a"
+                COLON@14..15 ":"
+                VALUE@15..17
+                  VALUE@15..17
+                    WHITESPACE@15..16 " "
+                    IDENT@16..17 "b"
+                SEMICOLON@17..17 ""
+              RBRACE@17..17 ""
+          WHITESPACE@17..18 "\n"
+        error 8..9: expected `from`
+    "#]],
+    );
+}
+
+#[test]
+fn for_from_after_a_blank_line_goes_on() {
+    check(
+        "@for $i\n\n  from 1 through 3\n  .z\n    a: $i\n",
+        expect![[r#"
+        SOURCE_FILE@0..43
+          FOR_RULE@0..42
+            AT@0..1 "@"
+            IDENT@1..4 "for"
+            WHITESPACE@4..5 " "
+            DOLLAR@5..6 "$"
+            IDENT@6..7 "i"
+            WHITESPACE@7..11 "\n\n  "
+            IDENT@11..15 "from"
+            NUMBER_LITERAL@15..17
+              WHITESPACE@15..16 " "
+              NUMBER@16..17 "1"
+            WHITESPACE@17..18 " "
+            IDENT@18..25 "through"
+            NUMBER_LITERAL@25..27
+              WHITESPACE@25..26 " "
+              NUMBER@26..27 "3"
+            BLOCK@27..42
+              LBRACE@27..27 ""
+              RULE_SET@27..42
+                SELECTOR_LIST@27..32
+                  SELECTOR@27..32
+                    SIMPLE_SELECTOR@27..32
+                      WHITESPACE@27..30 "\n  "
+                      DOT@30..31 "."
+                      IDENT@31..32 "z"
+                BLOCK@32..42
+                  LBRACE@32..32 ""
+                  DECLARATION@32..42
+                    PROPERTY@32..38
+                      WHITESPACE@32..37 "\n    "
+                      IDENT@37..38 "a"
+                    COLON@38..39 ":"
+                    VALUE@39..42
+                      VARIABLE_REF@39..42
+                        WHITESPACE@39..40 " "
+                        DOLLAR@40..41 "$"
+                        IDENT@41..42 "i"
+                    SEMICOLON@42..42 ""
+                  RBRACE@42..42 ""
+              RBRACE@42..42 ""
+          WHITESPACE@42..43 "\n"
+    "#]],
+    );
+}
+
+#[test]
 fn a_mixin_name_after_a_blank_line_is_its_name() {
     check(
         "@mixin\n\n  foo\n  a: b\n",

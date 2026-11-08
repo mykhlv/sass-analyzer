@@ -5267,6 +5267,103 @@ fn extend_optional_after_a_space_is_one_error() {
     );
 }
 
+#[test]
+fn for_missing_its_start_is_one_error() {
+    check(
+        "@for $i from { a { b: c; } }",
+        expect![[r#"
+        SOURCE_FILE@0..28
+          FOR_RULE@0..28
+            AT@0..1 "@"
+            IDENT@1..4 "for"
+            WHITESPACE@4..5 " "
+            DOLLAR@5..6 "$"
+            IDENT@6..7 "i"
+            WHITESPACE@7..8 " "
+            IDENT@8..12 "from"
+            BLOCK@12..28
+              WHITESPACE@12..13 " "
+              LBRACE@13..14 "{"
+              RULE_SET@14..26
+                SELECTOR_LIST@14..16
+                  SELECTOR@14..16
+                    SIMPLE_SELECTOR@14..16
+                      WHITESPACE@14..15 " "
+                      IDENT@15..16 "a"
+                BLOCK@16..26
+                  WHITESPACE@16..17 " "
+                  LBRACE@17..18 "{"
+                  DECLARATION@18..24
+                    PROPERTY@18..20
+                      WHITESPACE@18..19 " "
+                      IDENT@19..20 "b"
+                    COLON@20..21 ":"
+                    VALUE@21..23
+                      VALUE@21..23
+                        WHITESPACE@21..22 " "
+                        IDENT@22..23 "c"
+                    SEMICOLON@23..24 ";"
+                  WHITESPACE@24..25 " "
+                  RBRACE@25..26 "}"
+              WHITESPACE@26..27 " "
+              RBRACE@27..28 "}"
+        errors:
+          13..14: expected expression
+    "#]],
+    );
+}
+
+#[test]
+fn for_missing_its_end_is_one_error() {
+    check(
+        "@for $i from 1 to { a { b: c; } }",
+        expect![[r#"
+        SOURCE_FILE@0..33
+          FOR_RULE@0..33
+            AT@0..1 "@"
+            IDENT@1..4 "for"
+            WHITESPACE@4..5 " "
+            DOLLAR@5..6 "$"
+            IDENT@6..7 "i"
+            WHITESPACE@7..8 " "
+            IDENT@8..12 "from"
+            NUMBER_LITERAL@12..14
+              WHITESPACE@12..13 " "
+              NUMBER@13..14 "1"
+            WHITESPACE@14..15 " "
+            IDENT@15..17 "to"
+            BLOCK@17..33
+              WHITESPACE@17..18 " "
+              LBRACE@18..19 "{"
+              RULE_SET@19..31
+                SELECTOR_LIST@19..21
+                  SELECTOR@19..21
+                    SIMPLE_SELECTOR@19..21
+                      WHITESPACE@19..20 " "
+                      IDENT@20..21 "a"
+                BLOCK@21..31
+                  WHITESPACE@21..22 " "
+                  LBRACE@22..23 "{"
+                  DECLARATION@23..29
+                    PROPERTY@23..25
+                      WHITESPACE@23..24 " "
+                      IDENT@24..25 "b"
+                    COLON@25..26 ":"
+                    VALUE@26..28
+                      VALUE@26..28
+                        WHITESPACE@26..27 " "
+                        IDENT@27..28 "c"
+                    SEMICOLON@28..29 ";"
+                  WHITESPACE@29..30 " "
+                  RBRACE@30..31 "}"
+              WHITESPACE@31..32 " "
+              RBRACE@32..33 "}"
+        errors:
+          18..19: expected expression
+    "#]],
+    );
+}
+
 // ── @page ───────────────────────────────────────────────────────────────
 
 #[test]

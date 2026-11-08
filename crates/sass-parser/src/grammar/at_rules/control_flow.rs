@@ -1,6 +1,7 @@
 use crate::parser::Parser;
 #[allow(clippy::wildcard_imports)]
 use crate::syntax_kind::*;
+use crate::token_set::TokenSet;
 
 /// `@if condition { } @else if condition { } @else { }`
 pub fn if_rule(p: &mut Parser<'_>) {
@@ -64,28 +65,45 @@ pub fn for_rule(p: &mut Parser<'_>) {
     p.bump(); // @
     p.bump(); // for
     p.continue_header(&super::lines::FOR);
+    let errors = p.error_count();
     p.expect(DOLLAR);
     p.expect(IDENT); // variable name
-    p.continue_line_across_blank();
+    // Across blank lines only to the `from` it requires: `@for $i` / blank / `.z` is
+    // missing it, before a rule.
+    p.continue_line_to(TokenSet::new(&[IDENT]));
+
+    // Once a part is missing where the statement ends, the parts after it are missing
+    // with it, as one error: `@for $i from` / `.z`.
+    let ended = |p: &Parser<'_>| {
+        p.error_count() > errors && (p.at(SEMICOLON) || p.at(LBRACE) || p.at(RBRACE) || p.at_end())
+    };
 
     // Expect `from`
-    if p.at(IDENT) && p.current_text() == "from" {
+    // Missing, `from` ends the header unless an expression follows, as in `@for $i 1 to 3`.
+    let mut from = p.at(IDENT) && p.current_text() == "from";
+    if from {
         p.bump();
     } else {
         p.error("expected `from`");
+        from = p.at_ts(super::expressions::EXPR_START);
     }
 
-    super::expressions::expr(p, super::ParseContext::SassScript);
-    p.continue_line_across_blank();
+    if from && !ended(p) {
+        super::expressions::expr(p, super::ParseContext::SassScript);
+        p.continue_line_across_blank();
+    }
 
     // Expect `through` or `to`
-    if p.at(IDENT) && (p.current_text() == "through" || p.current_text() == "to") {
+    if !from || ended(p) {
+    } else if p.at(IDENT) && (p.current_text() == "through" || p.current_text() == "to") {
         p.bump();
     } else {
         p.error("expected `through` or `to`");
     }
 
-    super::expressions::expr(p, super::ParseContext::SassScript);
+    if from && !ended(p) {
+        super::expressions::expr(p, super::ParseContext::SassScript);
+    }
 
     if p.at(LBRACE) {
         super::block(p);
