@@ -96,6 +96,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   value is the next declaration, missing the `;` before it: `color: red font-size: 14px`
   reports the `;` and parses both declarations. Colons that values hold stay valid:
   `progid:` filters, `url(a:b)`, strings, escapes, interpolation, custom properties
+- Parser: a `.` in a declaration's value that starts no number is reported, as Dart Sass
+  does. In the indented syntax, a word operator or `+` at the end of a line took a
+  selector line below, `content: not` / `.c`, for its operand, and the lines beneath it
+  for a nested property, with no error. A line below that is no operand, as `&:hover`,
+  `b: c` or `$b: 2`, now reports the one error Dart Sass gives there
 
 ## 0.4.0 — 2026-11-08
 

@@ -171,7 +171,26 @@ fn value(p: &mut Parser<'_>) {
             break;
         }
         if matches!(p.current(), COLON | RPAREN | RBRACKET) {
-            stray_in_value(p, has_content);
+            let message = if !has_content {
+                "expected expression"
+            } else if p.braced() {
+                "expected SEMICOLON"
+            } else {
+                "expected newline"
+            };
+            stray_in_value(p, message);
+            has_content = true;
+            break;
+        }
+        if p.at(DOT) {
+            // A `.` that starts no number. Joined to a word, it names a module's
+            // function, `math.div(...)`, whose `(` is missing.
+            let message = if p.prev_kind() == IDENT && !p.has_whitespace_before() {
+                "expected `(`"
+            } else {
+                "expected digit"
+            };
+            stray_in_value(p, message);
             has_content = true;
             break;
         }
@@ -218,18 +237,12 @@ fn at_next_declaration(p: &Parser<'_>) -> bool {
         && !p.current_text().eq_ignore_ascii_case("progid")
 }
 
-/// At a `:`, `)` or `]` in a value, which no value holds there: Dart Sass expects the
-/// declaration to end before it, or reads no value at all if it comes first. That is one
-/// error, which takes the rest of the value, up to where the declaration ends.
-fn stray_in_value(p: &mut Parser<'_>, has_content: bool) {
+/// At a token no value holds where it stands: a `:`, `)` or `]`, before which Dart Sass
+/// expects the declaration to end, or reads no value at all if it comes first, or a `.`
+/// that starts no number. That is one error, `message`, which takes the rest of the value,
+/// up to where the declaration ends.
+fn stray_in_value(p: &mut Parser<'_>, message: &str) {
     let m = p.start();
-    let message = if !has_content {
-        "expected expression"
-    } else if p.braced() {
-        "expected SEMICOLON"
-    } else {
-        "expected newline"
-    };
     // A bracket that stopped at the token has reported it already.
     if !p.reported_here() {
         p.error(message);

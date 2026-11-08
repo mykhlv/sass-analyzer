@@ -5994,3 +5994,296 @@ fn forward_as_without_a_prefix_is_one_error_in_the_indented_syntax() {
     "#]],
     );
 }
+
+// ── An operator at the end of a line, before a line that is no operand ──
+
+#[test]
+fn word_operator_before_a_selector_line_reports_its_dot() {
+    // Dart Sass takes `.c` for the operand of `not`: `Expected digit.` at the `.`.
+    check_tree(
+        ".b\n  content: not\n  .c\n    d: e\n",
+        expect![[r#"
+        SOURCE_FILE@0..32
+          RULE_SET@0..31
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "b"
+            BLOCK@2..31
+              LBRACE@2..2 ""
+              NESTED_PROPERTY@2..31
+                PROPERTY@2..12
+                  WHITESPACE@2..5 "\n  "
+                  IDENT@5..12 "content"
+                COLON@12..13 ":"
+                VALUE@13..22
+                  VALUE@13..17
+                    WHITESPACE@13..14 " "
+                    IDENT@14..17 "not"
+                  ERROR@17..22
+                    WHITESPACE@17..20 "\n  "
+                    DOT@20..21 "."
+                    IDENT@21..22 "c"
+                BLOCK@22..31
+                  LBRACE@22..22 ""
+                  DECLARATION@22..31
+                    PROPERTY@22..28
+                      WHITESPACE@22..27 "\n    "
+                      IDENT@27..28 "d"
+                    COLON@28..29 ":"
+                    VALUE@29..31
+                      VALUE@29..31
+                        WHITESPACE@29..30 " "
+                        IDENT@30..31 "e"
+                    SEMICOLON@31..31 ""
+                  RBRACE@31..31 ""
+              RBRACE@31..31 ""
+          WHITESPACE@31..32 "\n"
+        errors:
+          20..21: expected digit
+    "#]],
+    );
+}
+
+#[test]
+fn plus_before_a_parent_selector_line_reports_its_dot() {
+    // Dart Sass: `Expected digit.`, after `&`, which is an operand.
+    check_tree(
+        ".b\n  content: 1 +\n  &.c\n    d: e\n",
+        expect![[r#"
+        SOURCE_FILE@0..33
+          RULE_SET@0..32
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "b"
+            BLOCK@2..32
+              LBRACE@2..2 ""
+              NESTED_PROPERTY@2..32
+                PROPERTY@2..12
+                  WHITESPACE@2..5 "\n  "
+                  IDENT@5..12 "content"
+                COLON@12..13 ":"
+                VALUE@13..23
+                  BINARY_EXPR@13..21
+                    NUMBER_LITERAL@13..15
+                      WHITESPACE@13..14 " "
+                      NUMBER@14..15 "1"
+                    WHITESPACE@15..16 " "
+                    PLUS@16..17 "+"
+                    VALUE@17..21
+                      WHITESPACE@17..20 "\n  "
+                      AMP@20..21 "&"
+                  ERROR@21..23
+                    DOT@21..22 "."
+                    IDENT@22..23 "c"
+                BLOCK@23..32
+                  LBRACE@23..23 ""
+                  DECLARATION@23..32
+                    PROPERTY@23..29
+                      WHITESPACE@23..28 "\n    "
+                      IDENT@28..29 "d"
+                    COLON@29..30 ":"
+                    VALUE@30..32
+                      VALUE@30..32
+                        WHITESPACE@30..31 " "
+                        IDENT@31..32 "e"
+                    SEMICOLON@32..32 ""
+                  RBRACE@32..32 ""
+              RBRACE@32..32 ""
+          WHITESPACE@32..33 "\n"
+        errors:
+          21..22: expected digit
+    "#]],
+    );
+}
+
+#[test]
+fn word_operator_before_a_pseudo_class_line_reports_its_colon() {
+    // Dart Sass: `expected newline.` at the `:`.
+    check_tree(
+        ".b\n  content: not\n  &:hover\n    d: e\n",
+        expect![[r#"
+        SOURCE_FILE@0..37
+          RULE_SET@0..36
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "b"
+            BLOCK@2..36
+              LBRACE@2..2 ""
+              NESTED_PROPERTY@2..36
+                PROPERTY@2..12
+                  WHITESPACE@2..5 "\n  "
+                  IDENT@5..12 "content"
+                COLON@12..13 ":"
+                VALUE@13..27
+                  VALUE@13..17
+                    WHITESPACE@13..14 " "
+                    IDENT@14..17 "not"
+                  VALUE@17..21
+                    WHITESPACE@17..20 "\n  "
+                    AMP@20..21 "&"
+                  ERROR@21..27
+                    COLON@21..22 ":"
+                    IDENT@22..27 "hover"
+                BLOCK@27..36
+                  LBRACE@27..27 ""
+                  DECLARATION@27..36
+                    PROPERTY@27..33
+                      WHITESPACE@27..32 "\n    "
+                      IDENT@32..33 "d"
+                    COLON@33..34 ":"
+                    VALUE@34..36
+                      VALUE@34..36
+                        WHITESPACE@34..35 " "
+                        IDENT@35..36 "e"
+                    SEMICOLON@36..36 ""
+                  RBRACE@36..36 ""
+              RBRACE@36..36 ""
+          WHITESPACE@36..37 "\n"
+        errors:
+          21..22: expected newline
+    "#]],
+    );
+}
+
+#[test]
+fn plus_before_a_declaration_line_reports_its_colon() {
+    // Dart Sass: `expected newline.` at the `:`.
+    check_tree(
+        ".b\n  content: 1 +\n  b: c\n.d\n  e: f\n",
+        expect![[r#"
+        SOURCE_FILE@0..35
+          RULE_SET@0..24
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "b"
+            BLOCK@2..24
+              LBRACE@2..2 ""
+              DECLARATION@2..24
+                PROPERTY@2..12
+                  WHITESPACE@2..5 "\n  "
+                  IDENT@5..12 "content"
+                COLON@12..13 ":"
+                VALUE@13..24
+                  BINARY_EXPR@13..21
+                    NUMBER_LITERAL@13..15
+                      WHITESPACE@13..14 " "
+                      NUMBER@14..15 "1"
+                    WHITESPACE@15..16 " "
+                    PLUS@16..17 "+"
+                    VALUE@17..21
+                      WHITESPACE@17..20 "\n  "
+                      IDENT@20..21 "b"
+                  ERROR@21..24
+                    COLON@21..22 ":"
+                    WHITESPACE@22..23 " "
+                    IDENT@23..24 "c"
+                SEMICOLON@24..24 ""
+              RBRACE@24..24 ""
+          RULE_SET@24..34
+            SELECTOR_LIST@24..27
+              SELECTOR@24..27
+                SIMPLE_SELECTOR@24..27
+                  WHITESPACE@24..25 "\n"
+                  DOT@25..26 "."
+                  IDENT@26..27 "d"
+            BLOCK@27..34
+              LBRACE@27..27 ""
+              DECLARATION@27..34
+                PROPERTY@27..31
+                  WHITESPACE@27..30 "\n  "
+                  IDENT@30..31 "e"
+                COLON@31..32 ":"
+                VALUE@32..34
+                  VALUE@32..34
+                    WHITESPACE@32..33 " "
+                    IDENT@33..34 "f"
+                SEMICOLON@34..34 ""
+              RBRACE@34..34 ""
+          WHITESPACE@34..35 "\n"
+        errors:
+          21..22: expected newline
+    "#]],
+    );
+}
+
+#[test]
+fn word_operator_before_a_variable_line_reports_its_colon() {
+    // Dart Sass: `expected newline.` at the `:`.
+    check_tree(
+        ".b\n  content: not\n$b: 2\n.d\n  e: f\n",
+        expect![[r#"
+        SOURCE_FILE@0..34
+          RULE_SET@0..23
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "b"
+            BLOCK@2..23
+              LBRACE@2..2 ""
+              DECLARATION@2..23
+                PROPERTY@2..12
+                  WHITESPACE@2..5 "\n  "
+                  IDENT@5..12 "content"
+                COLON@12..13 ":"
+                VALUE@13..23
+                  VALUE@13..17
+                    WHITESPACE@13..14 " "
+                    IDENT@14..17 "not"
+                  VARIABLE_REF@17..20
+                    WHITESPACE@17..18 "\n"
+                    DOLLAR@18..19 "$"
+                    IDENT@19..20 "b"
+                  ERROR@20..23
+                    COLON@20..21 ":"
+                    WHITESPACE@21..22 " "
+                    NUMBER@22..23 "2"
+                SEMICOLON@23..23 ""
+              RBRACE@23..23 ""
+          RULE_SET@23..33
+            SELECTOR_LIST@23..26
+              SELECTOR@23..26
+                SIMPLE_SELECTOR@23..26
+                  WHITESPACE@23..24 "\n"
+                  DOT@24..25 "."
+                  IDENT@25..26 "d"
+            BLOCK@26..33
+              LBRACE@26..26 ""
+              DECLARATION@26..33
+                PROPERTY@26..30
+                  WHITESPACE@26..29 "\n  "
+                  IDENT@29..30 "e"
+                COLON@30..31 ":"
+                VALUE@31..33
+                  VALUE@31..33
+                    WHITESPACE@31..32 " "
+                    IDENT@32..33 "f"
+                SEMICOLON@33..33 ""
+              RBRACE@33..33 ""
+          WHITESPACE@33..34 "\n"
+        errors:
+          20..21: expected newline
+    "#]],
+    );
+}
+
+#[test]
+fn operator_before_an_operand_line_is_valid() {
+    for source in [
+        ".b\n  content: 1 -\n  .5\n",
+        ".b\n  content: not\n  true\n",
+        ".b\n  content: a and\n  b\n",
+        ".b\n  content: 1 +\n\n  2\n",
+    ] {
+        let (_, errors) = sass_parser::parse_sass(source);
+        assert!(errors.is_empty(), "{source:?}: {errors:?}");
+    }
+}

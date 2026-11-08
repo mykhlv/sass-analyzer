@@ -328,6 +328,26 @@ fn colon_in_a_value_ends_the_line_in_the_indented_syntax() {
     );
 }
 
+#[test]
+fn dot_that_starts_no_number_ends_the_value() {
+    // Dart Sass: `Expected digit.` at the `.`; joined to a word, `expected "("`.
+    assert_eq!(
+        errors(sass_parser::parse_scss, "a { b: c .d; e: f; }\n"),
+        ["expected digit"]
+    );
+    assert_eq!(
+        errors(sass_parser::parse_scss, "a { b: c.d; e: f; }\n"),
+        ["expected `(`"]
+    );
+    assert_eq!(
+        errors(
+            sass_parser::parse_scss,
+            "a { b: 1.5 .5; c: math.div(1, 2); }\n"
+        ),
+        [] as [String; 0]
+    );
+}
+
 // ── Valid, untouched ────────────────────────────────────────────────────
 
 #[test]
