@@ -731,3 +731,50 @@ async fn did_change_full_sync_updates_correctly() {
         "hover should reflect the updated value '10', got: {hover_text}"
     );
 }
+
+#[tokio::test]
+async fn did_change_configuration_reparses_with_the_version_of_the_text() {
+    let uri = "file:///config_version.scss";
+    let (mut reader, mut writer) = spawn_server();
+    // The longest debounce keeps both edits pending, so the configuration change
+    // arrives while the stored document is still version 1.
+    do_initialize_with(
+        &mut reader,
+        &mut writer,
+        serde_json::json!({ "debounceMs": 5000 }),
+    )
+    .await;
+    open_document(&mut writer, uri, "$a: 1;\n").await;
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didChange",
+            "params": {
+                "textDocument": { "uri": uri, "version": 2 },
+                "contentChanges": [{ "text": "$a: ;\n" }]
+            }
+        }),
+    )
+    .await;
+    // Restores the default debounce, so the re-parse publishes promptly.
+    send_msg(
+        &mut writer,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "workspace/didChangeConfiguration",
+            "params": { "settings": { "sass-analyzer": {} } }
+        }),
+    )
+    .await;
+
+    let notif = loop {
+        let msg = recv_msg(&mut reader, &mut writer).await;
+        if msg["method"] == "textDocument/publishDiagnostics" && msg["params"]["uri"] == uri {
+            break msg;
+        }
+    };
+    let diags = notif["params"]["diagnostics"].as_array().unwrap();
+    assert!(!diags.is_empty(), "version 2 has a parse error: {notif}");
+    assert_eq!(notif["params"]["version"], 2, "{notif}");
+}

@@ -1,5 +1,6 @@
 use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use dashmap::DashMap;
@@ -58,6 +59,14 @@ pub struct ModuleInfo {
     pub has_legacy_import: bool,
     /// True if the file has `@use`/`@forward` imports that could not be resolved.
     pub has_unresolved_use: bool,
+    /// Distinct for every `index_file` call, so a tree re-parsed from an older
+    /// source is never cached over a newer one.
+    pub generation: u64,
+}
+
+enum CachedGreen {
+    Tree(GreenNode),
+    Evicted { generation: u64, source: String },
 }
 
 /// Cross-file dependency graph for the SCSS workspace.
@@ -73,6 +82,7 @@ pub struct ModuleGraph {
     tree_lru: Mutex<VecDeque<Uri>>,
     /// LRU order for source text eviction (front = most recently used).
     source_lru: Mutex<VecDeque<Uri>>,
+    next_generation: AtomicU64,
     runtime_config: Arc<RuntimeConfig>,
 }
 
@@ -87,6 +97,7 @@ impl ModuleGraph {
             allowed_roots: RwLock::new(Vec::new()),
             tree_lru: Mutex::new(VecDeque::new()),
             source_lru: Mutex::new(VecDeque::new()),
+            next_generation: AtomicU64::new(0),
             runtime_config,
         }
     }
@@ -223,13 +234,10 @@ impl ModuleGraph {
     /// Get the green tree for a URI, re-parsing from stored source if evicted.
     /// The parser (SCSS or indented Sass) is chosen by the URI's file extension.
     fn get_or_reparse_green(&self, uri: &Uri) -> Option<GreenNode> {
-        let info = self.files.get(uri)?;
-        if let Some(green) = &info.green {
-            return Some(green.clone());
-        }
-        // Re-parse from stored text (invariant: source_text is Some when green is None).
-        let source = info.source_text.clone()?;
-        drop(info);
+        let (generation, source) = match self.cached_green(uri)? {
+            CachedGreen::Tree(green) => return Some(green),
+            CachedGreen::Evicted { generation, source } => (generation, source),
+        };
         let parse_fn = if crate::worker::is_sass_file(uri) {
             sass_parser::parse_sass
         } else {
@@ -237,12 +245,41 @@ impl ModuleGraph {
         };
         let (green, _) =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| parse_fn(&source))).ok()?;
-        if let Some(mut info) = self.files.get_mut(uri) {
+        Some(self.store_reparsed(uri, generation, green))
+    }
+
+    /// The stored tree, or the stored source to re-parse it from. Parsing happens
+    /// with no guard held, so `index_file` may replace the entry meanwhile.
+    fn cached_green(&self, uri: &Uri) -> Option<CachedGreen> {
+        let info = self.files.get(uri)?;
+        if let Some(green) = &info.green {
+            return Some(CachedGreen::Tree(green.clone()));
+        }
+        // Invariant: source_text is Some when green is None.
+        Some(CachedGreen::Evicted {
+            generation: info.generation,
+            source: info.source_text.clone()?,
+        })
+    }
+
+    /// Cache a tree re-parsed from the source `cached_green` returned for
+    /// `generation`, and return the tree the caller should use.
+    fn store_reparsed(&self, uri: &Uri, generation: u64, green: GreenNode) -> GreenNode {
+        {
+            let Some(mut info) = self.files.get_mut(uri) else {
+                return green;
+            };
+            if info.generation != generation {
+                return green;
+            }
+            if let Some(cached) = &info.green {
+                return cached.clone();
+            }
             info.green = Some(green.clone());
         }
         self.touch_tree_lru(uri);
         self.evict_trees();
-        Some(green)
+        green
     }
 
     /// Total number of indexed files.
@@ -280,6 +317,7 @@ impl ModuleGraph {
                 source_text: Some(source_text),
                 has_legacy_import,
                 has_unresolved_use: false, // updated after resolution loop below
+                generation: self.next_generation.fetch_add(1, Ordering::Relaxed),
             },
         );
         self.touch_tree_lru(uri);
@@ -1550,6 +1588,7 @@ mod tests {
             source_text: Some(source.to_owned()),
             has_legacy_import: false,
             has_unresolved_use: false,
+            generation: 0,
         }
     }
 
@@ -2377,6 +2416,68 @@ mod tests {
             root.descendants()
                 .any(|n| n.kind() == SyntaxKind::DECLARATION),
             "indented Sass re-parsed as SCSS produces no DECLARATION; tree was:\n{root:#?}"
+        );
+    }
+
+    fn index_scss(graph: &ModuleGraph, uri: &Uri, source: &str) {
+        let (green, _) = sass_parser::parse_scss(source);
+        let line_index = sass_parser::line_index::LineIndex::new(source);
+        let symbols = {
+            let root = SyntaxNode::new_root(green.clone());
+            std::sync::Arc::new(symbols::collect_symbols(&root))
+        };
+        graph.index_file(uri, green, symbols, line_index, source.to_owned());
+    }
+
+    fn graph_caching_one_tree() -> ModuleGraph {
+        let config = std::sync::Arc::new(crate::config::RuntimeConfig::default());
+        config.apply(&crate::config::SassAnalyzerConfig {
+            max_cached_trees: Some(1),
+            ..Default::default()
+        });
+        ModuleGraph::new(config)
+    }
+
+    #[test]
+    fn reparse_of_replaced_source_is_not_cached() {
+        let graph = graph_caching_one_tree();
+        let uri: Uri = "file:///a.scss".parse().unwrap();
+        let other: Uri = "file:///b.scss".parse().unwrap();
+        index_scss(&graph, &uri, "$old: 1;\n");
+        index_scss(&graph, &other, "$x: 1;\n");
+
+        // A reader finds the tree evicted and re-parses the old source with no
+        // guard held; meanwhile the worker indexes a new version, whose tree is
+        // then evicted in turn.
+        let Some(CachedGreen::Evicted { generation, source }) = graph.cached_green(&uri) else {
+            panic!("tree should be evicted");
+        };
+        index_scss(&graph, &uri, "$new: 2;\n");
+        index_scss(&graph, &other, "$x: 1;\n");
+        let (stale, _) = sass_parser::parse_scss(&source);
+        let returned = graph.store_reparsed(&uri, generation, stale);
+        assert_eq!(
+            SyntaxNode::new_root(returned).text().to_string(),
+            "$old: 1;\n"
+        );
+
+        let green = graph.get_green(&uri).expect("green tree");
+        assert_eq!(SyntaxNode::new_root(green).text().to_string(), "$new: 2;\n");
+    }
+
+    #[test]
+    fn reparse_of_current_source_is_cached() {
+        let graph = graph_caching_one_tree();
+        let uri: Uri = "file:///a.scss".parse().unwrap();
+        let other: Uri = "file:///b.scss".parse().unwrap();
+        index_scss(&graph, &uri, "$a: 1;\n");
+        index_scss(&graph, &other, "$x: 1;\n");
+
+        let green = graph.get_green(&uri).expect("green tree");
+        assert_eq!(SyntaxNode::new_root(green).text().to_string(), "$a: 1;\n");
+        assert!(
+            matches!(graph.cached_green(&uri), Some(CachedGreen::Tree(_))),
+            "the re-parsed tree should be cached"
         );
     }
 
