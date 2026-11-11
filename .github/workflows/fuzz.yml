@@ -19,7 +19,7 @@ jobs:
           - fuzz_sass_parser_crash
           - fuzz_sass_parser_roundtrip
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-fuzz
