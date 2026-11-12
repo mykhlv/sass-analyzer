@@ -14,6 +14,13 @@ updates:
     target-branch: dev
     schedule:
       interval: weekly
+    # vscode-languageclient 10+ raises the minimum VS Code version, and @types/vscode
+    # must not pass engines.vscode or `vsce package` fails: both move by hand.
+    ignore:
+      - dependency-name: vscode-languageclient
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/vscode"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
     groups:
       npm-deps:
         patterns: ["*"]
