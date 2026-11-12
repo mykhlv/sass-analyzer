@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whose own importer loads what the server cannot
 
 ### Fixed
+- Parser: a rule or at-rule missing its `{`, where the tokens skipped before the block
+  hold a quoted string with an operator in its interpolation, as in `.a ) "#{$b + 1}" {}`
+  or `@media (a) x "#{$b + 1}" {}`, no longer crashes the parser.
 - LSP: an open document's state, its diagnostics and the cross-file index now always come
   from the same version of its text. A parse of an older version than the one stored no
   longer updates the cross-file index; after a settings change, the re-parse of an edit

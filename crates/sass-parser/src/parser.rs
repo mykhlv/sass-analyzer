@@ -817,7 +817,18 @@ impl<'src> Parser<'src> {
         let len = self.events.len();
         self.error_at(range, msg);
         let event = self.events.remove(len);
-        self.events.insert(m.pos as usize + 1, event);
+        let at = m.pos as usize + 1;
+        self.events.insert(at, event);
+        // Every event after `at` moved up by one; so did any node preceded there.
+        for event in &mut self.events[at + 1..] {
+            if let Event::Enter {
+                forward_parent: Some(next),
+                ..
+            } = event
+            {
+                *next += 1;
+            }
+        }
     }
 
     /// How many errors have been reported so far.
