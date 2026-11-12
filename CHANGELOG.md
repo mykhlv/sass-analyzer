@@ -163,6 +163,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   indented syntax, Dart Sass's message. Such `;` were accepted. A `;` that ends a
   statement, or sits in a string or `url()`, stays valid
 
+### Security
+- VS Code extension: `brace-expansion`, bundled through `vscode-languageclient`, is
+  updated to 2.1.7 for three denial-of-service advisories (GHSA-q2hr-2g5m-vwhr,
+  GHSA-qhr7-859c-m2p7, GHSA-6j4f-fj2g-mc7p)
+
 ## 0.4.0 — 2026-11-08
 
 ### Fixed
