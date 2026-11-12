@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use dashmap::DashMap;
+use dashmap::mapref::entry::Entry;
 use sass_parser::line_index::LineIndex;
 use sass_parser::syntax::{GreenNode, SyntaxNode};
 use sass_parser::text_range::TextRange;
@@ -17,7 +18,7 @@ use crate::convert::text_range_to_lsp;
 use crate::diagnostics;
 use crate::symbols;
 use crate::workspace;
-use crate::{DocumentState, IncrementalEdit, Task};
+use crate::{DocumentState, ExternalEvent, IncrementalEdit, Task};
 
 #[allow(clippy::case_sensitive_file_extension_comparisons)]
 pub(crate) fn is_sass_file(uri: &Uri) -> bool {
@@ -27,6 +28,16 @@ pub(crate) fn is_sass_file(uri: &Uri) -> bool {
     let s = uri.as_str();
     let path_end = s.find(['?', '#']).unwrap_or(s.len());
     s[..path_end].ends_with(".sass")
+}
+
+/// Whether `uri` names a plain CSS file, which an import may load but which is no
+/// Sass module of its own. In any case, as the watcher's `**/*.css` may match on a
+/// case-insensitive file system: `Foo.CSS` is no Sass module either. An import URL's
+/// `.css` is matched case-sensitively, as Dart Sass does, by the resolver.
+pub(crate) fn is_css_file(uri: &Uri) -> bool {
+    let s = uri.as_str();
+    let path = &s[..s.find(['?', '#']).unwrap_or(s.len())];
+    path.len() >= 4 && path.as_bytes()[path.len() - 4..].eq_ignore_ascii_case(b".css")
 }
 
 pub(crate) fn parse_document(
@@ -107,6 +118,112 @@ fn semantic_to_lsp(
         .collect()
 }
 
+/// Parse `text` as `version` of `uri`, index it and store it as the document's
+/// state. Returns the diagnostics to publish, or `None` when the parse failed or
+/// a newer version of the document is already stored.
+fn apply_parse(
+    documents: &DashMap<Uri, DocumentState>,
+    module_graph: &workspace::ModuleGraph,
+    uri: &Uri,
+    version: i32,
+    text: String,
+    incremental: Option<IncrementalEdit>,
+) -> Option<Vec<Diagnostic>> {
+    if documents.get(uri).is_some_and(|s| s.version > version) {
+        return None;
+    }
+    let (green, errors) = try_incremental_or_full(incremental, &text, uri)?;
+    let line_index = LineIndex::new(&text);
+    let mut all_diagnostics = errors_to_diagnostics(&errors, &line_index, &text);
+    let file_symbols = {
+        let root = SyntaxNode::new_root(green.clone());
+        Arc::new(symbols::collect_symbols(&root))
+    };
+
+    module_graph.index_file(
+        uri,
+        green.clone(),
+        file_symbols.clone(),
+        line_index.clone(),
+        text.clone(),
+    );
+
+    let semantic =
+        diagnostics::check_file(uri, &file_symbols, module_graph, &green, !errors.is_empty());
+    all_diagnostics.extend(semantic_to_lsp(semantic, &line_index, &text));
+
+    let state = DocumentState {
+        version,
+        text,
+        green,
+        errors,
+        line_index,
+        symbols: file_symbols,
+    };
+    // Re-checked under the entry guard: only the worker indexes, but `did_open`
+    // stores a document state of its own.
+    let entry = documents.entry(uri.clone());
+    if let Entry::Occupied(stored) = &entry
+        && stored.get().version > version
+    {
+        return None;
+    }
+    entry.insert(state);
+    Some(all_diagnostics)
+}
+
+/// Index the on-disk text of `uri` after a file-watcher event. Returns whether
+/// the module graph changed.
+///
+/// The handler skips open files, but the file may have been opened since: the
+/// editor's text then wins over the disk's.
+fn apply_external_change(
+    documents: &DashMap<Uri, DocumentState>,
+    module_graph: &workspace::ModuleGraph,
+    runtime_config: &RuntimeConfig,
+    uri: &Uri,
+    path: &Path,
+) -> bool {
+    if documents.contains_key(uri) {
+        return false;
+    }
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::warn!("failed to read {}: {e}", path.display());
+            return false;
+        }
+    };
+    if text.len() > runtime_config.max_file_size() {
+        return false;
+    }
+    let Some((green, _errors)) = parse_document(&text, is_sass_file(uri)) else {
+        return false;
+    };
+    let line_index = LineIndex::new(&text);
+    let file_symbols = {
+        let root = SyntaxNode::new_root(green.clone());
+        Arc::new(symbols::collect_symbols(&root))
+    };
+    module_graph.index_file(uri, green, file_symbols, line_index, text);
+    true
+}
+
+/// Drop `uri` from the module graph after a file-watcher delete event, unless it
+/// has been opened since the handler checked. Returns whether the module graph
+/// changed.
+fn apply_external_delete(
+    documents: &DashMap<Uri, DocumentState>,
+    module_graph: &workspace::ModuleGraph,
+    uri: &Uri,
+) -> bool {
+    if documents.contains_key(uri) {
+        return false;
+    }
+    module_graph.remove_file(uri);
+    true
+}
+
 pub(crate) async fn run_worker(
     mut rx: mpsc::UnboundedReceiver<Task>,
     client: Client,
@@ -146,48 +263,9 @@ pub(crate) async fn run_worker(
                         // go-to-definition, which would destroy indexed dependencies.
                         client.publish_diagnostics(uri, vec![], None).await;
                     }
-                    Task::ExternalChange { uri, path } => {
-                        let text = match std::fs::read_to_string(&path) {
-                            Ok(t) => t,
-                            Err(e) => {
-                                tracing::warn!(
-                                    "failed to read {}: {e}",
-                                    path.display(),
-                                );
-                                continue;
-                            }
-                        };
-                        if text.len() > runtime_config.max_file_size() {
-                            continue;
-                        }
-                        let Some((green, _errors)) = parse_document(&text, is_sass_file(&uri)) else {
-                            continue;
-                        };
-                        let line_index = LineIndex::new(&text);
-                        let file_symbols = {
-                            let root = SyntaxNode::new_root(green.clone());
-                            Arc::new(symbols::collect_symbols(&root))
-                        };
-
-                        module_graph.index_file(
-                            &uri,
-                            green,
-                            file_symbols,
-                            line_index,
-                            text,
-                        );
-
-                        // Re-publish diagnostics for open files that import
-                        // the changed file, since their cross-file references
-                        // may now resolve differently.
-                        refresh_dependents(
-                            &module_graph, &documents, &client, &uri,
-                        ).await;
-                    }
-                    Task::ExternalDelete { uri } => {
-                        module_graph.remove_file(&uri);
-                        refresh_dependents(
-                            &module_graph, &documents, &client, &uri,
+                    Task::External { events } => {
+                        apply_external_events(
+                            &documents, &module_graph, &runtime_config, &client, events,
                         ).await;
                     }
                     Task::CheckWorkspace { root } => {
@@ -199,56 +277,27 @@ pub(crate) async fn run_worker(
                 }
             }
             () = &mut sleep, if has_pending => {
+                let mut new_uris = Vec::new();
                 for (uri, (version, text, incremental)) in pending.drain() {
-                    let Some((green, errors)) = try_incremental_or_full(
-                        incremental, &text, &uri,
-                    ) else {
-                        continue;
-                    };
-                    let line_index = LineIndex::new(&text);
-                    let mut all_diagnostics =
-                        errors_to_diagnostics(&errors, &line_index, &text);
-                    let file_symbols = {
-                        let root = SyntaxNode::new_root(green.clone());
-                        Arc::new(symbols::collect_symbols(&root))
-                    };
-
-                    let is_current = documents
-                        .get(&uri)
-                        .is_none_or(|state| state.version <= version);
-
-                    module_graph.index_file(
-                        &uri,
-                        green.clone(),
-                        file_symbols.clone(),
-                        line_index.clone(),
-                        text.clone(),
-                    );
-
-                    let semantic = diagnostics::check_file(
-                        &uri, &file_symbols, &module_graph, &green,
-                        !errors.is_empty(),
-                    );
-                    all_diagnostics.extend(semantic_to_lsp(
-                        semantic, &line_index, &text,
-                    ));
-
-                    if is_current {
-                        documents.insert(
-                            uri.clone(),
-                            DocumentState {
-                                version,
-                                text,
-                                green,
-                                errors,
-                                line_index,
-                                symbols: file_symbols,
-                            },
-                        );
+                    let is_new = !module_graph.contains(&uri);
+                    if let Some(diagnostics) = apply_parse(
+                        &documents, &module_graph, &uri, version, text, incremental,
+                    ) {
+                        if is_new {
+                            new_uris.push(uri.clone());
+                        }
                         client
-                            .publish_diagnostics(uri, all_diagnostics, Some(version))
+                            .publish_diagnostics(uri, diagnostics, Some(version))
                             .await;
                     }
+                }
+                // A file opened in the editor before the watcher reports it never
+                // reaches apply_external_events, so a new one is checked against the
+                // unresolved imports here.
+                if !new_uris.is_empty() {
+                    let targets =
+                        documents_with_unresolved_imports(&documents, &module_graph, &new_uris);
+                    refresh_documents(&module_graph, &documents, &client, targets, true).await;
                 }
                 // Tell VS Code to re-request semantic tokens for all open editors.
                 // Without this, tokens requested before parsing finishes get a null
@@ -264,33 +313,129 @@ pub(crate) async fn run_worker(
     }
 }
 
-/// Re-publish diagnostics for open files that depend on a changed/deleted file.
-async fn refresh_dependents(
+/// Apply one batch of file-watcher events, then re-check the open documents they
+/// affect, each once however many of the events affect it.
+///
+/// Importers of a changed file may now resolve its members differently, and are
+/// re-published. A new file may also be the one an unresolved import looked for,
+/// and a deleted one may be what an import loaded, so their importers and the
+/// documents with unresolved imports are indexed again first. A change to a known
+/// file cannot make an import resolve.
+async fn apply_external_events(
+    documents: &DashMap<Uri, DocumentState>,
+    module_graph: &workspace::ModuleGraph,
+    runtime_config: &RuntimeConfig,
+    client: &Client,
+    events: Vec<ExternalEvent>,
+) {
+    let mut reindex = Vec::new();
+    let mut republish = Vec::new();
+    let mut new_uris = Vec::new();
+    for event in events {
+        match event {
+            ExternalEvent::Changed { uri, path } => {
+                let is_new = !module_graph.contains(&uri);
+                if apply_external_change(documents, module_graph, runtime_config, &uri, &path) {
+                    if is_new {
+                        reindex.extend(module_graph.dependents_of(&uri));
+                        new_uris.push(uri);
+                    } else {
+                        republish.extend(module_graph.dependents_of(&uri));
+                    }
+                }
+            }
+            ExternalEvent::CssCreated { uri } => new_uris.push(uri),
+            ExternalEvent::Deleted { uri } => {
+                let dependents = module_graph.dependents_of(&uri);
+                if apply_external_delete(documents, module_graph, &uri) {
+                    reindex.extend(dependents);
+                }
+            }
+        }
+    }
+    if !new_uris.is_empty() {
+        reindex.extend(documents_with_unresolved_imports(
+            documents,
+            module_graph,
+            &new_uris,
+        ));
+    }
+    republish.retain(|uri| !reindex.contains(uri));
+    refresh_documents(module_graph, documents, client, reindex, true).await;
+    refresh_documents(module_graph, documents, client, republish, false).await;
+}
+
+/// Open documents, other than `except`, with an import that does not resolve.
+fn documents_with_unresolved_imports(
+    documents: &DashMap<Uri, DocumentState>,
+    module_graph: &workspace::ModuleGraph,
+    except: &[Uri],
+) -> Vec<Uri> {
+    documents
+        .iter()
+        .map(|entry| entry.key().clone())
+        .filter(|uri| !except.contains(uri) && module_graph.has_unresolved_paths(uri))
+        .collect()
+}
+
+/// Re-publish the diagnostics of the open documents among `targets`. With
+/// `reindex`, each is indexed again first, so its imports resolve again against
+/// the disk.
+async fn refresh_documents(
     module_graph: &workspace::ModuleGraph,
     documents: &DashMap<Uri, DocumentState>,
     client: &Client,
-    changed_uri: &Uri,
+    mut targets: Vec<Uri>,
+    reindex: bool,
 ) {
-    for dep_uri in module_graph.dependents_of(changed_uri) {
-        if let Some(doc) = documents.get(&dep_uri) {
-            let mut all_diags = errors_to_diagnostics(&doc.errors, &doc.line_index, &doc.text);
-            let semantic = diagnostics::check_file(
-                &dep_uri,
-                &doc.symbols,
-                module_graph,
-                &doc.green,
-                !doc.errors.is_empty(),
-            );
-            all_diags.extend(semantic_to_lsp(semantic, &doc.line_index, &doc.text));
-            client
-                .publish_diagnostics(dep_uri.clone(), all_diags, Some(doc.version))
-                .await;
-        }
+    targets.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+    targets.dedup();
+    let mut published = false;
+    for uri in targets {
+        // Computed with the document guard released before publishing.
+        let Some((all_diags, version)) = documents.get(&uri).map(|doc| {
+            if reindex {
+                module_graph.index_file(
+                    &uri,
+                    doc.green.clone(),
+                    doc.symbols.clone(),
+                    doc.line_index.clone(),
+                    doc.text.clone(),
+                );
+            }
+            (document_diagnostics(&uri, &doc, module_graph), doc.version)
+        }) else {
+            continue;
+        };
+        client
+            .publish_diagnostics(uri, all_diags, Some(version))
+            .await;
+        published = true;
     }
-    let c = client.clone();
-    tokio::spawn(async move {
-        let _ = c.semantic_tokens_refresh().await;
-    });
+    if published {
+        let c = client.clone();
+        tokio::spawn(async move {
+            let _ = c.semantic_tokens_refresh().await;
+        });
+    }
+}
+
+/// Parse errors and semantic diagnostics of an open document.
+fn document_diagnostics(
+    uri: &Uri,
+    doc: &DocumentState,
+    module_graph: &workspace::ModuleGraph,
+) -> Vec<Diagnostic> {
+    let mut all_diags = errors_to_diagnostics(&doc.errors, &doc.line_index, &doc.text);
+    let semantic = diagnostics::check_file(
+        uri,
+        &doc.symbols,
+        module_graph,
+        &doc.green,
+        !doc.errors.is_empty(),
+    );
+    all_diags.extend(semantic_to_lsp(semantic, &doc.line_index, &doc.text));
+    all_diags
 }
 
 // ── Check Workspace ─────────────────────────────────────────────────
@@ -422,24 +567,22 @@ async fn check_workspace(
     }
 
     // Phase 3: re-check open files (they may now resolve more imports)
-    for entry in documents {
-        let uri = entry.key().clone();
-        let doc = entry.value();
-        let mut all_diagnostics = errors_to_diagnostics(&doc.errors, &doc.line_index, &doc.text);
-        let semantic = diagnostics::check_file(
-            &uri,
-            &doc.symbols,
-            module_graph,
-            &doc.green,
-            !doc.errors.is_empty(),
-        );
-        all_diagnostics.extend(semantic_to_lsp(semantic, &doc.line_index, &doc.text));
+    // Collected first: a shard guard held across the publish below would block a
+    // handler writing to that shard, which can keep the client channel from draining.
+    let open_uris: Vec<Uri> = documents.iter().map(|entry| entry.key().clone()).collect();
+    for uri in open_uris {
+        let Some((all_diagnostics, version)) = documents
+            .get(&uri)
+            .map(|doc| (document_diagnostics(&uri, &doc, module_graph), doc.version))
+        else {
+            continue;
+        };
         if !all_diagnostics.is_empty() {
             total_diags += all_diagnostics.len() as u64;
             files_with_diags += 1;
         }
         client
-            .publish_diagnostics(uri, all_diagnostics, Some(doc.version))
+            .publish_diagnostics(uri, all_diagnostics, Some(version))
             .await;
     }
 
@@ -507,6 +650,20 @@ mod tests {
     fn is_sass_file_css_extension() {
         let uri: Uri = "file:///project/styles.css".parse().unwrap();
         assert!(!is_sass_file(&uri));
+    }
+
+    #[test]
+    fn is_css_file_in_any_case() {
+        for uri in [
+            "file:///p/a.css",
+            "file:///p/Foo.CSS",
+            "file:///p/b.Css?x=1",
+        ] {
+            let uri: Uri = uri.parse().unwrap();
+            assert!(is_css_file(&uri), "{uri:?}");
+        }
+        let uri: Uri = "file:///p/a.scss".parse().unwrap();
+        assert!(!is_css_file(&uri));
     }
 
     #[test]
@@ -606,6 +763,139 @@ mod tests {
         assert_eq!(diags.len(), 2);
         assert_eq!(diags[0].message, "error one");
         assert_eq!(diags[1].message, "error two");
+    }
+
+    // ── apply_parse ─────────────────────────────────────────────────
+
+    fn defines(graph: &workspace::ModuleGraph, uri: &Uri, name: &str) -> bool {
+        graph
+            .get_symbols(uri)
+            .is_some_and(|s| s.definitions.iter().any(|d| d.name == name))
+    }
+
+    #[test]
+    fn stale_parse_changes_no_state() {
+        let documents = DashMap::new();
+        let graph = workspace::ModuleGraph::new(Arc::new(RuntimeConfig::default()));
+        let uri: Uri = "file:///a.scss".parse().unwrap();
+
+        let published = apply_parse(&documents, &graph, &uri, 5, "$new: 1;\n".to_owned(), None);
+        assert!(published.is_some());
+
+        let published = apply_parse(&documents, &graph, &uri, 3, "$old: 1;\n".to_owned(), None);
+        assert!(published.is_none(), "a stale parse must not be published");
+        assert_eq!(documents.get(&uri).unwrap().text, "$new: 1;\n");
+        assert!(
+            defines(&graph, &uri, "new"),
+            "the module graph lost the newer version"
+        );
+        assert!(
+            !defines(&graph, &uri, "old"),
+            "the module graph indexed a stale parse"
+        );
+    }
+
+    #[test]
+    fn same_version_parse_is_applied() {
+        let documents = DashMap::new();
+        let graph = workspace::ModuleGraph::new(Arc::new(RuntimeConfig::default()));
+        let uri: Uri = "file:///a.scss".parse().unwrap();
+
+        apply_parse(&documents, &graph, &uri, 2, "$a: 1;\n".to_owned(), None);
+        let published = apply_parse(&documents, &graph, &uri, 2, "$b: 1;\n".to_owned(), None);
+        assert!(published.is_some());
+        assert_eq!(documents.get(&uri).unwrap().text, "$b: 1;\n");
+        assert!(defines(&graph, &uri, "b"));
+    }
+
+    // ── external changes ────────────────────────────────────────────
+
+    #[test]
+    fn external_change_of_an_open_document_keeps_the_editor_text() {
+        let dir = std::env::temp_dir().join(format!("sass_ext_open_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("a.scss");
+        std::fs::write(&path, "$disk: 1;\n").unwrap();
+        let uri = workspace::path_to_uri(&path);
+        let documents = DashMap::new();
+        let config = RuntimeConfig::default();
+        let graph = workspace::ModuleGraph::new(Arc::new(RuntimeConfig::default()));
+
+        // The watcher event was checked against the open files before the file
+        // was opened, and reaches the worker after the editor's text was indexed.
+        apply_parse(
+            &documents,
+            &graph,
+            &uri,
+            1,
+            "$editor: 1;\n".to_owned(),
+            None,
+        );
+        let changed = apply_external_change(&documents, &graph, &config, &uri, &path);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(!changed);
+        assert!(
+            defines(&graph, &uri, "editor"),
+            "disk text replaced the editor's"
+        );
+    }
+
+    #[test]
+    fn external_change_of_a_closed_file_is_indexed() {
+        let dir = std::env::temp_dir().join(format!("sass_ext_closed_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("a.scss");
+        std::fs::write(&path, "$disk: 1;\n").unwrap();
+        let uri = workspace::path_to_uri(&path);
+        let graph = workspace::ModuleGraph::new(Arc::new(RuntimeConfig::default()));
+
+        let changed = apply_external_change(
+            &DashMap::new(),
+            &graph,
+            &RuntimeConfig::default(),
+            &uri,
+            &path,
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(changed);
+        assert!(defines(&graph, &uri, "disk"));
+    }
+
+    #[test]
+    fn external_delete_of_an_open_document_keeps_it_indexed() {
+        let documents = DashMap::new();
+        let graph = workspace::ModuleGraph::new(Arc::new(RuntimeConfig::default()));
+        let uri: Uri = "file:///a.scss".parse().unwrap();
+        apply_parse(
+            &documents,
+            &graph,
+            &uri,
+            1,
+            "$editor: 1;\n".to_owned(),
+            None,
+        );
+
+        assert!(!apply_external_delete(&documents, &graph, &uri));
+        assert!(defines(&graph, &uri, "editor"));
+    }
+
+    #[test]
+    fn external_delete_of_a_closed_file_drops_it() {
+        let graph = workspace::ModuleGraph::new(Arc::new(RuntimeConfig::default()));
+        let uri: Uri = "file:///a.scss".parse().unwrap();
+        apply_parse(
+            &DashMap::new(),
+            &graph,
+            &uri,
+            1,
+            "$a: 1;\n".to_owned(),
+            None,
+        );
+
+        assert!(apply_external_delete(&DashMap::new(), &graph, &uri));
+        assert!(!defines(&graph, &uri, "a"));
     }
 
     // ── try_incremental_or_full ─────────────────────────────────────

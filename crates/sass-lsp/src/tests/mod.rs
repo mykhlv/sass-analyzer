@@ -33,6 +33,7 @@ mod references_rename;
 mod sassdoc;
 mod selection_ranges;
 mod signature_help;
+mod unresolved_imports;
 mod workspace_symbols;
 
 /// Convert a filesystem path to a proper `file://` URI string.
@@ -302,7 +303,25 @@ fn apply_lsp_edits(source: &str, edits: &[Value]) -> String {
     let offset = |pos: &Value| {
         let line = usize::try_from(pos["line"].as_u64().unwrap()).unwrap();
         let character = usize::try_from(pos["character"].as_u64().unwrap()).unwrap();
-        let line_start: usize = source.split_inclusive('\n').take(line).map(str::len).sum();
+        // Lines end with `\n`, `\r\n` or a lone `\r`, as LSP positions count them.
+        let bytes = source.as_bytes();
+        let mut line_start = 0;
+        for _ in 0..line {
+            let Some(at) = bytes[line_start..]
+                .iter()
+                .position(|&b| b == b'\n' || b == b'\r')
+            else {
+                line_start = source.len();
+                break;
+            };
+            let at = line_start + at;
+            line_start = at
+                + if bytes[at..].starts_with(b"\r\n") {
+                    2
+                } else {
+                    1
+                };
+        }
         (line_start + character).min(source.len())
     };
     let mut ranges: Vec<(usize, usize, &str)> = edits

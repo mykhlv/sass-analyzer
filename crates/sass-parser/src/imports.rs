@@ -17,6 +17,12 @@ pub struct ImportRef {
     pub path: String,
     /// Source range of the entire import construct.
     pub range: TextRange,
+    /// Source range of the URL string, quotes included.
+    pub path_range: TextRange,
+    /// An `@import` that Dart Sass leaves to CSS rather than loading: its URL ends in
+    /// `.css`, starts with `http://`, `https://` or `//`, is written as `url(...)`, or is
+    /// followed by a media query or `supports(...)`. Always `false` for other kinds.
+    pub plain_css: bool,
 }
 
 /// The kind of import statement.
@@ -41,41 +47,53 @@ pub fn collect_imports(root: &SyntaxNode) -> Vec<ImportRef> {
 
 fn collect_rec(node: &SyntaxNode, out: &mut Vec<ImportRef>) {
     match node.kind() {
-        SyntaxKind::USE_RULE => {
-            if let Some(rule) = ast::UseRule::cast(node.clone())
-                && let Some(path) = rule.module_path()
-            {
+        SyntaxKind::USE_RULE | SyntaxKind::FORWARD_RULE => {
+            let path = if node.kind() == SyntaxKind::USE_RULE {
+                ast::UseRule::cast(node.clone()).and_then(|rule| rule.module_path())
+            } else {
+                ast::ForwardRule::cast(node.clone()).and_then(|rule| rule.module_path())
+            };
+            let token = node
+                .children_with_tokens()
+                .filter_map(rowan::NodeOrToken::into_token)
+                .find(|t| t.kind() == SyntaxKind::QUOTED_STRING);
+            if let (Some(path), Some(token)) = (path, token) {
                 out.push(ImportRef {
-                    kind: ImportKind::Use,
+                    kind: if node.kind() == SyntaxKind::USE_RULE {
+                        ImportKind::Use
+                    } else {
+                        ImportKind::Forward
+                    },
                     path,
                     range: node.text_range(),
-                });
-            }
-        }
-        SyntaxKind::FORWARD_RULE => {
-            if let Some(rule) = ast::ForwardRule::cast(node.clone())
-                && let Some(path) = rule.module_path()
-            {
-                out.push(ImportRef {
-                    kind: ImportKind::Forward,
-                    path,
-                    range: node.text_range(),
+                    path_range: token.text_range(),
+                    plain_css: false,
                 });
             }
         }
         SyntaxKind::IMPORT_RULE => {
             // @import paths are bare QUOTED_STRING tokens (not wrapped in Expr nodes)
-            for token in node
+            let tokens: Vec<_> = node
                 .children_with_tokens()
                 .filter_map(rowan::NodeOrToken::into_token)
-            {
-                if token.kind() == SyntaxKind::QUOTED_STRING {
-                    out.push(ImportRef {
-                        kind: ImportKind::Import,
-                        path: crate::ast::unquote(token.text()).to_owned(),
-                        range: node.text_range(),
-                    });
+                .filter(|t| !t.kind().is_trivia())
+                .collect();
+            for (i, token) in tokens.iter().enumerate() {
+                if token.kind() != SyntaxKind::QUOTED_STRING {
+                    continue;
                 }
+                let path = crate::ast::unquote(token.text());
+                let in_url = i > 0 && tokens[i - 1].kind() == SyntaxKind::LPAREN;
+                let has_modifiers = tokens.get(i + 1).is_some_and(|next| {
+                    !matches!(next.kind(), SyntaxKind::COMMA | SyntaxKind::SEMICOLON)
+                });
+                out.push(ImportRef {
+                    kind: ImportKind::Import,
+                    path: path.to_owned(),
+                    range: node.text_range(),
+                    path_range: token.text_range(),
+                    plain_css: in_url || has_modifiers || is_plain_css_url(path),
+                });
             }
         }
         SyntaxKind::NAMESPACE_REF => {
@@ -103,9 +121,26 @@ fn try_load_css(node: &SyntaxNode) -> Option<ImportRef> {
         return None;
     }
     let path = func.first_string_arg()?;
+    let token = func
+        .args()?
+        .syntax()
+        .descendants_with_tokens()
+        .filter_map(rowan::NodeOrToken::into_token)
+        .find(|t| t.kind() == SyntaxKind::QUOTED_STRING)?;
     Some(ImportRef {
         kind: ImportKind::LoadCss,
         path,
         range: node.text_range(),
+        path_range: token.text_range(),
+        plain_css: false,
     })
+}
+
+// Case-sensitive, as in Dart Sass: `@import "a.CSS"` loads a stylesheet.
+#[allow(clippy::case_sensitive_file_extension_comparisons)]
+fn is_plain_css_url(url: &str) -> bool {
+    url.ends_with(".css")
+        || url.starts_with("http://")
+        || url.starts_with("https://")
+        || url.starts_with("//")
 }

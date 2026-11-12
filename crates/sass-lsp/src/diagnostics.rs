@@ -27,6 +27,7 @@ pub(crate) fn check_file(
     let mut result = Vec::new();
     let suppress_undefined = has_parse_errors || should_suppress_undefined(uri, module_graph);
 
+    check_missing_imports(uri, module_graph, &mut result);
     check_arg_count(&root, symbols, module_graph, uri, &mut result);
     if !suppress_undefined {
         check_undefined(&root, symbols, module_graph, uri, &mut result);
@@ -38,11 +39,39 @@ pub(crate) fn check_file(
     result
 }
 
+// ── Missing stylesheets ─────────────────────────────────────────────
+
+/// An import of a stylesheet that does not exist, reported as Dart Sass reports it.
+/// The undefined-name warnings it would cause stay suppressed, so the one cause gives
+/// one diagnostic.
+fn check_missing_imports(
+    uri: &Uri,
+    module_graph: &workspace::ModuleGraph,
+    out: &mut Vec<SemanticDiagnostic>,
+) {
+    for range in module_graph.missing_imports(uri) {
+        out.push(SemanticDiagnostic {
+            range,
+            message: "Can't find stylesheet to import.".to_owned(),
+            severity: DiagnosticSeverity::ERROR,
+            code: "unresolved-import",
+            data: None,
+        });
+    }
+}
+
 // ── Colon rules in indented Sass ────────────────────────────────────
 
 /// A nested rule with no block whose selector reads `name:value`, as `color:red`: the
 /// indented syntax reads it as a selector, as Dart Sass does, and the empty rule compiles
 /// to nothing, so a declaration with its space after `:` missing is far more likely.
+///
+/// A `value` that names a pseudo-class or a legacy single-colon pseudo-element, as in
+/// `a:hover` or `a:not(.b)`, is a selector written as one and is left alone, and so is
+/// `::`, unless `name` is a CSS property: `cursor:default` warns, `input:default` does
+/// not. A vendor-prefixed value is taken as a pseudo-class on the same terms, as
+/// `-webkit-autofill` after `input` but not `-webkit-box` after `display`.
+/// Parentheses alone prove nothing: `width:calc(1px)` is a declaration.
 fn check_colon_selectors(root: &SyntaxNode, out: &mut Vec<SemanticDiagnostic>) {
     for rule in root
         .descendants()
@@ -64,16 +93,23 @@ fn check_colon_selectors(root: &SyntaxNode, out: &mut Vec<SemanticDiagnostic>) {
         let (Some(selector), None) = (selectors.next(), selectors.next()) else {
             continue;
         };
-        let mut parts = selector.children();
-        let (Some(name), Some(pseudo)) = (parts.next(), parts.next()) else {
+        let parts: Vec<SyntaxNode> = selector.children().collect();
+        let Some((pseudo, name_parts)) = parts.split_last() else {
             continue;
         };
-        if !reads_as_property_name(&name)
+        if name_parts.is_empty()
+            || !name_parts.iter().all(reads_as_property_name)
             || pseudo.kind() != SyntaxKind::PSEUDO_SELECTOR
             || pseudo
                 .first_token()
                 .is_none_or(|t| t.kind() != SyntaxKind::COLON)
         {
+            continue;
+        }
+        let selector_text = selector.text().to_string();
+        let name_len = usize::from(pseudo.text_range().start() - selector.text_range().start());
+        let name = selector_text[..name_len].trim_start();
+        if name.contains(char::is_whitespace) || names_pseudo_selector(name, pseudo) {
             continue;
         }
         let text = list.text().to_string();
@@ -94,8 +130,8 @@ fn check_colon_selectors(root: &SyntaxNode, out: &mut Vec<SemanticDiagnostic>) {
     }
 }
 
-/// A selector part that a declaration could have as its property: a plain name, or an
-/// interpolation.
+/// A selector part that a declaration could have as (part of) its property: a plain
+/// name, or an interpolation.
 fn reads_as_property_name(part: &SyntaxNode) -> bool {
     match part.kind() {
         SyntaxKind::INTERPOLATION => true,
@@ -111,6 +147,48 @@ fn reads_as_property_name(part: &SyntaxNode) -> bool {
         _ => false,
     }
 }
+
+/// Whether `pseudo`, the `:value` after the selector `name`, is a pseudo selector.
+fn names_pseudo_selector(name: &str, pseudo: &SyntaxNode) -> bool {
+    let Some(value) = pseudo
+        .children_with_tokens()
+        .filter(|element| !element.kind().is_trivia())
+        .nth(1)
+        .and_then(NodeOrToken::into_token)
+        .filter(|token| token.kind() == SyntaxKind::IDENT)
+    else {
+        return false;
+    };
+    let value = value.text().to_ascii_lowercase();
+    // `cursor:default`: a CSS property's name before the colon makes a declaration far
+    // more likely, in an empty rule, than an element of that name.
+    let property = crate::css_properties::CSS_PROPERTIES
+        .binary_search(&name.to_ascii_lowercase().as_str())
+        .is_ok();
+    !property && (value.starts_with('-') || PSEUDO_SELECTORS.binary_search(&value.as_str()).is_ok())
+}
+
+/// Pseudo-classes, and the pseudo-elements browsers also accept after a single colon.
+/// Sorted. The `@page` ones (`:left`, `:right`, `:first`) are left out: in a style
+/// rule they read as `float:left` with its space missing.
+/// Those of CSS Modules (`:export`, `:import`, `:global`, `:local`) and Vue's `:deep` too.
+#[rustfmt::skip]
+const PSEUDO_SELECTORS: &[&str] = &[
+    "active", "active-view-transition", "active-view-transition-type", "after", "any",
+    "any-link", "autofill", "backdrop", "before", "blank", "buffering", "checked", "closed",
+    "current", "deep", "default", "defined", "dir", "disabled", "empty", "enabled",
+    "export", "first-child", "first-letter", "first-line", "first-of-type", "focus",
+    "focus-visible", "focus-within", "fullscreen", "future", "global", "has",
+    "has-slotted", "heading", "host", "host-context", "hover", "import", "in-range",
+    "indeterminate", "invalid", "is", "lang", "last-child", "last-of-type", "link", "local",
+    "local-link", "marker", "matches", "modal", "muted", "not", "nth-child", "nth-col",
+    "nth-last-child", "nth-last-col", "nth-last-of-type", "nth-of-type", "only-child",
+    "only-of-type", "open", "optional", "out-of-range", "part", "past", "paused",
+    "picture-in-picture", "placeholder", "placeholder-shown", "playing", "popover-open",
+    "read-only", "read-write", "required", "root", "scope", "seeking", "selection",
+    "slotted", "stalled", "state", "target", "target-within", "user-invalid", "user-valid",
+    "valid", "visited", "volume-locked", "where", "xr-overlay",
+];
 
 // ── Argument count checking ─────────────────────────────────────────
 
@@ -513,6 +591,12 @@ fn should_suppress_undefined(uri: &Uri, module_graph: &workspace::ModuleGraph) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pseudo_selectors_are_sorted() {
+        assert!(PSEUDO_SELECTORS.is_sorted());
+        assert!(crate::css_properties::CSS_PROPERTIES.is_sorted());
+    }
 
     #[test]
     fn param_info_no_params() {

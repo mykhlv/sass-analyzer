@@ -3114,6 +3114,375 @@ fn value_context_is_cleared_when_a_block_opens() {
 }
 
 #[test]
+fn function_named_url_in_another_case() {
+    check_tree(
+        "@function URL($a)\n  @return $a\n",
+        expect![[r#"
+        SOURCE_FILE@0..31
+          FUNCTION_RULE@0..30
+            AT@0..1 "@"
+            IDENT@1..9 "function"
+            WHITESPACE@9..10 " "
+            IDENT@10..13 "URL"
+            PARAM_LIST@13..17
+              LPAREN@13..14 "("
+              PARAM@14..16
+                DOLLAR@14..15 "$"
+                IDENT@15..16 "a"
+              RPAREN@16..17 ")"
+            BLOCK@17..30
+              LBRACE@17..17 ""
+              RETURN_RULE@17..30
+                WHITESPACE@17..20 "\n  "
+                AT@20..21 "@"
+                IDENT@21..27 "return"
+                VARIABLE_REF@27..30
+                  WHITESPACE@27..28 " "
+                  DOLLAR@28..29 "$"
+                  IDENT@29..30 "a"
+                SEMICOLON@30..30 ""
+              RBRACE@30..30 ""
+          WHITESPACE@30..31 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn if_condition_and_at_end_of_line_is_its_operand() {
+    check_tree(
+        "@if and\n  a\n    b: c\n",
+        expect![[r#"
+        SOURCE_FILE@0..21
+          IF_RULE@0..20
+            AT@0..1 "@"
+            IDENT@1..3 "if"
+            VALUE@3..7
+              WHITESPACE@3..4 " "
+              IDENT@4..7 "and"
+            BLOCK@7..20
+              LBRACE@7..7 ""
+              RULE_SET@7..20
+                SELECTOR_LIST@7..11
+                  SELECTOR@7..11
+                    SIMPLE_SELECTOR@7..11
+                      WHITESPACE@7..10 "\n  "
+                      IDENT@10..11 "a"
+                BLOCK@11..20
+                  LBRACE@11..11 ""
+                  DECLARATION@11..20
+                    PROPERTY@11..17
+                      WHITESPACE@11..16 "\n    "
+                      IDENT@16..17 "b"
+                    COLON@17..18 ":"
+                    VALUE@18..20
+                      VALUE@18..20
+                        WHITESPACE@18..19 " "
+                        IDENT@19..20 "c"
+                    SEMICOLON@20..20 ""
+                  RBRACE@20..20 ""
+              RBRACE@20..20 ""
+          WHITESPACE@20..21 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn if_condition_or_on_its_own_line() {
+    check_tree(
+        "@if\n  or\n  a\n    b: c\n",
+        expect![[r#"
+        SOURCE_FILE@0..22
+          IF_RULE@0..21
+            AT@0..1 "@"
+            IDENT@1..3 "if"
+            VALUE@3..8
+              WHITESPACE@3..6 "\n  "
+              IDENT@6..8 "or"
+            BLOCK@8..21
+              LBRACE@8..8 ""
+              RULE_SET@8..21
+                SELECTOR_LIST@8..12
+                  SELECTOR@8..12
+                    SIMPLE_SELECTOR@8..12
+                      WHITESPACE@8..11 "\n  "
+                      IDENT@11..12 "a"
+                BLOCK@12..21
+                  LBRACE@12..12 ""
+                  DECLARATION@12..21
+                    PROPERTY@12..18
+                      WHITESPACE@12..17 "\n    "
+                      IDENT@17..18 "b"
+                    COLON@18..19 ":"
+                    VALUE@19..21
+                      VALUE@19..21
+                        WHITESPACE@19..20 " "
+                        IDENT@20..21 "c"
+                    SEMICOLON@21..21 ""
+                  RBRACE@21..21 ""
+              RBRACE@21..21 ""
+          WHITESPACE@21..22 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn not_and_at_end_of_line_is_complete() {
+    check_tree(
+        "@if not and\n  a\n    b: c\n",
+        expect![[r#"
+        SOURCE_FILE@0..25
+          IF_RULE@0..24
+            AT@0..1 "@"
+            IDENT@1..3 "if"
+            UNARY_EXPR@3..11
+              WHITESPACE@3..4 " "
+              IDENT@4..7 "not"
+              VALUE@7..11
+                WHITESPACE@7..8 " "
+                IDENT@8..11 "and"
+            BLOCK@11..24
+              LBRACE@11..11 ""
+              RULE_SET@11..24
+                SELECTOR_LIST@11..15
+                  SELECTOR@11..15
+                    SIMPLE_SELECTOR@11..15
+                      WHITESPACE@11..14 "\n  "
+                      IDENT@14..15 "a"
+                BLOCK@15..24
+                  LBRACE@15..15 ""
+                  DECLARATION@15..24
+                    PROPERTY@15..21
+                      WHITESPACE@15..20 "\n    "
+                      IDENT@20..21 "b"
+                    COLON@21..22 ":"
+                    VALUE@22..24
+                      VALUE@22..24
+                        WHITESPACE@22..23 " "
+                        IDENT@23..24 "c"
+                    SEMICOLON@24..24 ""
+                  RBRACE@24..24 ""
+              RBRACE@24..24 ""
+          WHITESPACE@24..25 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn and_after_an_operand_still_goes_on() {
+    check_tree(
+        "@if $b and\n  $b\n  a\n    b: c\n",
+        expect![[r#"
+        SOURCE_FILE@0..29
+          IF_RULE@0..28
+            AT@0..1 "@"
+            IDENT@1..3 "if"
+            BINARY_EXPR@3..15
+              VARIABLE_REF@3..6
+                WHITESPACE@3..4 " "
+                DOLLAR@4..5 "$"
+                IDENT@5..6 "b"
+              WHITESPACE@6..7 " "
+              IDENT@7..10 "and"
+              VARIABLE_REF@10..15
+                WHITESPACE@10..13 "\n  "
+                DOLLAR@13..14 "$"
+                IDENT@14..15 "b"
+            BLOCK@15..28
+              LBRACE@15..15 ""
+              RULE_SET@15..28
+                SELECTOR_LIST@15..19
+                  SELECTOR@15..19
+                    SIMPLE_SELECTOR@15..19
+                      WHITESPACE@15..18 "\n  "
+                      IDENT@18..19 "a"
+                BLOCK@19..28
+                  LBRACE@19..19 ""
+                  DECLARATION@19..28
+                    PROPERTY@19..25
+                      WHITESPACE@19..24 "\n    "
+                      IDENT@24..25 "b"
+                    COLON@25..26 ":"
+                    VALUE@26..28
+                      VALUE@26..28
+                        WHITESPACE@26..27 " "
+                        IDENT@27..28 "c"
+                    SEMICOLON@28..28 ""
+                  RBRACE@28..28 ""
+              RBRACE@28..28 ""
+          WHITESPACE@28..29 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn variable_value_and_is_an_identifier() {
+    check_tree(
+        "$a: and\na\n  b: $a\n",
+        expect![[r#"
+        SOURCE_FILE@0..18
+          VARIABLE_DECL@0..7
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "a"
+            COLON@2..3 ":"
+            VALUE@3..7
+              WHITESPACE@3..4 " "
+              IDENT@4..7 "and"
+            SEMICOLON@7..7 ""
+          RULE_SET@7..17
+            SELECTOR_LIST@7..9
+              SELECTOR@7..9
+                SIMPLE_SELECTOR@7..9
+                  WHITESPACE@7..8 "\n"
+                  IDENT@8..9 "a"
+            BLOCK@9..17
+              LBRACE@9..9 ""
+              DECLARATION@9..17
+                PROPERTY@9..13
+                  WHITESPACE@9..12 "\n  "
+                  IDENT@12..13 "b"
+                COLON@13..14 ":"
+                VALUE@14..17
+                  VARIABLE_REF@14..17
+                    WHITESPACE@14..15 " "
+                    DOLLAR@15..16 "$"
+                    IDENT@16..17 "a"
+                SEMICOLON@17..17 ""
+              RBRACE@17..17 ""
+          WHITESPACE@17..18 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn and_after_a_percentage_goes_on() {
+    check_tree(
+        "@if 10% and\n  $b\n  a\n    b: c\n",
+        expect![[r#"
+        SOURCE_FILE@0..30
+          IF_RULE@0..29
+            AT@0..1 "@"
+            IDENT@1..3 "if"
+            BINARY_EXPR@3..16
+              DIMENSION@3..7
+                WHITESPACE@3..4 " "
+                NUMBER@4..6 "10"
+                PERCENT@6..7 "%"
+              WHITESPACE@7..8 " "
+              IDENT@8..11 "and"
+              VARIABLE_REF@11..16
+                WHITESPACE@11..14 "\n  "
+                DOLLAR@14..15 "$"
+                IDENT@15..16 "b"
+            BLOCK@16..29
+              LBRACE@16..16 ""
+              RULE_SET@16..29
+                SELECTOR_LIST@16..20
+                  SELECTOR@16..20
+                    SIMPLE_SELECTOR@16..20
+                      WHITESPACE@16..19 "\n  "
+                      IDENT@19..20 "a"
+                BLOCK@20..29
+                  LBRACE@20..20 ""
+                  DECLARATION@20..29
+                    PROPERTY@20..26
+                      WHITESPACE@20..25 "\n    "
+                      IDENT@25..26 "b"
+                    COLON@26..27 ":"
+                    VALUE@27..29
+                      VALUE@27..29
+                        WHITESPACE@27..28 " "
+                        IDENT@28..29 "c"
+                    SEMICOLON@29..29 ""
+                  RBRACE@29..29 ""
+              RBRACE@29..29 ""
+          WHITESPACE@29..30 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn and_after_a_variable_named_like_an_end_word_goes_on() {
+    check_tree(
+        "@if $from and\n  $b\n  a\n    b: c\n",
+        expect![[r#"
+        SOURCE_FILE@0..32
+          IF_RULE@0..31
+            AT@0..1 "@"
+            IDENT@1..3 "if"
+            BINARY_EXPR@3..18
+              VARIABLE_REF@3..9
+                WHITESPACE@3..4 " "
+                DOLLAR@4..5 "$"
+                IDENT@5..9 "from"
+              WHITESPACE@9..10 " "
+              IDENT@10..13 "and"
+              VARIABLE_REF@13..18
+                WHITESPACE@13..16 "\n  "
+                DOLLAR@16..17 "$"
+                IDENT@17..18 "b"
+            BLOCK@18..31
+              LBRACE@18..18 ""
+              RULE_SET@18..31
+                SELECTOR_LIST@18..22
+                  SELECTOR@18..22
+                    SIMPLE_SELECTOR@18..22
+                      WHITESPACE@18..21 "\n  "
+                      IDENT@21..22 "a"
+                BLOCK@22..31
+                  LBRACE@22..22 ""
+                  DECLARATION@22..31
+                    PROPERTY@22..28
+                      WHITESPACE@22..27 "\n    "
+                      IDENT@27..28 "b"
+                    COLON@28..29 ":"
+                    VALUE@29..31
+                      VALUE@29..31
+                        WHITESPACE@29..30 " "
+                        IDENT@30..31 "c"
+                    SEMICOLON@31..31 ""
+                  RBRACE@31..31 ""
+              RBRACE@31..31 ""
+          WHITESPACE@31..32 "\n"
+    "#]],
+    );
+}
+
+#[test]
+fn page_rule_selector_list() {
+    check_tree(
+        "@page toc, index:blank\n  margin: 1in\n",
+        expect![[r#"
+        SOURCE_FILE@0..37
+          PAGE_RULE@0..36
+            AT@0..1 "@"
+            IDENT@1..5 "page"
+            WHITESPACE@5..6 " "
+            IDENT@6..9 "toc"
+            COMMA@9..10 ","
+            WHITESPACE@10..11 " "
+            IDENT@11..16 "index"
+            COLON@16..17 ":"
+            IDENT@17..22 "blank"
+            BLOCK@22..36
+              LBRACE@22..22 ""
+              DECLARATION@22..36
+                PROPERTY@22..31
+                  WHITESPACE@22..25 "\n  "
+                  IDENT@25..31 "margin"
+                COLON@31..32 ":"
+                VALUE@32..36
+                  DIMENSION@32..36
+                    WHITESPACE@32..33 " "
+                    NUMBER@33..34 "1"
+                    IDENT@34..36 "in"
+                SEMICOLON@36..36 ""
+              RBRACE@36..36 ""
+          WHITESPACE@36..37 "\n"
+    "#]],
+    );
+}
+
+#[test]
 fn value_context_is_cleared_when_a_deferred_block_opens() {
     // Same reset, third path: an at-rule header defers its LBRACE, so the flush site
     // inside the main loop clears the flag rather than `process_newline`. The header's
@@ -5800,4 +6169,490 @@ fn silent_comment_continues_over_crlf_line_breaks() {
               WHITESPACE@34..36 "\r\n"
         "#]],
     );
+}
+
+// ── Recovery inside a bracket ────────────────────────────────────────
+
+#[test]
+fn use_with_namespaced_variable_is_one_error_in_the_indented_syntax() {
+    check_tree(
+        "@use \"other\" with (a.$b: c)\n.a\n  b: c\n",
+        expect![[r#"
+        SOURCE_FILE@0..38
+          USE_RULE@0..27
+            AT@0..1 "@"
+            IDENT@1..4 "use"
+            WHITESPACE@4..5 " "
+            QUOTED_STRING@5..12 "\"other\""
+            WHITESPACE@12..13 " "
+            IDENT@13..17 "with"
+            WHITESPACE@17..18 " "
+            LPAREN@18..19 "("
+            ERROR@19..26
+              IDENT@19..20 "a"
+              DOT@20..21 "."
+              DOLLAR@21..22 "$"
+              IDENT@22..23 "b"
+              COLON@23..24 ":"
+              WHITESPACE@24..25 " "
+              IDENT@25..26 "c"
+            RPAREN@26..27 ")"
+            SEMICOLON@27..27 ""
+          RULE_SET@27..37
+            SELECTOR_LIST@27..30
+              SELECTOR@27..30
+                SIMPLE_SELECTOR@27..30
+                  WHITESPACE@27..28 "\n"
+                  DOT@28..29 "."
+                  IDENT@29..30 "a"
+            BLOCK@30..37
+              LBRACE@30..30 ""
+              DECLARATION@30..37
+                PROPERTY@30..34
+                  WHITESPACE@30..33 "\n  "
+                  IDENT@33..34 "b"
+                COLON@34..35 ":"
+                VALUE@35..37
+                  VALUE@35..37
+                    WHITESPACE@35..36 " "
+                    IDENT@36..37 "c"
+                SEMICOLON@37..37 ""
+              RBRACE@37..37 ""
+          WHITESPACE@37..38 "\n"
+        errors:
+          19..20: expected DOLLAR
+    "#]],
+    );
+}
+
+#[test]
+fn bad_token_in_parens_spanning_lines_is_one_error() {
+    check_tree(
+        "$a: f((b c. d\n  e))\n$f: g\n",
+        expect![[r#"
+        SOURCE_FILE@0..26
+          VARIABLE_DECL@0..19
+            DOLLAR@0..1 "$"
+            IDENT@1..2 "a"
+            COLON@2..3 ":"
+            FUNCTION_CALL@3..19
+              WHITESPACE@3..4 " "
+              IDENT@4..5 "f"
+              ARG_LIST@5..19
+                LPAREN@5..6 "("
+                ARG@6..18
+                  PAREN_EXPR@6..18
+                    LPAREN@6..7 "("
+                    VALUE@7..8
+                      IDENT@7..8 "b"
+                    VALUE@8..10
+                      WHITESPACE@8..9 " "
+                      IDENT@9..10 "c"
+                    ERROR@10..17
+                      DOT@10..11 "."
+                      WHITESPACE@11..12 " "
+                      IDENT@12..13 "d"
+                      WHITESPACE@13..16 "\n  "
+                      IDENT@16..17 "e"
+                    RPAREN@17..18 ")"
+                RPAREN@18..19 ")"
+            SEMICOLON@19..19 ""
+          VARIABLE_DECL@19..25
+            WHITESPACE@19..20 "\n"
+            DOLLAR@20..21 "$"
+            IDENT@21..22 "f"
+            COLON@22..23 ":"
+            VALUE@23..25
+              WHITESPACE@23..24 " "
+              IDENT@24..25 "g"
+            SEMICOLON@25..25 ""
+          WHITESPACE@25..26 "\n"
+        errors:
+          10..11: expected expression
+    "#]],
+    );
+}
+
+#[test]
+fn include_using_without_parens_keeps_the_lines_beneath() {
+    check_tree(
+        "+m using $a\n  b: $a\nc\n  d: e\n",
+        expect![[r#"
+        SOURCE_FILE@0..29
+          INCLUDE_RULE@0..19
+            AT@0..0 ""
+            IDENT@0..1 "+"
+            IDENT@1..2 "m"
+            WHITESPACE@2..3 " "
+            IDENT@3..8 "using"
+            ERROR@8..11
+              WHITESPACE@8..9 " "
+              DOLLAR@9..10 "$"
+              IDENT@10..11 "a"
+            BLOCK@11..19
+              LBRACE@11..11 ""
+              DECLARATION@11..19
+                PROPERTY@11..15
+                  WHITESPACE@11..14 "\n  "
+                  IDENT@14..15 "b"
+                COLON@15..16 ":"
+                VALUE@16..19
+                  VARIABLE_REF@16..19
+                    WHITESPACE@16..17 " "
+                    DOLLAR@17..18 "$"
+                    IDENT@18..19 "a"
+                SEMICOLON@19..19 ""
+              RBRACE@19..19 ""
+          RULE_SET@19..28
+            SELECTOR_LIST@19..21
+              SELECTOR@19..21
+                SIMPLE_SELECTOR@19..21
+                  WHITESPACE@19..20 "\n"
+                  IDENT@20..21 "c"
+            BLOCK@21..28
+              LBRACE@21..21 ""
+              DECLARATION@21..28
+                PROPERTY@21..25
+                  WHITESPACE@21..24 "\n  "
+                  IDENT@24..25 "d"
+                COLON@25..26 ":"
+                VALUE@26..28
+                  VALUE@26..28
+                    WHITESPACE@26..27 " "
+                    IDENT@27..28 "e"
+                SEMICOLON@28..28 ""
+              RBRACE@28..28 ""
+          WHITESPACE@28..29 "\n"
+        errors:
+          9..10: expected `(`
+    "#]],
+    );
+}
+
+#[test]
+fn forward_as_without_a_prefix_is_one_error_in_the_indented_syntax() {
+    check_tree(
+        "@forward \"a\" as 1-*\n$c: d\n",
+        expect![[r#"
+        SOURCE_FILE@0..26
+          FORWARD_RULE@0..19
+            AT@0..1 "@"
+            IDENT@1..8 "forward"
+            WHITESPACE@8..9 " "
+            QUOTED_STRING@9..12 "\"a\""
+            WHITESPACE@12..13 " "
+            IDENT@13..15 "as"
+            ERROR@15..19
+              WHITESPACE@15..16 " "
+              NUMBER@16..17 "1"
+              MINUS@17..18 "-"
+              STAR@18..19 "*"
+            SEMICOLON@19..19 ""
+          VARIABLE_DECL@19..25
+            WHITESPACE@19..20 "\n"
+            DOLLAR@20..21 "$"
+            IDENT@21..22 "c"
+            COLON@22..23 ":"
+            VALUE@23..25
+              WHITESPACE@23..24 " "
+              IDENT@24..25 "d"
+            SEMICOLON@25..25 ""
+          WHITESPACE@25..26 "\n"
+        errors:
+          16..17: expected IDENT
+    "#]],
+    );
+}
+
+// ── An operator at the end of a line, before a line that is no operand ──
+
+#[test]
+fn word_operator_before_a_selector_line_reports_its_dot() {
+    // Dart Sass takes `.c` for the operand of `not`: `Expected digit.` at the `.`.
+    check_tree(
+        ".b\n  content: not\n  .c\n    d: e\n",
+        expect![[r#"
+        SOURCE_FILE@0..32
+          RULE_SET@0..31
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "b"
+            BLOCK@2..31
+              LBRACE@2..2 ""
+              NESTED_PROPERTY@2..31
+                PROPERTY@2..12
+                  WHITESPACE@2..5 "\n  "
+                  IDENT@5..12 "content"
+                COLON@12..13 ":"
+                VALUE@13..22
+                  VALUE@13..17
+                    WHITESPACE@13..14 " "
+                    IDENT@14..17 "not"
+                  ERROR@17..22
+                    WHITESPACE@17..20 "\n  "
+                    DOT@20..21 "."
+                    IDENT@21..22 "c"
+                BLOCK@22..31
+                  LBRACE@22..22 ""
+                  DECLARATION@22..31
+                    PROPERTY@22..28
+                      WHITESPACE@22..27 "\n    "
+                      IDENT@27..28 "d"
+                    COLON@28..29 ":"
+                    VALUE@29..31
+                      VALUE@29..31
+                        WHITESPACE@29..30 " "
+                        IDENT@30..31 "e"
+                    SEMICOLON@31..31 ""
+                  RBRACE@31..31 ""
+              RBRACE@31..31 ""
+          WHITESPACE@31..32 "\n"
+        errors:
+          20..21: expected digit
+    "#]],
+    );
+}
+
+#[test]
+fn plus_before_a_parent_selector_line_reports_its_dot() {
+    // Dart Sass: `Expected digit.`, after `&`, which is an operand.
+    check_tree(
+        ".b\n  content: 1 +\n  &.c\n    d: e\n",
+        expect![[r#"
+        SOURCE_FILE@0..33
+          RULE_SET@0..32
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "b"
+            BLOCK@2..32
+              LBRACE@2..2 ""
+              NESTED_PROPERTY@2..32
+                PROPERTY@2..12
+                  WHITESPACE@2..5 "\n  "
+                  IDENT@5..12 "content"
+                COLON@12..13 ":"
+                VALUE@13..23
+                  BINARY_EXPR@13..21
+                    NUMBER_LITERAL@13..15
+                      WHITESPACE@13..14 " "
+                      NUMBER@14..15 "1"
+                    WHITESPACE@15..16 " "
+                    PLUS@16..17 "+"
+                    VALUE@17..21
+                      WHITESPACE@17..20 "\n  "
+                      AMP@20..21 "&"
+                  ERROR@21..23
+                    DOT@21..22 "."
+                    IDENT@22..23 "c"
+                BLOCK@23..32
+                  LBRACE@23..23 ""
+                  DECLARATION@23..32
+                    PROPERTY@23..29
+                      WHITESPACE@23..28 "\n    "
+                      IDENT@28..29 "d"
+                    COLON@29..30 ":"
+                    VALUE@30..32
+                      VALUE@30..32
+                        WHITESPACE@30..31 " "
+                        IDENT@31..32 "e"
+                    SEMICOLON@32..32 ""
+                  RBRACE@32..32 ""
+              RBRACE@32..32 ""
+          WHITESPACE@32..33 "\n"
+        errors:
+          21..22: expected digit
+    "#]],
+    );
+}
+
+#[test]
+fn word_operator_before_a_pseudo_class_line_reports_its_colon() {
+    // Dart Sass: `expected newline.` at the `:`.
+    check_tree(
+        ".b\n  content: not\n  &:hover\n    d: e\n",
+        expect![[r#"
+        SOURCE_FILE@0..37
+          RULE_SET@0..36
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "b"
+            BLOCK@2..36
+              LBRACE@2..2 ""
+              NESTED_PROPERTY@2..36
+                PROPERTY@2..12
+                  WHITESPACE@2..5 "\n  "
+                  IDENT@5..12 "content"
+                COLON@12..13 ":"
+                VALUE@13..27
+                  VALUE@13..17
+                    WHITESPACE@13..14 " "
+                    IDENT@14..17 "not"
+                  VALUE@17..21
+                    WHITESPACE@17..20 "\n  "
+                    AMP@20..21 "&"
+                  ERROR@21..27
+                    COLON@21..22 ":"
+                    IDENT@22..27 "hover"
+                BLOCK@27..36
+                  LBRACE@27..27 ""
+                  DECLARATION@27..36
+                    PROPERTY@27..33
+                      WHITESPACE@27..32 "\n    "
+                      IDENT@32..33 "d"
+                    COLON@33..34 ":"
+                    VALUE@34..36
+                      VALUE@34..36
+                        WHITESPACE@34..35 " "
+                        IDENT@35..36 "e"
+                    SEMICOLON@36..36 ""
+                  RBRACE@36..36 ""
+              RBRACE@36..36 ""
+          WHITESPACE@36..37 "\n"
+        errors:
+          21..22: expected newline
+    "#]],
+    );
+}
+
+#[test]
+fn plus_before_a_declaration_line_reports_its_colon() {
+    // Dart Sass: `expected newline.` at the `:`.
+    check_tree(
+        ".b\n  content: 1 +\n  b: c\n.d\n  e: f\n",
+        expect![[r#"
+        SOURCE_FILE@0..35
+          RULE_SET@0..24
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "b"
+            BLOCK@2..24
+              LBRACE@2..2 ""
+              DECLARATION@2..24
+                PROPERTY@2..12
+                  WHITESPACE@2..5 "\n  "
+                  IDENT@5..12 "content"
+                COLON@12..13 ":"
+                VALUE@13..24
+                  BINARY_EXPR@13..21
+                    NUMBER_LITERAL@13..15
+                      WHITESPACE@13..14 " "
+                      NUMBER@14..15 "1"
+                    WHITESPACE@15..16 " "
+                    PLUS@16..17 "+"
+                    VALUE@17..21
+                      WHITESPACE@17..20 "\n  "
+                      IDENT@20..21 "b"
+                  ERROR@21..24
+                    COLON@21..22 ":"
+                    WHITESPACE@22..23 " "
+                    IDENT@23..24 "c"
+                SEMICOLON@24..24 ""
+              RBRACE@24..24 ""
+          RULE_SET@24..34
+            SELECTOR_LIST@24..27
+              SELECTOR@24..27
+                SIMPLE_SELECTOR@24..27
+                  WHITESPACE@24..25 "\n"
+                  DOT@25..26 "."
+                  IDENT@26..27 "d"
+            BLOCK@27..34
+              LBRACE@27..27 ""
+              DECLARATION@27..34
+                PROPERTY@27..31
+                  WHITESPACE@27..30 "\n  "
+                  IDENT@30..31 "e"
+                COLON@31..32 ":"
+                VALUE@32..34
+                  VALUE@32..34
+                    WHITESPACE@32..33 " "
+                    IDENT@33..34 "f"
+                SEMICOLON@34..34 ""
+              RBRACE@34..34 ""
+          WHITESPACE@34..35 "\n"
+        errors:
+          21..22: expected newline
+    "#]],
+    );
+}
+
+#[test]
+fn word_operator_before_a_variable_line_reports_its_colon() {
+    // Dart Sass: `expected newline.` at the `:`.
+    check_tree(
+        ".b\n  content: not\n$b: 2\n.d\n  e: f\n",
+        expect![[r#"
+        SOURCE_FILE@0..34
+          RULE_SET@0..23
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "b"
+            BLOCK@2..23
+              LBRACE@2..2 ""
+              DECLARATION@2..23
+                PROPERTY@2..12
+                  WHITESPACE@2..5 "\n  "
+                  IDENT@5..12 "content"
+                COLON@12..13 ":"
+                VALUE@13..23
+                  VALUE@13..17
+                    WHITESPACE@13..14 " "
+                    IDENT@14..17 "not"
+                  VARIABLE_REF@17..20
+                    WHITESPACE@17..18 "\n"
+                    DOLLAR@18..19 "$"
+                    IDENT@19..20 "b"
+                  ERROR@20..23
+                    COLON@20..21 ":"
+                    WHITESPACE@21..22 " "
+                    NUMBER@22..23 "2"
+                SEMICOLON@23..23 ""
+              RBRACE@23..23 ""
+          RULE_SET@23..33
+            SELECTOR_LIST@23..26
+              SELECTOR@23..26
+                SIMPLE_SELECTOR@23..26
+                  WHITESPACE@23..24 "\n"
+                  DOT@24..25 "."
+                  IDENT@25..26 "d"
+            BLOCK@26..33
+              LBRACE@26..26 ""
+              DECLARATION@26..33
+                PROPERTY@26..30
+                  WHITESPACE@26..29 "\n  "
+                  IDENT@29..30 "e"
+                COLON@30..31 ":"
+                VALUE@31..33
+                  VALUE@31..33
+                    WHITESPACE@31..32 " "
+                    IDENT@32..33 "f"
+                SEMICOLON@33..33 ""
+              RBRACE@33..33 ""
+          WHITESPACE@33..34 "\n"
+        errors:
+          20..21: expected newline
+    "#]],
+    );
+}
+
+#[test]
+fn operator_before_an_operand_line_is_valid() {
+    for source in [
+        ".b\n  content: 1 -\n  .5\n",
+        ".b\n  content: not\n  true\n",
+        ".b\n  content: a and\n  b\n",
+        ".b\n  content: 1 +\n\n  2\n",
+    ] {
+        let (_, errors) = sass_parser::parse_sass(source);
+        assert!(errors.is_empty(), "{source:?}: {errors:?}");
+    }
 }

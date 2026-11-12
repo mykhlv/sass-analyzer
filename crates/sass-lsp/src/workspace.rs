@@ -1,10 +1,11 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use dashmap::DashMap;
 use sass_parser::imports::{self, ImportKind, ImportRef};
-use sass_parser::resolver::{ModuleResolver, ResolvedModule};
+use sass_parser::resolver::{ModuleResolver, ResolveError, ResolvedModule};
 use sass_parser::syntax::{GreenNode, NodeOrToken, SyntaxNode};
 use sass_parser::syntax_kind::SyntaxKind;
 use sass_parser::text_range::TextRange;
@@ -58,6 +59,17 @@ pub struct ModuleInfo {
     pub has_legacy_import: bool,
     /// True if the file has `@use`/`@forward` imports that could not be resolved.
     pub has_unresolved_use: bool,
+    /// Distinct for every `index_file` call, so a tree re-parsed from an older
+    /// source is never cached over a newer one.
+    pub generation: u64,
+    /// URL ranges of the imports that do not resolve and that the resolver could
+    /// have found, so are reported as missing stylesheets.
+    pub missing_imports: Vec<TextRange>,
+}
+
+enum CachedGreen {
+    Tree(GreenNode),
+    Evicted { generation: u64, source: String },
 }
 
 /// Cross-file dependency graph for the SCSS workspace.
@@ -73,7 +85,14 @@ pub struct ModuleGraph {
     tree_lru: Mutex<VecDeque<Uri>>,
     /// LRU order for source text eviction (front = most recently used).
     source_lru: Mutex<VecDeque<Uri>>,
+    next_generation: AtomicU64,
     runtime_config: Arc<RuntimeConfig>,
+    /// The stylesheet entries of each `package.json` read so far, with the
+    /// modification time and length they were read at.
+    package_manifests: Mutex<HashMap<PathBuf, CachedManifest>>,
+    /// How many times a `package.json` was read and parsed.
+    #[cfg(test)]
+    manifest_reads: std::sync::atomic::AtomicUsize,
 }
 
 impl ModuleGraph {
@@ -87,7 +106,11 @@ impl ModuleGraph {
             allowed_roots: RwLock::new(Vec::new()),
             tree_lru: Mutex::new(VecDeque::new()),
             source_lru: Mutex::new(VecDeque::new()),
+            next_generation: AtomicU64::new(0),
             runtime_config,
+            package_manifests: Mutex::new(HashMap::new()),
+            #[cfg(test)]
+            manifest_reads: std::sync::atomic::AtomicUsize::new(0),
         }
     }
 
@@ -223,13 +246,10 @@ impl ModuleGraph {
     /// Get the green tree for a URI, re-parsing from stored source if evicted.
     /// The parser (SCSS or indented Sass) is chosen by the URI's file extension.
     fn get_or_reparse_green(&self, uri: &Uri) -> Option<GreenNode> {
-        let info = self.files.get(uri)?;
-        if let Some(green) = &info.green {
-            return Some(green.clone());
-        }
-        // Re-parse from stored text (invariant: source_text is Some when green is None).
-        let source = info.source_text.clone()?;
-        drop(info);
+        let (generation, source) = match self.cached_green(uri)? {
+            CachedGreen::Tree(green) => return Some(green),
+            CachedGreen::Evicted { generation, source } => (generation, source),
+        };
         let parse_fn = if crate::worker::is_sass_file(uri) {
             sass_parser::parse_sass
         } else {
@@ -237,12 +257,46 @@ impl ModuleGraph {
         };
         let (green, _) =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| parse_fn(&source))).ok()?;
-        if let Some(mut info) = self.files.get_mut(uri) {
+        Some(self.store_reparsed(uri, generation, green))
+    }
+
+    /// The stored tree, or the stored source to re-parse it from. Parsing happens
+    /// with no guard held, so `index_file` may replace the entry meanwhile.
+    fn cached_green(&self, uri: &Uri) -> Option<CachedGreen> {
+        let info = self.files.get(uri)?;
+        if let Some(green) = &info.green {
+            return Some(CachedGreen::Tree(green.clone()));
+        }
+        // Invariant: source_text is Some when green is None.
+        Some(CachedGreen::Evicted {
+            generation: info.generation,
+            source: info.source_text.clone()?,
+        })
+    }
+
+    /// Cache a tree re-parsed from the source `cached_green` returned for
+    /// `generation`, and return the tree the caller should use.
+    fn store_reparsed(&self, uri: &Uri, generation: u64, green: GreenNode) -> GreenNode {
+        {
+            let Some(mut info) = self.files.get_mut(uri) else {
+                return green;
+            };
+            if info.generation != generation {
+                return green;
+            }
+            if let Some(cached) = &info.green {
+                return cached.clone();
+            }
             info.green = Some(green.clone());
         }
         self.touch_tree_lru(uri);
         self.evict_trees();
-        Some(green)
+        green
+    }
+
+    /// Whether the file is indexed.
+    pub fn contains(&self, uri: &Uri) -> bool {
+        self.files.contains_key(uri)
     }
 
     /// Total number of indexed files.
@@ -280,6 +334,8 @@ impl ModuleGraph {
                 source_text: Some(source_text),
                 has_legacy_import,
                 has_unresolved_use: false, // updated after resolution loop below
+                generation: self.next_generation.fetch_add(1, Ordering::Relaxed),
+                missing_imports: Vec::new(),
             },
         );
         self.touch_tree_lru(uri);
@@ -290,6 +346,7 @@ impl ModuleGraph {
 
         let mut resolved_edges = Vec::new();
         let mut has_unresolved_use = false;
+        let mut missing_imports = Vec::new();
 
         for import_ref in &import_refs {
             if import_ref.kind == ImportKind::LoadCss {
@@ -300,13 +357,8 @@ impl ModuleGraph {
             // Scope the guard to the resolve call: index_dependency below recurses
             // into index_file, and a recursive read lock can deadlock against
             // set_resolver waiting to write.
-            let resolved = {
-                let resolver = self
-                    .resolver
-                    .read()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                resolver.resolve(&import_ref.path, base)
-            };
+            let (resolved, package) =
+                self.resolve_url_with_package(&import_ref.path, base, import_ref.kind);
 
             if let Ok(ResolvedModule::File(target_path)) = resolved {
                 let target_uri = path_to_uri(&target_path);
@@ -338,8 +390,22 @@ impl ModuleGraph {
                         visibility: ForwardVisibility::default(),
                     });
                 }
-            } else if import_ref.kind == ImportKind::Use || import_ref.kind == ImportKind::Forward {
-                has_unresolved_use = true;
+            } else {
+                if import_ref.kind == ImportKind::Use || import_ref.kind == ImportKind::Forward {
+                    has_unresolved_use = true;
+                }
+                let missing = match resolved {
+                    Err(ResolveError::UnknownBuiltin(_)) => true,
+                    Err(ResolveError::NotFound(_)) => {
+                        !import_ref.plain_css
+                            && is_resolvable_url(&import_ref.path)
+                            && package == PackageLookup::Absent
+                    }
+                    Ok(_) => false,
+                };
+                if missing {
+                    missing_imports.push(import_ref.path_range);
+                }
             }
         }
 
@@ -373,9 +439,32 @@ impl ModuleGraph {
 
         self.edges.insert(uri.clone(), resolved_edges);
 
-        if has_unresolved_use && let Some(mut info) = self.files.get_mut(uri) {
-            info.has_unresolved_use = true;
+        if (has_unresolved_use || !missing_imports.is_empty())
+            && let Some(mut info) = self.files.get_mut(uri)
+        {
+            info.has_unresolved_use = has_unresolved_use;
+            info.missing_imports = missing_imports;
         }
+    }
+
+    /// URL ranges of the file's imports that name a stylesheet that does not exist,
+    /// unless the settings turn that report off.
+    pub fn missing_imports(&self, uri: &Uri) -> Vec<TextRange> {
+        if !self.runtime_config.report_unresolved_imports() {
+            return Vec::new();
+        }
+        self.files
+            .get(uri)
+            .map(|info| info.missing_imports.clone())
+            .unwrap_or_default()
+    }
+
+    /// Whether some `@use`, `@forward` or `@import` of the file does not resolve,
+    /// so a new file or a settings change may change what it loads.
+    pub fn has_unresolved_paths(&self, uri: &Uri) -> bool {
+        self.files
+            .get(uri)
+            .is_some_and(|info| info.has_unresolved_use || !info.missing_imports.is_empty())
     }
 
     /// Check if a file has `@import` or `meta.load-css()` — these can provide
@@ -738,16 +827,164 @@ impl ModuleGraph {
 
     /// Resolve an import specifier from a given file URI.
     /// Returns the target file URI if resolution succeeds.
-    pub fn resolve_import(&self, from: &Uri, spec: &str) -> Option<Uri> {
+    pub fn resolve_import(&self, from: &Uri, spec: &str, kind: ImportKind) -> Option<Uri> {
         let base = uri_to_path(from)?;
-        let resolver = self
-            .resolver
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        match resolver.resolve(spec, &base) {
+        match self.resolve_url(spec, &base, kind) {
             Ok(ResolvedModule::File(path)) => Some(path_to_uri(&path)),
             _ => None,
         }
+    }
+
+    /// Resolve the URL of an import of `kind` in the file at `base`. Beyond what the
+    /// resolver finds, a bare package name loads the stylesheet its `package.json`
+    /// names, as bundlers do.
+    fn resolve_url(
+        &self,
+        url: &str,
+        base: &Path,
+        kind: ImportKind,
+    ) -> Result<ResolvedModule, ResolveError> {
+        self.resolve_url_with_package(url, base, kind).0
+    }
+
+    /// [`Self::resolve_url`], and the package lookup made for a URL the resolver did
+    /// not find, `Absent` if none was made, so that a caller need not repeat it.
+    fn resolve_url_with_package(
+        &self,
+        url: &str,
+        base: &Path,
+        kind: ImportKind,
+    ) -> (Result<ResolvedModule, ResolveError>, PackageLookup) {
+        // Scoped: index_dependency recurses into index_file, and a recursive read
+        // lock can deadlock against set_resolver waiting to write.
+        let resolved = {
+            let resolver = self
+                .resolver
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if kind == ImportKind::Import {
+                resolver.resolve_for_import(url, base)
+            } else {
+                resolver.resolve(url, base)
+            }
+        };
+        if !matches!(resolved, Err(ResolveError::NotFound(_))) {
+            return (resolved, PackageLookup::Absent);
+        }
+        match self.lookup_package(url, base) {
+            PackageLookup::Entry(path) => (
+                Ok(ResolvedModule::File(path.clone())),
+                PackageLookup::Entry(path),
+            ),
+            package => (resolved, package),
+        }
+    }
+
+    /// Look `url` up as a package in the nearest `node_modules` holding its first
+    /// segment (two for a scoped `@scope/name`). For the bare name, the entry is the
+    /// `sass` or `style` condition of `exports`, else the `sass` or `style` field.
+    fn lookup_package(&self, url: &str, base: &Path) -> PackageLookup {
+        let Some((name, subpath)) = package_name(url) else {
+            return PackageLookup::Absent;
+        };
+        let mut dir = base.parent();
+        while let Some(current) = dir {
+            let package_dir = current.join("node_modules").join(name);
+            if package_dir.is_dir() {
+                if !subpath.is_empty() || !self.is_path_allowed(&package_dir) {
+                    return PackageLookup::Installed;
+                }
+                return self
+                    .package_entry(&package_dir, base)
+                    .map_or(PackageLookup::Installed, PackageLookup::Entry);
+            }
+            dir = current.parent();
+        }
+        PackageLookup::Absent
+    }
+
+    fn package_entry(&self, package_dir: &Path, base: &Path) -> Option<PathBuf> {
+        let entries = self.manifest_entries(&package_dir.join("package.json"))?;
+        for entry in entries.iter() {
+            let path = package_dir.join(entry.trim_start_matches("./"));
+            if path.is_file() {
+                return Some(path);
+            }
+            let resolved = {
+                let resolver = self
+                    .resolver
+                    .read()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                resolver.resolve(path.to_str()?, base)
+            };
+            if let Ok(ResolvedModule::File(found)) = resolved {
+                return Some(found);
+            }
+        }
+        None
+    }
+
+    /// The stylesheet entries `manifest` names, in the order they are tried: the
+    /// `sass` and `style` conditions of `exports`, then the `sass` and `style`
+    /// fields. Cached until the file's modification time or length changes, since
+    /// the editor's file watcher does not report changes inside `node_modules`.
+    fn manifest_entries(&self, manifest: &Path) -> Option<Arc<[String]>> {
+        const MAX_CACHED_MANIFESTS: usize = 1024;
+
+        let stamp = std::fs::metadata(manifest)
+            .ok()
+            .map(|meta| (meta.modified().ok(), meta.len()));
+        let mut cache = self
+            .package_manifests
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(stamp) = stamp else {
+            cache.remove(manifest);
+            return None;
+        };
+        if let Some(cached) = cache.get(manifest)
+            && cached.stamp == stamp
+        {
+            return cached.entries.clone();
+        }
+        drop(cache);
+
+        #[cfg(test)]
+        self.manifest_reads.fetch_add(1, Ordering::Relaxed);
+        let entries = std::fs::read_to_string(manifest)
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+            .map(|manifest| {
+                let exports = manifest.get("exports");
+                let exports = exports.and_then(|e| e.get(".")).or(exports);
+                ["sass", "style"]
+                    .into_iter()
+                    .filter_map(|c| exports.and_then(|e| e.get(c)))
+                    .chain(
+                        ["sass", "style"]
+                            .into_iter()
+                            .filter_map(|f| manifest.get(f)),
+                    )
+                    .filter_map(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                    .collect::<Arc<[String]>>()
+            });
+
+        let mut cache = self
+            .package_manifests
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if cache.len() >= MAX_CACHED_MANIFESTS {
+            cache.clear();
+        }
+        cache.insert(
+            manifest.to_path_buf(),
+            CachedManifest {
+                stamp,
+                entries: entries.clone(),
+            },
+        );
+        entries
     }
 
     /// Provide completion items for `@use "` / `@forward "` import paths.
@@ -1145,6 +1382,19 @@ impl ModuleGraph {
             );
             return;
         }
+        // Plain CSS, which Dart Sass loads as such: no Sass member is defined there, and
+        // its imports are left to the browser. Nothing reads its tree, so it is not even
+        // read; the module stays in the graph, as the target of the import's edge.
+        if path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("css"))
+        {
+            let (green, _) = sass_parser::parse_scss("");
+            let line_index = sass_parser::line_index::LineIndex::new("");
+            let symbols = Arc::new(FileSymbols::default());
+            self.index_file(uri, green, symbols, line_index, String::new());
+            return;
+        }
         let Ok(source) = std::fs::read_to_string(path) else {
             return;
         };
@@ -1397,6 +1647,54 @@ fn find_name_in_forward_clauses(
     results
 }
 
+/// A `package.json`'s stylesheet entries (`None` if it does not parse), and the
+/// modification time and length of the file they were read from.
+struct CachedManifest {
+    stamp: (Option<std::time::SystemTime>, u64),
+    entries: Option<Arc<[String]>>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum PackageLookup {
+    /// The stylesheet the package's manifest names.
+    Entry(PathBuf),
+    /// The package is installed, but the server cannot tell what loads from it.
+    Installed,
+    Absent,
+}
+
+/// Split a bare package URL into its package name and the rest of the path.
+fn package_name(url: &str) -> Option<(&str, &str)> {
+    if url.is_empty() || url.starts_with(['.', '/', '\\']) {
+        return None;
+    }
+    let segments = if url.starts_with('@') { 2 } else { 1 };
+    let end = url
+        .match_indices('/')
+        .nth(segments - 1)
+        .map_or(url.len(), |(i, _)| i);
+    let (name, rest) = url.split_at(end);
+    if segments == 2 && !name.contains('/') {
+        return None;
+    }
+    Some((name, rest.trim_start_matches('/')))
+}
+
+/// Whether `url` is one the resolver looks up on disk: not a URL with a scheme, as
+/// `pkg:` or `https:`, which only a custom importer loads, nor a bundler's `~` prefix.
+fn is_resolvable_url(url: &str) -> bool {
+    if url.starts_with('~') {
+        return false;
+    }
+    let scheme_len = url
+        .find(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.')))
+        .unwrap_or(url.len());
+    let has_scheme = scheme_len > 0
+        && url.starts_with(|c: char| c.is_ascii_alphabetic())
+        && url[scheme_len..].starts_with(':');
+    !has_scheme
+}
+
 fn is_scss_sass_or_css(name: &str) -> bool {
     Path::new(name).extension().is_some_and(|ext| {
         ext.eq_ignore_ascii_case("scss")
@@ -1550,6 +1848,8 @@ mod tests {
             source_text: Some(source.to_owned()),
             has_legacy_import: false,
             has_unresolved_use: false,
+            generation: 0,
+            missing_imports: Vec::new(),
         }
     }
 
@@ -2380,6 +2680,84 @@ mod tests {
         );
     }
 
+    fn index_scss(graph: &ModuleGraph, uri: &Uri, source: &str) {
+        let (green, _) = sass_parser::parse_scss(source);
+        let line_index = sass_parser::line_index::LineIndex::new(source);
+        let symbols = {
+            let root = SyntaxNode::new_root(green.clone());
+            std::sync::Arc::new(symbols::collect_symbols(&root))
+        };
+        graph.index_file(uri, green, symbols, line_index, source.to_owned());
+    }
+
+    fn graph_caching_one_tree() -> ModuleGraph {
+        let config = std::sync::Arc::new(crate::config::RuntimeConfig::default());
+        config.apply(&crate::config::SassAnalyzerConfig {
+            max_cached_trees: Some(1),
+            ..Default::default()
+        });
+        ModuleGraph::new(config)
+    }
+
+    #[test]
+    fn reparse_of_replaced_source_is_not_cached() {
+        let graph = graph_caching_one_tree();
+        let uri: Uri = "file:///a.scss".parse().unwrap();
+        let other: Uri = "file:///b.scss".parse().unwrap();
+        index_scss(&graph, &uri, "$old: 1;\n");
+        index_scss(&graph, &other, "$x: 1;\n");
+
+        // A reader finds the tree evicted and re-parses the old source with no
+        // guard held; meanwhile the worker indexes a new version, whose tree is
+        // then evicted in turn.
+        let Some(CachedGreen::Evicted { generation, source }) = graph.cached_green(&uri) else {
+            panic!("tree should be evicted");
+        };
+        index_scss(&graph, &uri, "$new: 2;\n");
+        index_scss(&graph, &other, "$x: 1;\n");
+        let (stale, _) = sass_parser::parse_scss(&source);
+        let returned = graph.store_reparsed(&uri, generation, stale);
+        assert_eq!(
+            SyntaxNode::new_root(returned).text().to_string(),
+            "$old: 1;\n"
+        );
+
+        let green = graph.get_green(&uri).expect("green tree");
+        assert_eq!(SyntaxNode::new_root(green).text().to_string(), "$new: 2;\n");
+    }
+
+    #[test]
+    fn reparse_of_current_source_is_cached() {
+        let graph = graph_caching_one_tree();
+        let uri: Uri = "file:///a.scss".parse().unwrap();
+        let other: Uri = "file:///b.scss".parse().unwrap();
+        index_scss(&graph, &uri, "$a: 1;\n");
+        index_scss(&graph, &other, "$x: 1;\n");
+
+        let green = graph.get_green(&uri).expect("green tree");
+        assert_eq!(SyntaxNode::new_root(green).text().to_string(), "$a: 1;\n");
+        assert!(
+            matches!(graph.cached_green(&uri), Some(CachedGreen::Tree(_))),
+            "the re-parsed tree should be cached"
+        );
+    }
+
+    #[test]
+    fn resolvable_urls() {
+        for url in ["colors", "../a/b", "@alias/x", "a/b:c", "_x.scss"] {
+            assert!(is_resolvable_url(url), "{url}");
+        }
+        for url in [
+            "pkg:x",
+            "https://x/y",
+            "file:///a",
+            "~bootstrap/x",
+            "a+b.c-d:e",
+        ] {
+            assert!(!is_resolvable_url(url), "{url}");
+        }
+    }
+
     #[test]
     #[ignore = "stress test for lock recursion; run manually with --ignored"]
     fn concurrent_set_resolver_and_index_does_not_deadlock() {
@@ -2441,6 +2819,62 @@ mod tests {
              (file_count = {indexed_count}, {INDEXED} files were indexed directly); \
              the @use \"other\" import must not have resolved"
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Index `src` as `dir/main.scss`.
+    fn index_main(graph: &ModuleGraph, dir: &Path, src: &str) -> Uri {
+        let (green, _) = sass_parser::parse_scss(src);
+        let syms = Arc::new(symbols::collect_symbols(&SyntaxNode::new_root(
+            green.clone(),
+        )));
+        let uri = path_to_uri(&dir.join("main.scss"));
+        let line_index = sass_parser::line_index::LineIndex::new(src);
+        graph.index_file(&uri, green, syms, line_index, src.to_owned());
+        uri
+    }
+
+    /// A package's manifest is read once per import while it is unchanged, and again
+    /// once it changes.
+    #[test]
+    fn package_manifest_is_read_once_until_it_changes() {
+        let dir =
+            std::env::temp_dir().join(format!("sass-analyzer-manifest-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let package = dir.join("node_modules").join("pkg");
+        std::fs::create_dir_all(&package).unwrap();
+        let manifest = package.join("package.json");
+        std::fs::write(&manifest, r#"{ "sass": "missing.scss" }"#).unwrap();
+        let reads = |graph: &ModuleGraph| graph.manifest_reads.load(Ordering::Relaxed);
+
+        let graph = ModuleGraph::new(Arc::new(RuntimeConfig::default()));
+        let src = "@use \"pkg\";\n";
+        let uri = index_main(&graph, &dir, src);
+        assert_eq!(reads(&graph), 1);
+        assert!(
+            graph.missing_imports(&uri).is_empty(),
+            "an installed package is not missing"
+        );
+        index_main(&graph, &dir, src);
+        assert_eq!(reads(&graph), 1);
+
+        std::fs::write(package.join("_entry.scss"), "$x: 1;\n").unwrap();
+        std::fs::write(&manifest, r#"{ "sass": "entry" }"#).unwrap();
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
+        std::fs::File::options()
+            .write(true)
+            .open(&manifest)
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+        index_main(&graph, &dir, src);
+        assert_eq!(reads(&graph), 2);
+        assert_eq!(
+            graph.resolve_import(&uri, "pkg", ImportKind::Use),
+            Some(path_to_uri(&package.join("_entry.scss")))
+        );
+        assert_eq!(reads(&graph), 2);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

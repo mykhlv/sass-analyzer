@@ -72,7 +72,7 @@ pub fn expr(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarker> {
 /// Extra values become siblings (no wrapper node).
 pub(crate) fn sass_value(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarker> {
     let cm = expr(p, ctx)?;
-    while !at_value_end(p)
+    while (!at_value_end(p) || at_important_expr(p))
         && !p.at(COMMA)
         && !p.at(RPAREN)
         && !p.at(RBRACKET)
@@ -82,6 +82,8 @@ pub(crate) fn sass_value(p: &mut Parser<'_>, ctx: ParseContext) -> Option<Comple
             // CSS separator: `11px/1.5`, `font: 12px/1.4 sans-serif`
             p.bump();
             p.continue_line_to(EXPR_START);
+        } else if at_important_expr(p) {
+            important(p);
         } else if p.at_ts(EXPR_START) {
             expr(p, ctx);
         } else {
@@ -89,6 +91,60 @@ pub(crate) fn sass_value(p: &mut Parser<'_>, ctx: ParseContext) -> Option<Comple
         }
     }
     Some(cm)
+}
+
+/// A space-separated value inside brackets, where `!important` is one of its items, as in
+/// `(a: 1 !important)`, `[a !important b]` or `f(1 !important)`. Outside them it is the
+/// declaration's flag, which ends the value.
+pub(crate) fn bracketed_value(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarker> {
+    let cm = sass_value(p, ctx);
+    while at_important(p) {
+        important(p);
+        if p.at_ts(EXPR_START) {
+            let _ = sass_value(p, ctx);
+        }
+    }
+    cm
+}
+
+fn at_important(p: &Parser<'_>) -> bool {
+    if !p.at(BANG) {
+        return false;
+    }
+    let joined = p.joined(super::lines::LINE_JOINS);
+    p.nth_joined(joined, 1) == IDENT
+        && p.nth_text_joined(joined, 1)
+            .eq_ignore_ascii_case("important")
+}
+
+/// Whether the `!` at the cursor is one Dart Sass reads as `!important` in a value: one
+/// followed by `important`, in any case, or by whitespace, a line break included, and
+/// then anything, which it reports. Joined to another word it is a flag, `!default`,
+/// which ends the value.
+pub(crate) fn at_important_expr(p: &Parser<'_>) -> bool {
+    if !p.at(BANG) {
+        return false;
+    }
+    let joined = p.joined(super::lines::LINE_JOINS);
+    at_important(p)
+        || p.nth_joined(joined, 1) == EOF
+        || p.nth_has_whitespace_before_joined(joined, 1)
+}
+
+/// `!important`, with the line breaks between its two tokens, or a `!` that
+/// [`at_important_expr`] reads as such, missing its word.
+pub(crate) fn important(p: &mut Parser<'_>) {
+    let m = p.start();
+    let word = at_important(p);
+    p.bump(); // !
+    if word {
+        p.continue_line_across_blank();
+        p.bump(); // important
+        let _ = m.complete(p, IMPORTANT);
+    } else {
+        p.error("expected `important`");
+        let _ = m.complete(p, ERROR);
+    }
 }
 
 /// Parse a comma-separated list of space-separated groups.
@@ -124,6 +180,7 @@ fn at_value_end(p: &Parser<'_>) -> bool {
 
 fn expr_bp(p: &mut Parser<'_>, min_bp: u8, ctx: ParseContext) -> Option<CompletedMarker> {
     let Ok(mut g) = p.depth_guard() else {
+        skip_too_deep(p);
         return None;
     };
 
@@ -164,6 +221,38 @@ fn expr_bp(p: &mut Parser<'_>, min_bp: u8, ctx: ParseContext) -> Option<Complete
     Some(lhs)
 }
 
+/// At the nesting limit, which has just been reported: the rest of the operand that went
+/// too deep, with the brackets it opens, as one error, up to what ends it at the depth it
+/// started at — a `,`, a closer of a bracket opened above, or the end of the statement.
+/// The brackets left open above it then end there with no error of their own.
+pub(crate) fn skip_too_deep(p: &mut Parser<'_>) {
+    let m = p.start();
+    let mut open: Vec<SyntaxKind> = Vec::new();
+    while !p.at_end() && !p.at_virtual() && !p.at_unclosed_string_break() {
+        let closer = match p.current() {
+            LPAREN => Some(RPAREN),
+            LBRACKET => Some(RBRACKET),
+            HASH_LBRACE => Some(RBRACE),
+            _ => None,
+        };
+        if let Some(closer) = closer {
+            open.push(closer);
+        } else {
+            match p.current() {
+                kind @ (RPAREN | RBRACKET | RBRACE) if open.last() == Some(&kind) => {
+                    open.pop();
+                }
+                RPAREN | RBRACKET | RBRACE | LBRACE | SEMICOLON => break,
+                COMMA if open.is_empty() => break,
+                _ => {}
+            }
+        }
+        p.bump();
+    }
+    let _ = m.complete(p, ERROR);
+    p.quiet_here();
+}
+
 // ── LHS: prefix operators + atoms ──────────────────────────────────
 
 fn lhs(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarker> {
@@ -197,7 +286,15 @@ pub fn variable_declaration(p: &mut Parser<'_>) {
         p.continue_line_across_blank();
     }
 
+    let value_errors = p.error_count();
     sass_value_list(p, ParseContext::SassScript);
+    if p.error_count() > value_errors {
+        if skip_rest_of_line(p) {
+            let _ = m.complete(p, VARIABLE_DECL);
+            return;
+        }
+        skip_rest_of_indented_line(p);
+    }
 
     // Parse flags: !default, !global (can co-occur)
     while p.at(BANG) {
@@ -222,6 +319,70 @@ pub fn variable_declaration(p: &mut Parser<'_>) {
     let _ = m.complete(p, VARIABLE_DECL);
 }
 
+/// After a value that reported an error where it could not be read, such as a bracket
+/// left unclosed, braced: the rest of the statement on its line, as one error, up to the
+/// `;` or `}` that ends it there, or else to the line break, unless a `{`, a flag or a
+/// bracket, which may go on below, comes first. The next line most likely starts the next
+/// statement, `$m: (` / `a: 1` / `b: 2` / `.c {`; the `;` missing before it is that same
+/// mistake. Returns whether it skipped to such a line. The indented layout ends the
+/// statement at the line itself.
+fn skip_rest_of_line(p: &mut Parser<'_>) -> bool {
+    if !p.braced() || p.at_line_break() {
+        return false;
+    }
+    let mut count = 0;
+    let to_line = loop {
+        match p.nth(count) {
+            SEMICOLON | RBRACE => break false,
+            LBRACE | BANG | EOF | LPAREN | LBRACKET | HASH_LBRACE | STRING_START => {
+                return false;
+            }
+            _ => {}
+        }
+        count += 1;
+        if p.nth_at_line_break(count) {
+            break true;
+        }
+    };
+    if count > 0 {
+        let m = p.start();
+        for _ in 0..count {
+            p.bump();
+        }
+        let _ = m.complete(p, ERROR);
+    }
+    to_line
+}
+
+/// [`skip_rest_of_line`] for the indented layout, where the statement ends with its line:
+/// after a value that reported an error, the rest of the line as part of that error, up
+/// to a flag, `$m: (` / `a: 1` / `b: 2`, whose `: 2` would report the line's end missing
+/// at the same place. A line that goes on with brackets or braces of its own is left to
+/// the recovery the statement's end makes.
+fn skip_rest_of_indented_line(p: &mut Parser<'_>) {
+    if p.braced() || !p.reported_here() {
+        return;
+    }
+    let mut count = 0;
+    loop {
+        match p.nth(count) {
+            SEMICOLON | LBRACE | RBRACE if p.nth_text(count).is_empty() => break,
+            BANG | EOF => break,
+            SEMICOLON | LBRACE | RBRACE | LPAREN | LBRACKET | HASH_LBRACE | STRING_START => {
+                return;
+            }
+            _ => count += 1,
+        }
+    }
+    if count > 0 {
+        let m = p.start();
+        for _ in 0..count {
+            p.bump();
+        }
+        let _ = m.complete(p, ERROR);
+    }
+}
+
 // ── Interpolation (Phase 3 upgrade) ────────────────────────────────
 
 /// Parse `#{expr}` with fully-parsed inner expression.
@@ -232,6 +393,7 @@ pub fn interpolation(p: &mut Parser<'_>) -> CompletedMarker {
     let unclosed_strings = p.unclosed_strings();
     {
         let mut g = p.transparent_guard();
+        let errors = g.error_count();
         g.bump(); // #{
         if g.at(RBRACE) {
             g.error("expected expression");
@@ -240,7 +402,7 @@ pub fn interpolation(p: &mut Parser<'_>) -> CompletedMarker {
         }
         // A string left unclosed inside ended the interpolation too, already reported.
         if g.unclosed_strings() == unclosed_strings {
-            g.expect(RBRACE);
+            crate::grammar::close_bracket(&mut g, RBRACE, errors);
         }
     }
     m.complete(p, INTERPOLATION)

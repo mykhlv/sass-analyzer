@@ -154,6 +154,9 @@ pub(crate) fn err_line(p: &mut Parser<'_>, message: &str, report: bool) {
         p.error(message);
     }
     skip_line(p);
+    if !p.braced() && p.at(SEMICOLON) && !p.current_text().is_empty() {
+        p.bump();
+    }
     if p.at(LBRACE) {
         super::block(p);
     }
@@ -169,13 +172,61 @@ pub(crate) fn rest_of_line(p: &mut Parser<'_>, errors: usize) {
     }
     let m = p.start();
     if p.error_count() == errors {
-        p.error("expected newline");
+        p.error(if after_written_semicolon(p) {
+            MULTIPLE_STATEMENTS
+        } else {
+            "expected newline"
+        });
     }
     skip_line(p);
     if p.at(LBRACE) {
         super::block(p);
     }
     let _ = m.complete(p, ERROR);
+}
+
+const MULTIPLE_STATEMENTS: &str =
+    "multiple statements on one line are not supported in the indented syntax";
+
+/// Whether the token before the cursor is a `;` written on its line, not the zero-width
+/// one that ends a line.
+fn after_written_semicolon(p: &Parser<'_>) -> bool {
+    p.prev_kind() == SEMICOLON && !p.prev_text().is_empty()
+}
+
+/// A `;` where a statement may start: braced, or the zero-width one that ends a line, an
+/// empty statement. A written one in the indented layout is one error, as in Dart Sass:
+/// after another `;` on its line, as `b: c;;`, a second statement on the line; on a line
+/// of its own, no statement at all.
+pub(crate) fn stray_semicolon(p: &mut Parser<'_>) {
+    debug_assert!(p.at(SEMICOLON));
+    if p.braced() || p.current_text().is_empty() {
+        p.bump();
+        return;
+    }
+    let m = p.start();
+    if after_written_semicolon(p) && !p.at_line_break() {
+        p.error(MULTIPLE_STATEMENTS);
+    } else {
+        p.error("expected end of rule");
+    }
+    p.bump();
+    let _ = m.complete(p, ERROR);
+}
+
+/// After a selector in the indented layout, at a written `;`, which ends no rule there:
+/// one error, `expected newline` as Dart Sass reports it, with the rest of the line, and
+/// below it the lines indented beneath it, which are still the rule's block.
+pub(crate) fn semicolon_after_selector(p: &mut Parser<'_>) -> bool {
+    if p.braced() || !p.at(SEMICOLON) || p.current_text().is_empty() {
+        return false;
+    }
+    let m = p.start();
+    p.error("expected newline");
+    p.bump();
+    skip_line(p);
+    let _ = m.complete(p, ERROR);
+    true
 }
 
 /// The end of a statement that takes no block. In the indented layout, the lines
@@ -215,7 +266,7 @@ pub(crate) fn end_without_block(p: &mut Parser<'_>, errors: usize, statement: &s
     let _ = m.complete(p, ERROR);
 }
 
-fn skip_line(p: &mut Parser<'_>) {
+pub(crate) fn skip_line(p: &mut Parser<'_>) {
     while !p.at_ts(LINE_END) && !p.at_end() {
         if matches!(p.current(), LPAREN | LBRACKET | HASH_LBRACE) {
             skip_bracket(p);
@@ -227,7 +278,7 @@ fn skip_line(p: &mut Parser<'_>) {
 
 /// A bracket in tokens being skipped, through its closer, so that the line breaks
 /// inside it stay trivia and one it leaves unclosed ends as the grammar's do, unreported.
-fn skip_bracket(p: &mut Parser<'_>) {
+pub(crate) fn skip_bracket(p: &mut Parser<'_>) {
     match p.current() {
         LPAREN => super::eat_balanced_with(p, LPAREN, RPAREN, false),
         LBRACKET => super::eat_balanced_with(p, LBRACKET, RBRACKET, false),

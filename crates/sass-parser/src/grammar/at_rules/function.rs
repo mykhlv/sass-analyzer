@@ -8,6 +8,15 @@ pub fn function_rule(p: &mut Parser<'_>) {
     p.bump(); // @
     p.bump(); // function
     p.continue_header(&super::lines::NAMED);
+    if p.at(IDENT) {
+        match p.current_text() {
+            "url" | "and" | "or" | "not" | "expression" | "element" => {
+                p.error("invalid function name");
+            }
+            "type" => p.error("this name is reserved for the plain-CSS function"),
+            _ => {}
+        }
+    }
     p.expect(IDENT); // name
     p.continue_line_across_blank();
     if p.at(LPAREN) {

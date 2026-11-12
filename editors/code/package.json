@@ -2,7 +2,7 @@
   "name": "sass-analyzer",
   "displayName": "sass-analyzer",
   "description": "Fast SCSS and Sass language support: diagnostics, completions, go to definition, hover, rename, and more — powered by a hand-written Rust parser.",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "publisher": "mykhlv",
   "license": "MIT",
   "icon": "icon.png",
@@ -134,6 +134,11 @@
           "default": [],
           "description": "Module paths to implicitly @use as * in every file (e.g. for Vite additionalData). Supports ${workspaceFolder}."
         },
+        "sass-analyzer.reportUnresolvedImports": {
+          "type": "boolean",
+          "default": true,
+          "description": "Report an error on a @use, @forward or @import whose stylesheet cannot be found. Turn off when a custom importer resolves URLs the server cannot."
+        },
         "sass-analyzer.maxFileSize": {
           "type": "integer",
           "default": 2000000,
@@ -166,9 +171,9 @@
     "vscode-languageclient": "^9.0.1"
   },
   "devDependencies": {
-    "@types/node": "^26.1.2",
+    "@types/node": "^26.6.6",
     "@types/vscode": "~1.82.0",
-    "esbuild": "^0.28.1",
+    "esbuild": "^0.28.2",
     "typescript": "^7.0.2"
   }
 }

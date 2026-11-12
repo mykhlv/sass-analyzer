@@ -1688,19 +1688,21 @@ fn error_missing_semicolon() {
                 BLOCK@1..33
                   WHITESPACE@1..2 " "
                   LBRACE@2..3 "{"
-                  DECLARATION@3..31
+                  DECLARATION@3..14
                     PROPERTY@3..9
                       WHITESPACE@3..4 " "
                       IDENT@4..9 "color"
                     COLON@9..10 ":"
-                    VALUE@10..30
+                    VALUE@10..14
                       VALUE@10..14
                         WHITESPACE@10..11 " "
                         IDENT@11..14 "red"
-                      VALUE@14..24
-                        WHITESPACE@14..15 " "
-                        IDENT@15..24 "font-size"
-                      COLON@24..25 ":"
+                  DECLARATION@14..31
+                    PROPERTY@14..24
+                      WHITESPACE@14..15 " "
+                      IDENT@15..24 "font-size"
+                    COLON@24..25 ":"
+                    VALUE@25..30
                       DIMENSION@25..30
                         WHITESPACE@25..26 " "
                         NUMBER@26..28 "14"
@@ -1708,6 +1710,8 @@ fn error_missing_semicolon() {
                     SEMICOLON@30..31 ";"
                   WHITESPACE@31..32 " "
                   RBRACE@32..33 "}"
+            errors:
+              15..24: expected SEMICOLON
         "#]],
     );
 }
@@ -2457,19 +2461,21 @@ fn error_missing_semicolon_between_decls() {
                 BLOCK@1..33
                   WHITESPACE@1..2 " "
                   LBRACE@2..3 "{"
-                  DECLARATION@3..31
+                  DECLARATION@3..14
                     PROPERTY@3..9
                       WHITESPACE@3..4 " "
                       IDENT@4..9 "color"
                     COLON@9..10 ":"
-                    VALUE@10..30
+                    VALUE@10..14
                       VALUE@10..14
                         WHITESPACE@10..11 " "
                         IDENT@11..14 "red"
-                      VALUE@14..24
-                        WHITESPACE@14..15 " "
-                        IDENT@15..24 "font-size"
-                      COLON@24..25 ":"
+                  DECLARATION@14..31
+                    PROPERTY@14..24
+                      WHITESPACE@14..15 " "
+                      IDENT@15..24 "font-size"
+                    COLON@24..25 ":"
+                    VALUE@25..30
                       DIMENSION@25..30
                         WHITESPACE@25..26 " "
                         NUMBER@26..28 "14"
@@ -2477,6 +2483,8 @@ fn error_missing_semicolon_between_decls() {
                     SEMICOLON@30..31 ";"
                   WHITESPACE@31..32 " "
                   RBRACE@32..33 "}"
+            errors:
+              15..24: expected SEMICOLON
         "#]],
     );
 }
@@ -2501,9 +2509,9 @@ fn error_extra_colon_in_value() {
                       IDENT@4..9 "color"
                     COLON@9..10 ":"
                     VALUE@10..16
-                      WHITESPACE@10..11 " "
-                      COLON@11..12 ":"
-                      VALUE@12..16
+                      ERROR@10..16
+                        WHITESPACE@10..11 " "
+                        COLON@11..12 ":"
                         WHITESPACE@12..13 " "
                         IDENT@13..16 "red"
                     SEMICOLON@16..17 ";"
@@ -2520,6 +2528,8 @@ fn error_extra_colon_in_value() {
                     SEMICOLON@33..34 ";"
                   WHITESPACE@34..35 " "
                   RBRACE@35..36 "}"
+            errors:
+              11..12: expected expression
         "#]],
     );
 }

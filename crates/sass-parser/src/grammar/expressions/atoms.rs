@@ -3,7 +3,7 @@ use crate::parser::{CompletedMarker, Parser};
 use crate::syntax_kind::*;
 
 use super::super::ParseContext;
-use super::{eat_comma, expr, interpolation, sass_value};
+use super::{bracketed_value, eat_comma, expr, interpolation};
 
 // ── Atoms ──────────────────────────────────────────────────────────
 
@@ -15,7 +15,7 @@ pub(super) fn atom(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMar
         HASH => Some(color_literal(p)),
         HASH_LBRACE => Some(interpolation_atom(p, ctx)),
         DOLLAR => Some(variable_ref(p)),
-        IDENT => ident_or_call(p, ctx),
+        IDENT => Some(ident_or_call(p, ctx)),
         LPAREN => Some(paren_or_map(p, ctx)),
         LBRACKET => Some(bracketed_list(p, ctx)),
         PERCENT => Some(standalone_percent(p)),
@@ -119,7 +119,7 @@ pub(super) fn variable_ref(p: &mut Parser<'_>) -> CompletedMarker {
 }
 
 /// Dispatch IDENT: namespace member, boolean/null literal, function call, or plain identifier.
-fn ident_or_call(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarker> {
+fn ident_or_call(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
     let text = p.current_text();
 
     // Namespace member access: ns.$var or ns.func()
@@ -130,14 +130,14 @@ fn ident_or_call(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarke
             p.bump(); // DOT
             p.bump(); // DOLLAR
             p.bump(); // IDENT (variable name)
-            return Some(m.complete(p, NAMESPACE_REF));
+            return m.complete(p, NAMESPACE_REF);
         }
         if p.nth(2) == IDENT && p.nth(3) == LPAREN {
             let m = p.start();
             p.bump(); // IDENT (namespace)
             p.bump(); // DOT
             let _ = super::functions::function_dispatch(p, ctx);
-            return Some(m.complete(p, NAMESPACE_REF));
+            return m.complete(p, NAMESPACE_REF);
         }
     }
 
@@ -145,27 +145,24 @@ fn ident_or_call(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarke
     if text == "true" || text == "false" {
         let m = p.start();
         p.bump();
-        return Some(m.complete(p, BOOL_LITERAL));
+        return m.complete(p, BOOL_LITERAL);
     }
     if text == "null" {
         let m = p.start();
         p.bump();
-        return Some(m.complete(p, NULL_LITERAL));
+        return m.complete(p, NULL_LITERAL);
     }
 
-    // In SassScript, `and`/`or` are infix operators — don't consume as atom
-    if ctx == ParseContext::SassScript && (text == "and" || text == "or") {
-        return None;
-    }
-
+    // `and` and `or` where an operand starts are identifiers, as in Dart Sass: `$a: and`,
+    // `and and and`. After an operand they are infix operators (see `infix_bp`).
     // progid:Namespace.Class(args) — multi-token IE filter function name
     if text.eq_ignore_ascii_case("progid") && p.nth(1) == COLON {
-        return Some(super::functions::progid_function_call(p));
+        return super::functions::progid_function_call(p);
     }
 
     // Check for function call: IDENT immediately followed by LPAREN (no whitespace)
     if p.nth(1) == LPAREN && !p.nth_has_whitespace_before(1) {
-        return Some(super::functions::function_dispatch(p, ctx));
+        return super::functions::function_dispatch(p, ctx);
     }
 
     // Plain identifier — possibly followed by interpolation: `--color-#{$name}`
@@ -186,10 +183,10 @@ fn ident_or_call(p: &mut Parser<'_>, ctx: ParseContext) -> Option<CompletedMarke
         // Interpolated function call: `foo#{bar}(args)`
         if !p.at_end() && !p.has_whitespace_before() && p.at(LPAREN) {
             super::functions::arg_list(p, ctx);
-            return Some(m.complete(p, FUNCTION_CALL));
+            return m.complete(p, FUNCTION_CALL);
         }
     }
-    Some(m.complete(p, VALUE))
+    m.complete(p, VALUE)
 }
 
 fn standalone_percent(p: &mut Parser<'_>) -> CompletedMarker {
@@ -223,9 +220,10 @@ fn paren_or_map(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
     paren_or_map_in_brackets(&mut p.transparent_guard(), ctx)
 }
 
-fn paren_or_map_in_brackets(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
+fn paren_or_map_in_brackets(p: &mut Parser<'_>, _ctx: ParseContext) -> CompletedMarker {
     assert!(p.at(LPAREN));
     let m = p.start();
+    let errors = p.error_count();
     p.bump(); // (
 
     // Empty parens: `()` = empty list
@@ -238,7 +236,7 @@ fn paren_or_map_in_brackets(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedM
     // After first expression: `:` → map, `,` → list, `)` → paren expr
     if p.at(COLON) {
         // It's a map: (key: value, ...)
-        return finish_map(p, m, first, ctx);
+        return finish_map(p, m, first, errors);
     }
 
     // Space-separated values inside parens: `(28px 28px 0 0)`, `(small medium large)`
@@ -258,21 +256,21 @@ fn paren_or_map_in_brackets(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedM
 
     // Space-separated key followed by `:` → map: `(1 2: 3, 4 5: 6)`
     if p.at(COLON) {
-        return finish_map(p, m, first, ctx);
+        return finish_map(p, m, first, errors);
     }
 
     if p.at(COMMA) || p.at_unclosed_string_break() {
         // Comma-separated list inside parens (possibly of space-separated groups)
         while eat_comma(p) {
             if !p.at(RPAREN) && !p.at_end() {
-                sass_value(p, ParseContext::SassScript);
+                bracketed_value(p, ParseContext::SassScript);
             }
         }
-        p.expect(RPAREN);
+        crate::grammar::close_bracket(p, RPAREN, errors);
         return m.complete(p, LIST_EXPR);
     }
 
-    p.expect(RPAREN);
+    crate::grammar::close_bracket(p, RPAREN, errors);
     m.complete(p, PAREN_EXPR)
 }
 
@@ -280,7 +278,7 @@ fn finish_map(
     p: &mut Parser<'_>,
     outer: crate::parser::Marker,
     first_key: Option<CompletedMarker>,
-    _ctx: ParseContext,
+    errors: usize,
 ) -> CompletedMarker {
     // Wrap already-parsed key expression in MAP_ENTRY
     let entry_m = if let Some(key) = first_key {
@@ -289,7 +287,7 @@ fn finish_map(
         p.start()
     };
     p.expect(COLON);
-    sass_value(p, ParseContext::SassScript);
+    bracketed_value(p, ParseContext::SassScript);
     let _ = entry_m.complete(p, MAP_ENTRY);
 
     // Parse remaining entries
@@ -310,12 +308,14 @@ fn finish_map(
                 break;
             }
         }
-        p.expect(COLON);
-        sass_value(p, ParseContext::SassScript);
+        // An entry missing its `:` is reported once: no value follows it either.
+        if p.expect(COLON) {
+            bracketed_value(p, ParseContext::SassScript);
+        }
         let _ = em.complete(p, MAP_ENTRY);
     }
 
-    p.expect(RPAREN);
+    crate::grammar::close_bracket(p, RPAREN, errors);
     outer.complete(p, MAP_EXPR)
 }
 
@@ -325,16 +325,17 @@ fn bracketed_list(p: &mut Parser<'_>, ctx: ParseContext) -> CompletedMarker {
     assert!(p.at(LBRACKET));
     let p = &mut *p.transparent_guard();
     let m = p.start();
+    let errors = p.error_count();
     p.bump(); // [
     if !p.at(RBRACKET) && !p.at_end() {
-        sass_value(p, ctx);
+        bracketed_value(p, ctx);
         while eat_comma(p) {
             if !p.at(RBRACKET) && !p.at_end() {
-                sass_value(p, ctx);
+                bracketed_value(p, ctx);
             }
         }
     }
-    p.expect(RBRACKET);
+    crate::grammar::close_bracket(p, RBRACKET, errors);
     m.complete(p, BRACKETED_LIST)
 }
 

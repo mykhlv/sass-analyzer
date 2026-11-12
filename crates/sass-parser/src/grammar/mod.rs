@@ -4,7 +4,7 @@ pub(crate) mod expressions;
 mod lines;
 pub(crate) mod selectors;
 
-use crate::parser::{Joined, Parser};
+use crate::parser::{BracketRest, Joined, Parser};
 #[allow(clippy::wildcard_imports)]
 use crate::syntax_kind::*;
 
@@ -47,7 +47,7 @@ fn top_level_item(p: &mut Parser<'_>) {
     } else if p.at_ts(selectors::SELECTOR_START) || p.at_ts(selectors::COMBINATOR_TOKEN) {
         rule_set(p);
     } else if p.at(SEMICOLON) {
-        p.bump();
+        lines::stray_semicolon(p);
     } else {
         let m = p.start();
         p.error("expected rule");
@@ -361,9 +361,10 @@ fn rule_set(p: &mut Parser<'_>) {
     let m = g.start();
     let errors = g.error_count();
     selectors::selector_list(&mut g);
+    let semicolon = lines::semicolon_after_selector(&mut g);
     if g.at(LBRACE) {
         block(&mut g);
-    } else if g.braced() {
+    } else if g.braced() && !semicolon {
         let selector_reported = g.error_count() > errors;
         missing_rule_block(&mut g, selector_reported);
     }
@@ -430,6 +431,7 @@ pub(crate) fn skip_to_rule_block(p: &mut Parser<'_>, report: bool) {
     let m = p.start();
     let at = p.error_range();
     let strings = p.unclosed_strings();
+    let at_string = matches!(p.current(), QUOTED_STRING | STRING_START);
     let mut first = true;
     let mut same_line = true;
     let mut interpolation: u32 = 0;
@@ -451,7 +453,10 @@ pub(crate) fn skip_to_rule_block(p: &mut Parser<'_>, report: bool) {
         }
     }
     let took_block = p.unclosed_strings() > strings && same_line && p.at_virtual() && p.at(LBRACE);
-    if report && !took_block {
+    // A string left unclosed where the `{` belongs has reported the mistake there: most
+    // likely the closing quote of a string above that a line break ended, `'a` / `b';`.
+    let string_reported = at_string && p.unclosed_strings() > strings;
+    if report && !took_block && !string_reported {
         p.error_at_start(&m, at, "expected `{`");
     }
     let _ = m.complete(p, SyntaxKind::ERROR);
@@ -595,6 +600,66 @@ pub(crate) fn report_unclosed(p: &mut Parser<'_>, close: SyntaxKind) {
     }
 }
 
+/// The `close` of a bracket whose contents the grammar has read up to the cursor, opened
+/// with `errors` reported. Contents it could not read are one mistake, reported once:
+/// they are skipped as one error through the closer, or through the string left
+/// unclosed that swallowed it (see [`Parser::rest_of_bracket`]), and the statement goes
+/// on after them. A bracket left unclosed is reported, and ends where it did: at the line
+/// break of a string left unclosed, or where a statement ends.
+pub(crate) fn close_bracket(p: &mut Parser<'_>, close: SyntaxKind, errors: usize) {
+    if p.eat(close) {
+        return;
+    }
+    let reported = p.error_count() > errors;
+    if !reported {
+        p.expect(close);
+    }
+    // A string left unclosed right before ended the bracket at its line break.
+    let rest = if p.at_unclosed_string_break() {
+        None
+    } else {
+        p.rest_of_bracket(close, false)
+    };
+    match rest {
+        Some((count, end)) => {
+            let closed = end == BracketRest::Closer;
+            skip_as_error(p, count - usize::from(closed));
+            if closed {
+                p.bump();
+            }
+        }
+        None if reported => {
+            p.expect(close);
+        }
+        None => {}
+    }
+}
+
+/// After an item of a bracketed list that reported an error where it could not be read,
+/// such as a parameter missing its `$`: the rest of the item, up to the `,` before the
+/// next one or the bracket's `close`, as one error, so that the items after it still
+/// parse.
+pub(crate) fn skip_rest_of_item(p: &mut Parser<'_>, close: SyntaxKind) {
+    if p.at(COMMA) || p.at(close) || p.at_unclosed_string_break() {
+        return;
+    }
+    if let Some((count, BracketRest::Comma | BracketRest::Closer)) = p.rest_of_bracket(close, true)
+    {
+        skip_as_error(p, count - 1);
+    }
+}
+
+fn skip_as_error(p: &mut Parser<'_>, count: usize) {
+    if count == 0 {
+        return;
+    }
+    let m = p.start();
+    for _ in 0..count {
+        p.bump();
+    }
+    let _ = m.complete(p, SyntaxKind::ERROR);
+}
+
 /// Parse a `{ ... }` block containing declarations and/or nested rules.
 pub(crate) fn block(p: &mut Parser<'_>) {
     block_after(p, false);
@@ -615,7 +680,7 @@ pub(crate) fn block_after(p: &mut Parser<'_>, header_failed: bool) {
     let mut quiet = header_failed;
     while !g.at(RBRACE) && !g.at_end() {
         if g.at(SEMICOLON) {
-            g.bump();
+            lines::stray_semicolon(&mut g);
         } else if g.at(AT)
             || g.at(DOLLAR)
             || g.at(MINUS)
@@ -654,7 +719,7 @@ pub(crate) fn property_block(p: &mut Parser<'_>) {
     g.bump(); // {
     while !g.at(RBRACE) && !g.at_end() {
         if g.at(SEMICOLON) {
-            g.bump();
+            lines::stray_semicolon(&mut g);
         } else if g.at(AT) || g.at(DOLLAR) || g.at_shorthand() || at_namespace_var_assignment(&g) {
             let errors = g.error_count();
             block_item(&mut g);
@@ -685,7 +750,7 @@ pub(crate) fn generic_at_rule_block(p: &mut Parser<'_>) {
     g.bump(); // {
     while !g.at(RBRACE) && !g.at_end() {
         if g.at(SEMICOLON) {
-            g.bump();
+            lines::stray_semicolon(&mut g);
         } else if g.at(AT)
             || g.at(DOLLAR)
             || g.at(MINUS)
@@ -753,7 +818,7 @@ pub(crate) fn css_function_block(p: &mut Parser<'_>) {
     g.bump(); // {
     while !g.at(RBRACE) && !g.at_end() {
         if g.at(SEMICOLON) {
-            g.bump();
+            lines::stray_semicolon(&mut g);
         } else if g.at(AT) || g.at_shorthand() {
             at_rules::at_rule(&mut g);
         } else if g.at(IDENT) || g.at(HASH_LBRACE) || g.at(MINUS) || g.at(STAR) {

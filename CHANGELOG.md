@@ -5,6 +5,169 @@ All notable changes to sass-analyzer will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.5.0 — 2026-11-12
+
+### Added
+- LSP: a `@use`, `@forward` or `@import` of a stylesheet that does not exist, as a
+  misspelled path or one that needs a `loadPaths` entry, is reported as an error on its
+  URL, with Dart Sass's message "Can't find stylesheet to import.", and so is an unknown
+  `sass:` module. Nothing was reported: the only trace was that every undefined-name
+  warning in the file went silent, which it still does, so the one cause gives one
+  diagnostic. URLs the server does not resolve itself are not reported: `pkg:` and other
+  schemes, the `~` prefix of bundlers, and a URL in an installed package that the
+  server cannot follow. Neither are plain-CSS `@import`s, which Dart Sass leaves to the
+  browser: a URL ending in `.css`, starting with `http://`, `https://` or `//`, written
+  as `url(...)`, or followed by a media query or `supports(...)`. A `@use` or `@forward`
+  of a `.css` URL loads that file, so a missing one is reported. The
+  `sass-analyzer.reportUnresolvedImports` setting turns the report off, for a project
+  whose own importer loads what the server cannot
+
+### Fixed
+- Parser: a rule or at-rule missing its `{`, where the tokens skipped before the block
+  hold a quoted string with an operator in its interpolation, as in `.a ) "#{$b + 1}" {}`
+  or `@media (a) x "#{$b + 1}" {}`, no longer crashes the parser.
+- LSP: an open document's state, its diagnostics and the cross-file index now always come
+  from the same version of its text. A parse of an older version than the one stored no
+  longer updates the cross-file index; after a settings change, the re-parse of an edit
+  still waiting to be parsed publishes its diagnostics under its own version, not the
+  previous one's, and is no longer dropped when the edit was parsed meanwhile; a file
+  watcher event for a file opened meanwhile no longer replaces the editor's text with the
+  disk's; and a tree re-parsed after being evicted from the cache is no longer stored over
+  a newer version of the file
+- LSP: imports resolve to the files Dart Sass loads: a `.css` file for a URL with no
+  extension, as `@import "normalize.css/normalize"`, and a directory's `index.css`; an
+  import-only file such as `_theme.import.scss` for an `@import`, ahead of the plain
+  file; and a URL with `%` escapes, as `my%20file`. A bare package name loads the
+  stylesheet its `package.json` names in `exports` (the `sass` or `style` condition) or
+  in its `sass` or `style` field, as bundlers do. Go to definition and document links
+  reached none of these, and their members were not found
+- LSP: a `.css` URL, as in `@use "reset.css"`, resolves to its file, or to the partial
+  `_reset.css`, so go to definition and document links reach it. As in Dart Sass, the
+  extension is matched case-sensitively: `@import "a.CSS"` is not plain CSS, and
+  `@use "a.SCSS"` does not load `a.scss`
+- LSP: a URL ending in `/`, as `@use "theme/" as t`, loads the directory's `index`
+  file, as in Dart Sass; it loaded `theme.scss` beside the directory, and reported
+  nothing when only that existed
+- LSP: a file that appears, created on disk or opened in the editor, re-checks the open
+  files whose imports did not resolve, and deleting a file re-resolves the imports of
+  the open files that use it. A new file was not seen by its importers until they were
+  edited, and a deleted one was still treated as loaded. A change to a file already
+  known re-checks only the files that import it
+- LSP: a `.css` file created or deleted on disk re-checks the open files as a new or
+  deleted stylesheet does, so creating `theme.css` clears the error of `@use "theme"`
+  without editing the importer. A watcher event alone does not index a CSS file as a Sass
+  module, whatever the case of its extension: a change to `Foo.CSS` was read as SCSS
+- LSP: "Check Workspace" no longer holds a lock on the open documents while it
+  publishes their diagnostics, which could hang the server if a file was opened at
+  that moment
+- LSP: the auto-import, extract-to-variable and extract-to-mixin code actions write
+  their lines with the document's own line breaks. In a file with `\r\n` line endings
+  they inserted bare `\n` breaks, and auto-import added a stray empty line after an
+  existing `@use`
+- Indented Sass: extract to mixin is no longer offered for lines whose indentation does
+  not continue the first selected line's, as tabs below a line indented with spaces. It
+  moved such a line flush with the mixin's body, which could take a nested declaration
+  out of its rule
+- Indented Sass: the warning that a nested `name:value` rule is likely a declaration
+  missing its space after `:` is no longer given for a pseudo selector, as an empty
+  `a:hover`, `li:first-child`, `a:not(.b)` or `input:-webkit-autofill`, nor for those of
+  CSS Modules and Vue, as `:export` or `div:deep(.x)`, `:active-view-transition`,
+  `:heading` or `:xr-overlay`. It is now given for an interpolated name, as
+  `margin-#{$side}:auto`, and for a CSS property's name before a pseudo-class's, as
+  `cursor:default`, while `input:default` stays silent
+- Parser: a mistake inside a bracket — an argument list, a parameter list, the
+  configuration of `@use` or `@forward ... with (...)`, a parenthesized list or map, a
+  bracketed list or an interpolation — is one error, and what could not be read up to
+  the bracket's closer is skipped with it. The statement went on from the inside of the
+  bracket instead, which reported up to a dozen errors for one, as for
+  `@use "a" with (b.$c: d)` or `f((a, b: c)...)`. A parameter or a configured variable
+  missing its `$` no longer takes the ones after it with it
+- Parser: an expression nested too deep is one error, "nesting too deep". The rest of
+  the operand that went too deep is skipped with it, and the brackets left open around
+  it end there without errors of their own: 1000 unclosed `[` gave over 1700 errors
+- Parser: `@include m using $a { ... }`, missing the parentheses around `$a`, is one
+  error, a missing `(` as in Dart Sass, and the content block still parses as the
+  rule's. It was taken for a declaration, with up to nine errors
+- Parser: a `@use ... as` or `@forward ... as` clause with no identifier, as
+  `@forward "a" as 1-*`, is one error, and the clauses after it still parse. The rest of
+  the clause was left to the next statement, with up to three more errors
+- Parser: a map entry missing its `:`, as `two` in `(a: 1, two, b: 2)`, is one error,
+  not a second one for a value it never had
+- Parser: a rule missing its `{` where a string left unclosed starts, as the rest of
+  `'line1` / `line2';` read on the line after a line break that ended the string, reports
+  the string only, not a missing `{` at the same place as well
+- Parser: a `:`, `)` or `]` in a declaration's value, as in `c: d)` or `b: c:d`, is
+  reported, as Dart Sass does, and the rest of the value is skipped with it. Such
+  values were accepted silently, in both syntaxes. In the braced syntax, `name:` after a
+  value is the next declaration, missing the `;` before it: `color: red font-size: 14px`
+  reports the `;` and parses both declarations. Colons that values hold stay valid:
+  `progid:` filters, `url(a:b)`, strings, escapes, interpolation, custom properties
+- Parser: a `.` in a declaration's value that starts no number is reported, as Dart Sass
+  does. In the indented syntax, a word operator or `+` at the end of a line took a
+  selector line below, `content: not` / `.c`, for its operand, and the lines beneath it
+  for a nested property, with no error. A line below that is no operand, as `&:hover`,
+  `b: c` or `$b: 2`, now reports the one error Dart Sass gives there
+- SCSS: a variable's value that reports an error, as a map missing its commas and
+  left unclosed, `$m: (` / `a: 1` / `b: 2` / `.c { ... }`, takes the rest of its line
+  with that one error. The rest was left to the next statement, with up to three more
+  errors, and the rule on the next line was read into it. The indented syntax does the
+  same, `$m: (` / `a: 1` / `b: 2` / `.c`, which reported the line's end missing as well
+- Indented Sass: a file with many brackets left unclosed, line after line, parses in time
+  linear in its size. Each line searched on to the end of the file for the next line
+  start, and each erroring bracket for the next line at its column, so the time grew with
+  the square of the file's length
+- Parser: an `@page` selector list, as `@page toc, index:blank` or `@page :left, :right`,
+  is no longer an error. Only the first selector was read, and the rest was a rule missing
+  its selector; a prelude such as `@page a + b` was read as a rule after the at-rule, with
+  no error
+- Parser: `!important` inside brackets, as in `(a: 1 !important)`, `(1, 2 !important)`,
+  `[a !important b]` or `f(a !important b)`, is an item of the value, as in Dart Sass, not
+  an error. Only a positional argument ending with it was accepted
+- Parser: a function named `URL` or `Url`, which Dart Sass accepts with a deprecation
+  warning, is no longer an error: its name was read as the start of `url(...)`, and its
+  parameters as the URL. `@function url(...)`, as well as `and`, `or`, `not`,
+  `expression` and `element`, is one error on the name, "invalid function name", as in
+  Dart Sass, and `@function type(...)` reports that the name is reserved for the
+  plain-CSS function. `url(...)` in values is read as before
+- Parser: `and` and `or` where an operand starts are identifiers, as in Dart Sass:
+  `$a: and;`, `f(and, or)`, `$a: and and and` and `@if not and` are no longer errors.
+  After an operand they stay operators, and one missing its right operand, as
+  `$a: 1 and;`, is still reported. In the indented syntax, an `@if` or `@while` line ending
+  with such an operand, `@if and`, no longer reads the lines beneath it as more of its
+  condition
+- Parser: a variable's value may end with `!important`, as `$a: 1 !important;` or
+  `$a: 1 ! important;`, which Dart Sass accepts; that was three errors. `!important` is
+  matched in any case, `!IMPORTANT`. A `!` followed by a space and another word, as
+  `$a: 1 ! default` or `b: c ! d`, is one error, "expected `important`", as in Dart Sass;
+  it was accepted
+- Indented Sass: `b: c !` / blank line / `important` is the declaration's `!important`,
+  as in Dart Sass; it read `important` as a rule of its own. A `!` ending a line before a
+  line that is not `important`, as `$a: 1 !` / `default`, is one error after the `!`
+- LSP: a `.css` file that an import loads, as `@use "theme"` finding `theme.css`, is
+  plain CSS, as in Dart Sass, which rejects Sass variables, mixins and functions there.
+  It was read as SCSS, so a `$v` defined in it was a member of the module, with a
+  definition and a workspace symbol. It now exports no members and adds no symbols; go to
+  definition and document links on the import still reach the file
+- Parser: `@extend .b ! optional`, or `!` and `optional` on lines of their own, is one
+  error after the `!`, as in Dart Sass, which takes the flag only when it is joined to its
+  `!`. The braced syntax accepted it
+- Parser: an `@for` missing a part where its header ends, as `@for $i from {` or, in the
+  indented syntax, `@for $i from` / blank line / `.z`, is one error, as in Dart Sass; the
+  parts after it were reported missing too, three errors at one place. In the indented
+  syntax, `@for $i` goes on across blank lines only to a word, its `from`, so a rule
+  below stays a rule
+- Indented Sass: a written `;` that ends no statement is one error per line, as in Dart
+  Sass: after a selector, `.x;` or `b:c;`, "expected newline", and the lines beneath it
+  are still the rule's block; a second `;`, `b: c;;`, or a second statement after one,
+  `b: c; d: e`, reports that multiple statements on one line are not supported in the
+  indented syntax, Dart Sass's message. Such `;` were accepted. A `;` that ends a
+  statement, or sits in a string or `url()`, stays valid
+
+### Security
+- VS Code extension: `brace-expansion`, bundled through `vscode-languageclient`, is
+  updated to 2.1.7 for three denial-of-service advisories (GHSA-q2hr-2g5m-vwhr,
+  GHSA-qhr7-859c-m2p7, GHSA-6j4f-fj2g-mc7p)
+
 ## 0.4.0 — 2026-11-08
 
 ### Fixed

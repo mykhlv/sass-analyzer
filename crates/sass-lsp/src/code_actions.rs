@@ -42,7 +42,7 @@ pub(crate) fn handle_code_action(
     let existing_use_uris: HashSet<Uri> = existing_imports
         .iter()
         .filter(|i| i.kind == ImportKind::Use)
-        .filter_map(|i| module_graph.resolve_import(&uri, &i.path))
+        .filter_map(|i| module_graph.resolve_import(&uri, &i.path, i.kind))
         .collect();
 
     // Lazily initialized: only fetch when we encounter a relevant diagnostic.
@@ -118,6 +118,43 @@ fn statement_terminator(uri: &Uri) -> &'static str {
     }
 }
 
+/// The line break the document already uses, taken from its first one, so that
+/// inserted lines match it. A document with no line break gets `\n`.
+fn line_ending(text: &str) -> &'static str {
+    match text.find(['\n', '\r']).map(|i| &text.as_bytes()[i..]) {
+        Some([b'\r', b'\n', ..]) => "\r\n",
+        Some([b'\r', ..]) => "\r",
+        _ => "\n",
+    }
+}
+
+fn is_line_break(c: char) -> bool {
+    matches!(c, '\n' | '\r')
+}
+
+/// The lines of `text`, split at `\r\n`, `\n` or a lone `\r`, without their breaks.
+fn split_lines(text: &str) -> impl Iterator<Item = &str> {
+    let text = text
+        .strip_suffix("\r\n")
+        .or_else(|| text.strip_suffix(['\n', '\r']))
+        .unwrap_or(text);
+    let mut rest = Some(text);
+    std::iter::from_fn(move || {
+        let current = rest?;
+        let Some(i) = current.find(is_line_break) else {
+            rest = None;
+            return Some(current);
+        };
+        let skip = if current[i..].starts_with("\r\n") {
+            2
+        } else {
+            1
+        };
+        rest = Some(&current[i + skip..]);
+        Some(&current[..i])
+    })
+}
+
 /// Read symbol name from the structured `data` field of a diagnostic.
 fn extract_name_from_data(diag: &Diagnostic) -> Option<String> {
     let data = diag.data.as_ref()?.as_object()?;
@@ -174,9 +211,10 @@ fn auto_import_actions(
             continue;
         };
 
-        let prefix = if needs_newline { "\n" } else { "" };
+        let eol = line_ending(text);
+        let prefix = if needs_newline { eol } else { "" };
         let terminator = statement_terminator(from_uri);
-        let use_statement = format!("{prefix}@use \"{use_path}\"{terminator}\n");
+        let use_statement = format!("{prefix}@use \"{use_path}\"{terminator}{eol}");
 
         // Qualify the bare reference: $primary → colors.$primary, darken → colors.darken
         let qualified_ref = if kind == SymbolKind::Variable {
@@ -238,7 +276,7 @@ fn compute_use_path(
     let spec = normalize_sass_path(&rel);
 
     // Round-trip validation: check that the spec resolves back to target
-    if let Some(resolved_uri) = module_graph.resolve_import(from_uri, &spec)
+    if let Some(resolved_uri) = module_graph.resolve_import(from_uri, &spec, ImportKind::Use)
         && resolved_uri == *target_uri
     {
         return Some(spec);
@@ -247,7 +285,7 @@ fn compute_use_path(
     // Fallback: try without stripping _ (non-partial files)
     let spec2 = normalize_extension_only(&rel);
     if spec2 != spec
-        && let Some(resolved_uri) = module_graph.resolve_import(from_uri, &spec2)
+        && let Some(resolved_uri) = module_graph.resolve_import(from_uri, &spec2, ImportKind::Use)
         && resolved_uri == *target_uri
     {
         return Some(spec2);
@@ -349,7 +387,7 @@ fn diff_paths(target: &Path, base: &Path) -> PathBuf {
 /// not just the first contiguous block (#12).
 ///
 /// Returns `(position, needs_newline_prefix)`. When the last import ends at
-/// EOF without a trailing newline, the caller must prepend `\n` to the
+/// EOF without a trailing newline, the caller must prepend a line break to the
 /// inserted text to avoid concatenating on the same line.
 fn find_use_insertion_point(
     root: &SyntaxNode,
@@ -369,7 +407,7 @@ fn find_use_insertion_point(
 
     if let Some(end) = last_import_end {
         let offset: usize = end.into();
-        let needs_newline = offset >= text.len() || text.as_bytes()[offset] != b'\n';
+        let needs_newline = !text[offset..].starts_with(is_line_break);
         let range = sass_parser::text_range::TextRange::new(end, end);
         let lsp_pos = text_range_to_lsp(range, line_index, text);
         (Position::new(lsp_pos.start.line + 1, 0), needs_newline)
@@ -545,9 +583,11 @@ fn find_insertion_ancestor(expr: &SyntaxNode) -> Option<SyntaxNode> {
 
 /// Extract leading whitespace from the line containing `byte_offset`.
 fn indentation_at(text: &str, byte_offset: usize) -> &str {
-    let line_start = text[..byte_offset].rfind('\n').map_or(0, |p| p + 1);
+    let line_start = text[..byte_offset]
+        .rfind(is_line_break)
+        .map_or(0, |p| p + 1);
     let non_ws = text[line_start..]
-        .find(|c: char| !c.is_ascii_whitespace() || c == '\n')
+        .find(|c: char| !c.is_ascii_whitespace() || is_line_break(c))
         .unwrap_or(0);
     &text[line_start..line_start + non_ws]
 }
@@ -566,7 +606,9 @@ fn first_content_offset(node: &SyntaxNode) -> TextSize {
 #[allow(clippy::cast_possible_truncation)]
 fn content_line_start(text: &str, node: &SyntaxNode) -> TextSize {
     let content_offset: usize = first_content_offset(node).into();
-    let line_start = text[..content_offset].rfind('\n').map_or(0, |p| p + 1);
+    let line_start = text[..content_offset]
+        .rfind(is_line_break)
+        .map_or(0, |p| p + 1);
     TextSize::from(line_start as u32)
 }
 
@@ -612,7 +654,8 @@ fn extract_variable_action(
     let insert_line_start = content_line_start(text, &insert_before);
 
     let terminator = statement_terminator(uri);
-    let var_decl = format!("{indent}$new-variable: {expr_text}{terminator}\n");
+    let eol = line_ending(text);
+    let var_decl = format!("{indent}$new-variable: {expr_text}{terminator}{eol}");
     let insert_pos = text_range_to_lsp(
         TextRange::new(insert_line_start, insert_line_start),
         line_index,
@@ -774,13 +817,17 @@ fn extract_mixin_action(
     };
 
     let rule_indent = node_indentation(text, &rule_set);
-    let body = mixin_body(text, &block, moved, rule_indent);
+    let indented = crate::worker::is_sass_file(uri);
+    let Some(body) = mixin_body(text, &block, moved, rule_indent, indented) else {
+        return;
+    };
 
-    let (mixin_text, include_text) = if crate::worker::is_sass_file(uri) {
-        indented_mixin_texts(root, &block, &body, rule_indent)
+    let eol = line_ending(text);
+    let (mixin_text, include_text) = if indented {
+        indented_mixin_texts(root, &block, &body, rule_indent, eol)
     } else {
         (
-            format!("{rule_indent}@mixin new-mixin {{\n{body}\n{rule_indent}}}\n\n"),
+            format!("{rule_indent}@mixin new-mixin {{{eol}{body}{eol}{rule_indent}}}{eol}{eol}"),
             "@include new-mixin;".to_owned(),
         )
     };
@@ -853,7 +900,19 @@ fn mixin_insertion_anchor(block: &SyntaxNode) -> Option<SyntaxNode> {
 /// indentation relative to the first one, which keeps nested blocks and
 /// continuation lines attached to the line that owns them — and in indented
 /// Sass, where indentation alone opens a block, keeps the meaning intact.
-fn mixin_body(text: &str, block: &SyntaxNode, moved: TextRange, rule_indent: &str) -> String {
+///
+/// A line whose indentation does not start with the first line's (tabs below
+/// spaces, or a continuation line outdented past it) has no relative indentation
+/// to keep. In SCSS it is re-indented flush with the body, which braces make
+/// harmless; in indented Sass (`indented`) there is no body at all, since any
+/// guess at its depth could nest it differently than the original does.
+fn mixin_body(
+    text: &str,
+    block: &SyntaxNode,
+    moved: TextRange,
+    rule_indent: &str,
+    indented: bool,
+) -> Option<String> {
     let start = usize::from(moved.start());
     let first_indent = indentation_at(text, start);
     // The unit is the step from the block's header to its body. The rule the
@@ -866,23 +925,25 @@ fn mixin_body(text: &str, block: &SyntaxNode, moved: TextRange, rule_indent: &st
         .unwrap_or_else(|| detect_indent_unit(text));
     let body_indent = format!("{rule_indent}{unit}");
 
-    text[start..usize::from(moved.end())]
-        .lines()
+    split_lines(&text[start..usize::from(moved.end())])
         .enumerate()
         .map(|(i, line)| {
             if line.trim().is_empty() {
-                return String::new();
+                return Some(String::new());
             }
             let relative = if i == 0 {
                 line
+            } else if let Some(relative) = line.strip_prefix(first_indent) {
+                relative
+            } else if indented {
+                return None;
             } else {
-                line.strip_prefix(first_indent)
-                    .unwrap_or_else(|| line.trim_start())
+                line.trim_start()
             };
-            format!("{body_indent}{relative}")
+            Some(format!("{body_indent}{relative}"))
         })
-        .collect::<Vec<_>>()
-        .join("\n")
+        .collect::<Option<Vec<_>>>()
+        .map(|lines| lines.join(line_ending(text)))
 }
 
 /// The mixin definition and the `@include` that replaces the selection, for
@@ -898,6 +959,7 @@ fn indented_mixin_texts(
     block: &SyntaxNode,
     body: &str,
     rule_indent: &str,
+    eol: &str,
 ) -> (String, String) {
     let header = if uses_shorthand(root, SyntaxKind::MIXIN_RULE, "=") {
         "=new-mixin"
@@ -913,7 +975,7 @@ fn indented_mixin_texts(
         "@include new-mixin"
     };
     (
-        format!("{rule_indent}{header}\n{body}\n\n"),
+        format!("{rule_indent}{header}{eol}{body}{eol}{eol}"),
         include.to_owned(),
     )
 }
@@ -930,7 +992,7 @@ fn uses_shorthand(root: &SyntaxNode, kind: SyntaxKind, sigil: &str) -> bool {
 /// The leading whitespace of the first indented line, or two spaces for a file
 /// with no indentation at all.
 fn detect_indent_unit(text: &str) -> &str {
-    text.lines()
+    split_lines(text)
         .filter(|line| !line.trim().is_empty())
         .map(|line| &line[..line.len() - line.trim_start().len()])
         .find(|ws| !ws.is_empty())
@@ -940,6 +1002,21 @@ fn detect_indent_unit(text: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn line_ending_follows_the_first_break() {
+        assert_eq!(line_ending("a\r\nb\n"), "\r\n");
+        assert_eq!(line_ending("a\rb"), "\r");
+        assert_eq!(line_ending("a\nb\r\n"), "\n");
+        assert_eq!(line_ending("a"), "\n");
+    }
+
+    #[test]
+    fn split_lines_at_every_break() {
+        let lines: Vec<_> = split_lines("a\r\n  b\r  c\nd\r\n").collect();
+        assert_eq!(lines, ["a", "  b", "  c", "d"]);
+        assert_eq!(split_lines("a\n\nb").collect::<Vec<_>>(), ["a", "", "b"]);
+    }
 
     // ── extract_name_from_data ──────────────────────────────────────
 
@@ -2175,6 +2252,55 @@ mod tests {
             apply_in_sass(extract_mixin_action, src, "color: red\n  .b"),
             None
         );
+    }
+
+    /// Run extract-to-mixin on `src` as `uri` without requiring a clean parse.
+    fn extract_mixin_texts(uri: &str, src: &str, selected: &str) -> Vec<String> {
+        let uri: Uri = uri.parse().unwrap();
+        let parse = if crate::worker::is_sass_file(&uri) {
+            sass_parser::parse_sass
+        } else {
+            sass_parser::parse_scss
+        };
+        let root = SyntaxNode::new_root(parse(src).0);
+        let li = sass_parser::line_index::LineIndex::new(src);
+        let start = src.find(selected).expect("selection not found in source");
+        #[allow(clippy::cast_possible_truncation)]
+        let sel = TextRange::at(
+            TextSize::from(start as u32),
+            TextSize::from(selected.len() as u32),
+        );
+        let mut actions = Vec::new();
+        let range = text_range_to_lsp(sel, &li, src);
+        extract_mixin_action(&uri, &root, src, &li, range, &mut actions);
+        actions
+            .into_iter()
+            .flat_map(|a| a.edit.unwrap().changes.unwrap().into_values().flatten())
+            .map(|e| e.new_text)
+            .collect()
+    }
+
+    /// In indented Sass the indentation is the structure. A moved line whose
+    /// indentation does not extend the first line's (tabs where the first line
+    /// has spaces) has no faithful re-indentation, so nothing is offered rather
+    /// than a mixin whose nesting differs from the original.
+    #[test]
+    fn sass_extract_mixin_inconsistent_indentation_no_action() {
+        let src = ".a\n\t.b\n\t\tmargin: 0\n\t\t.c\n    color: red\n";
+        let texts = extract_mixin_texts("file:///t.sass", src, "margin: 0\n\t\t.c\n    color: red");
+        assert_eq!(texts, Vec::<String>::new());
+    }
+
+    /// Braces carry SCSS's structure, so the same lines are still extracted there.
+    #[test]
+    fn scss_extract_mixin_inconsistent_indentation_still_offered() {
+        let src = ".a {\n\t.b {\n\t\tmargin: 0;\n\t\t.c {\n    color: red; }\n\t}\n}\n";
+        let texts = extract_mixin_texts(
+            "file:///t.scss",
+            src,
+            "margin: 0;\n\t\t.c {\n    color: red; }",
+        );
+        assert_eq!(texts.len(), 2, "{texts:?}");
     }
 
     #[test]

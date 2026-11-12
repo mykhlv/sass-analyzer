@@ -15,6 +15,8 @@
 //! [`Parser::continue_header`], which declares how an at-rule's header goes on after its
 //! name or one of its words. Line breaks inside brackets are plain trivia.
 
+use std::cell::OnceCell;
+
 use super::{Fence, Parser};
 use crate::event::Event;
 use crate::input::{IndentKind, LineBreak, bracket_depth_after};
@@ -35,6 +37,17 @@ pub struct HeaderLines {
     pub end_words: &'static [&'static str],
     pub name_continues: bool,
 }
+
+/// Tokens after which a header's next token starts an operand.
+#[rustfmt::skip]
+const OPERAND_STARTS_AFTER: TokenSet = {
+    #[allow(clippy::enum_glob_use)]
+    use SyntaxKind::*;
+    TokenSet::new(&[
+        LPAREN, LBRACKET, HASH_LBRACE, COMMA, COLON, BANG, PLUS, MINUS, STAR, SLASH, PERCENT,
+        EQ_EQ, BANG_EQ, GT_EQ, LT_EQ, GT, LT,
+    ])
+};
 
 /// How many lines [`Parser::bracket_left_unclosed`] reads at most: far beyond any
 /// selector argument or at-rule prelude laid out over lines. Every line counts, those of
@@ -71,6 +84,9 @@ pub(super) struct IndentedState {
     /// any start from `from` up to `found`, as for the brackets opened or erroring on one
     /// line, which would otherwise each walk the same lines again.
     line_search: Option<(u32, usize, usize)>,
+    /// For the searches over line breaks that may reach far: see [`BreakSearch`]. Built the
+    /// first time a search does, and again after the input's line breaks change.
+    break_search: OnceCell<BreakSearch>,
     /// How the file indents: decided by its first indented line.
     indent_kind: IndentKind,
     reported_mixed: bool,
@@ -135,6 +151,7 @@ impl IndentedState {
             unwound: 0,
             brackets: Vec::new(),
             line_search: None,
+            break_search: OnceCell::new(),
             indent_kind: IndentKind::None,
             reported_mixed: false,
             reported_kind: false,
@@ -289,8 +306,10 @@ impl<'src> Parser<'src> {
             } else {
                 self.input.line_break_range(line)
             };
+            // After a comma, and a `!` that `important` may follow, blank lines too.
             while next < end
-                && (last == SyntaxKind::COMMA || !self.input.line_break(next).is_blank_line())
+                && (matches!(last, SyntaxKind::COMMA | SyntaxKind::BANG)
+                    || !self.input.line_break(next).is_blank_line())
             {
                 next += 1;
             }
@@ -381,16 +400,39 @@ impl<'src> Parser<'src> {
     /// The next line start after the token `line`, with its first line break; EOF has
     /// none when no line break comes before it.
     fn line_start_after(&self, line: usize) -> (usize, Option<LineBreak>) {
-        let count = self.input.line_break_count();
-        let mut index = self.input.line_break_range(line + 1).0;
-        while index < count {
-            let line_break = self.input.line_break(index);
-            if line_break.depth() <= self.indented.unwound {
-                return (self.input.line_break_owner(index), Some(line_break));
-            }
-            index += 1;
+        let start = self.input.line_break_range(line + 1).0;
+        let index = self.break_within(start, self.indented.unwound);
+        if index < self.input.line_break_count() {
+            return (
+                self.input.line_break_owner(index),
+                Some(self.input.line_break(index)),
+            );
         }
         (self.input.len(), None)
+    }
+
+    /// The first line break from `index` on at bracket depth `depth` or less, or the
+    /// number of line breaks if there is none.
+    fn break_within(&self, index: u32, depth: u16) -> u32 {
+        let count = self.input.line_break_count();
+        let near = index.saturating_add(NEAR_BREAKS).min(count);
+        (index..near)
+            .find(|&i| {
+                count_break_work();
+                self.input.line_break(i).depth() <= depth
+            })
+            .unwrap_or_else(|| {
+                self.break_search()
+                    .depths
+                    .first_at_most(near, u32::from(depth))
+                    .unwrap_or(count)
+            })
+    }
+
+    fn break_search(&self) -> &BreakSearch {
+        self.indented
+            .break_search
+            .get_or_init(|| BreakSearch::new(&self.input))
     }
 
     /// Like [`Parser::nth`], but when the cursor is at a `;` the layout implies and no
@@ -569,17 +611,23 @@ impl<'src> Parser<'src> {
     /// Make the first line start at or after token `from` the current one.
     pub(super) fn find_line_start(&mut self, from: usize) {
         let count = self.input.line_break_count();
-        let mut index = self.input.line_break_range(from).0;
-        let mut token = from;
-        while index < count {
-            let line_break = self.input.line_break(index);
-            let depth = line_break.depth();
+        let start = self.input.line_break_range(from).0;
+        // The first break no deeper than `unwound`: those before it are inside brackets.
+        let index = self.break_within(start, self.indented.unwound);
+        if index < count {
             // A closer with no opener in sight closes an unwound bracket too.
-            self.indented.unwound = self.indented.unwound.min(depth);
-            if depth == self.indented.unwound {
-                // The token the break comes before; lines are short, so walk to it.
+            self.indented.unwound = self.input.line_break(index).depth();
+            {
+                // The token the break comes before; lines are short, so walk to it, unless
+                // the break lies far ahead.
+                let mut token = from;
                 while self.input.line_break_range(token).1 <= index {
+                    count_break_work();
                     token += 1;
+                    if token - from > NEAR_TOKENS {
+                        token = self.input.line_break_owner(index);
+                        break;
+                    }
                 }
                 let (next, end) = self.input.line_break_range(token);
                 self.indented.line = Line {
@@ -592,7 +640,6 @@ impl<'src> Parser<'src> {
                 };
                 return;
             }
-            index += 1;
         }
         let len = self.input.len();
         let (_, end) = self.input.line_break_range(len);
@@ -657,6 +704,7 @@ impl<'src> Parser<'src> {
         {
             self.indented.line.end = self.input.line_break_range(line.index).1;
             self.indented.line_search = None;
+            self.indented.break_search = OnceCell::new();
         }
     }
 
@@ -674,12 +722,41 @@ impl<'src> Parser<'src> {
             return false;
         };
         let last = index - 1;
-        let variable = self.input.kind(last.wrapping_sub(1)) == SyntaxKind::DOLLAR
-            && self.input.trivia_before(last).is_empty();
         (last == name && header.name_continues)
             || (self.input.kind(last) == SyntaxKind::IDENT
-                && !variable
-                && header.end_words.contains(&self.token_text(last)))
+                && !self.is_variable_name(last)
+                && header.end_words.contains(&self.token_text(last))
+                && (!matches!(self.token_text(last), "and" | "or")
+                    || self.operand_before(header, last, name)))
+    }
+
+    /// Whether an operand ends right before the header token `index`, so that an `and` or
+    /// `or` there is an operator, not an operand of its own: `@if $a and` goes on below,
+    /// `@if and` and `@if not and` end with their operand.
+    fn operand_before(&self, header: &HeaderLines, index: usize, name: usize) -> bool {
+        let before = index - 1;
+        if before <= name {
+            return false;
+        }
+        match self.input.kind(before) {
+            SyntaxKind::IDENT => {
+                self.is_variable_name(before)
+                    || !header.end_words.contains(&self.token_text(before))
+            }
+            // A unit: `10%`.
+            SyntaxKind::PERCENT
+                if self.input.kind(before - 1) == SyntaxKind::NUMBER
+                    && self.input.trivia_before(before).is_empty() =>
+            {
+                true
+            }
+            kind => !OPERAND_STARTS_AFTER.contains(kind),
+        }
+    }
+
+    fn is_variable_name(&self, index: usize) -> bool {
+        self.input.kind(index.wrapping_sub(1)) == SyntaxKind::DOLLAR
+            && self.input.trivia_before(index).is_empty()
     }
 
     fn token_text(&self, index: usize) -> &'src str {
@@ -967,6 +1044,7 @@ impl<'src> Parser<'src> {
     fn find_line_at_or_before_column(&self, from: usize, column: u32) -> usize {
         let count = self.input.line_break_count();
         let mut index = self.input.line_break_range(from).0;
+        let mut lines = 0;
         while index < count {
             let token = self.input.line_break_owner(index);
             let (_, end) = self.input.line_break_range(token);
@@ -974,6 +1052,15 @@ impl<'src> Parser<'src> {
                 return token;
             }
             index = end;
+            lines += 1;
+            count_break_work();
+            if lines == NEAR_BREAKS {
+                return self
+                    .break_search()
+                    .line_columns
+                    .first_at_most(index, column)
+                    .map_or(self.input.len(), |last| self.input.line_break_owner(last));
+            }
         }
         self.input.len()
     }
@@ -984,5 +1071,127 @@ impl<'src> Parser<'src> {
             .iter()
             .filter_map(|bracket| bracket.sync)
             .min()
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Line breaks, lines and tokens the searches over line breaks walk on this thread,
+    /// and the searches [`BreakSearch`] answers.
+    pub(crate) static BREAK_WORK: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[inline]
+fn count_break_work() {
+    #[cfg(test)]
+    BREAK_WORK.set(BREAK_WORK.get() + 1);
+}
+
+/// How many line breaks, or lines, a search walks before it asks [`BreakSearch`] instead.
+const NEAR_BREAKS: u32 = 64;
+
+/// How many tokens [`Parser::find_line_start`] walks to the token a line break comes
+/// before, before it looks the token up.
+const NEAR_TOKENS: usize = 64;
+
+/// The searches over the input's line breaks that a run of brackets left unclosed would
+/// otherwise repeat over the same lines: each answered in `O(log n)`, so that the parse
+/// stays near-linear in the input however the brackets nest.
+struct BreakSearch {
+    /// Each line break's bracket depth.
+    depths: MinTree,
+    /// Each line's indentation, at the last of the line breaks before its first token;
+    /// the other breaks take no part.
+    line_columns: MinTree,
+}
+
+impl BreakSearch {
+    fn new(input: &crate::input::Input) -> Self {
+        let count = input.line_break_count();
+        let depths = MinTree::new((0..count).map(|i| u32::from(input.line_break(i).depth())));
+        let mut columns = vec![u32::MAX; count as usize];
+        for token in 0..=input.len() {
+            let (start, end) = input.line_break_range(token);
+            if end > start {
+                columns[end as usize - 1] = input.line_break(end - 1).column();
+            }
+        }
+        Self {
+            depths,
+            line_columns: MinTree::new(columns.into_iter()),
+        }
+    }
+}
+
+/// A minimum over a fixed sequence of keys, for the first key from an index on that is at
+/// most a bound.
+struct MinTree {
+    /// The number of leaves: a power of two, at least the number of keys.
+    leaves: usize,
+    /// Node `i` holds the minimum of nodes `2i` and `2i + 1`; the leaves start at `leaves`,
+    /// padded with `u32::MAX`.
+    nodes: Vec<u32>,
+}
+
+impl MinTree {
+    fn new(keys: impl ExactSizeIterator<Item = u32>) -> Self {
+        let leaves = keys.len().next_power_of_two();
+        let mut nodes = vec![u32::MAX; 2 * leaves];
+        for (i, key) in keys.enumerate() {
+            nodes[leaves + i] = key;
+        }
+        for i in (1..leaves).rev() {
+            nodes[i] = nodes[2 * i].min(nodes[2 * i + 1]);
+        }
+        Self { leaves, nodes }
+    }
+
+    /// The first index from `from` on whose key is at most `bound`.
+    fn first_at_most(&self, from: u32, bound: u32) -> Option<u32> {
+        count_break_work();
+        let from = from as usize;
+        if from >= self.leaves {
+            return None;
+        }
+        // Up from the leaf, to the first subtree right of it that holds such a key ...
+        let mut i = self.leaves + from;
+        while self.nodes[i] > bound {
+            while i & 1 == 1 {
+                i >>= 1;
+            }
+            if i == 0 {
+                return None;
+            }
+            i += 1;
+        }
+        // ... and down it, leftmost first.
+        while i < self.leaves {
+            i = if self.nodes[2 * i] <= bound {
+                2 * i
+            } else {
+                2 * i + 1
+            };
+        }
+        #[allow(clippy::cast_possible_truncation)]
+        Some((i - self.leaves) as u32)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MinTree;
+
+    #[test]
+    fn min_tree_finds_the_first_key_at_most_the_bound() {
+        let keys: [u32; 7] = [5, 3, 7, 1, 9, 2, 8];
+        let tree = MinTree::new(keys.iter().copied());
+        for from in 0..=8u32 {
+            for bound in 0..10 {
+                let expected = (from..7).find(|&i| keys[i as usize] <= bound);
+                let actual = tree.first_at_most(from, bound);
+                assert_eq!(actual, expected, "from {from}, bound {bound}");
+            }
+        }
+        assert_eq!(MinTree::new(std::iter::empty()).first_at_most(0, 0), None);
     }
 }

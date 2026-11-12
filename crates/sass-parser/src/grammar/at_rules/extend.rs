@@ -57,13 +57,18 @@ pub fn extend_rule(p: &mut Parser<'_>) {
         p.error("`@extend` does not support descendant combinators");
     }
 
-    // Optional !optional flag
+    // Optional !optional flag, joined to its `!` as Dart Sass requires: `! optional`, or
+    // `!` and `optional` on lines of their own, is one error right after the `!`.
     if p.at(BANG) {
         let fm = p.start();
         p.bump(); // !
-        if p.at(IDENT) && p.current_text() == "optional" {
+        if p.at(IDENT) && p.current_text() == "optional" && !p.has_whitespace_before() {
             p.bump();
             let _ = fm.complete(p, SASS_FLAG);
+        } else if p.at(IDENT) && p.current_text() == "optional" {
+            p.error_after_prev("expected `optional`");
+            p.bump();
+            let _ = fm.complete(p, ERROR);
         } else {
             p.error("expected `optional`");
             fm.abandon(p);

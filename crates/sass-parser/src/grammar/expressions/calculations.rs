@@ -96,6 +96,7 @@ fn calc_product(p: &mut Parser<'_>) -> bool {
 /// Returns whether it consumed a token: not at the nesting limit, nor where no value starts.
 fn calc_value(p: &mut Parser<'_>) -> bool {
     let Ok(mut g) = p.depth_guard() else {
+        super::skip_too_deep(p);
         return false;
     };
     let m = g.start();

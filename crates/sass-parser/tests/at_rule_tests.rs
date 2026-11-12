@@ -269,6 +269,273 @@ fn content_simple() {
 // ── @function / @return ─────────────────────────────────────────────────
 
 #[test]
+fn function_named_url_in_another_case() {
+    check(
+        "@function URL($a) { @return $a; }",
+        expect![[r#"
+        SOURCE_FILE@0..33
+          FUNCTION_RULE@0..33
+            AT@0..1 "@"
+            IDENT@1..9 "function"
+            WHITESPACE@9..10 " "
+            IDENT@10..13 "URL"
+            PARAM_LIST@13..17
+              LPAREN@13..14 "("
+              PARAM@14..16
+                DOLLAR@14..15 "$"
+                IDENT@15..16 "a"
+              RPAREN@16..17 ")"
+            BLOCK@17..33
+              WHITESPACE@17..18 " "
+              LBRACE@18..19 "{"
+              RETURN_RULE@19..31
+                WHITESPACE@19..20 " "
+                AT@20..21 "@"
+                IDENT@21..27 "return"
+                VARIABLE_REF@27..30
+                  WHITESPACE@27..28 " "
+                  DOLLAR@28..29 "$"
+                  IDENT@29..30 "a"
+                SEMICOLON@30..31 ";"
+              WHITESPACE@31..32 " "
+              RBRACE@32..33 "}"
+    "#]],
+    );
+}
+
+#[test]
+fn function_name_after_a_comment_is_no_url() {
+    check(
+        "@function /* c */ Url($a) { @return $a; }",
+        expect![[r#"
+        SOURCE_FILE@0..41
+          FUNCTION_RULE@0..41
+            AT@0..1 "@"
+            IDENT@1..9 "function"
+            WHITESPACE@9..10 " "
+            MULTI_LINE_COMMENT@10..17 "/* c */"
+            WHITESPACE@17..18 " "
+            IDENT@18..21 "Url"
+            PARAM_LIST@21..25
+              LPAREN@21..22 "("
+              PARAM@22..24
+                DOLLAR@22..23 "$"
+                IDENT@23..24 "a"
+              RPAREN@24..25 ")"
+            BLOCK@25..41
+              WHITESPACE@25..26 " "
+              LBRACE@26..27 "{"
+              RETURN_RULE@27..39
+                WHITESPACE@27..28 " "
+                AT@28..29 "@"
+                IDENT@29..35 "return"
+                VARIABLE_REF@35..38
+                  WHITESPACE@35..36 " "
+                  DOLLAR@36..37 "$"
+                  IDENT@37..38 "a"
+                SEMICOLON@38..39 ";"
+              WHITESPACE@39..40 " "
+              RBRACE@40..41 "}"
+    "#]],
+    );
+}
+
+#[test]
+fn function_named_url_is_one_error() {
+    check(
+        "@function url($a) { @return $a; } .c { d: e; }",
+        expect![[r#"
+        SOURCE_FILE@0..46
+          FUNCTION_RULE@0..33
+            AT@0..1 "@"
+            IDENT@1..9 "function"
+            WHITESPACE@9..10 " "
+            IDENT@10..13 "url"
+            PARAM_LIST@13..17
+              LPAREN@13..14 "("
+              PARAM@14..16
+                DOLLAR@14..15 "$"
+                IDENT@15..16 "a"
+              RPAREN@16..17 ")"
+            BLOCK@17..33
+              WHITESPACE@17..18 " "
+              LBRACE@18..19 "{"
+              RETURN_RULE@19..31
+                WHITESPACE@19..20 " "
+                AT@20..21 "@"
+                IDENT@21..27 "return"
+                VARIABLE_REF@27..30
+                  WHITESPACE@27..28 " "
+                  DOLLAR@28..29 "$"
+                  IDENT@29..30 "a"
+                SEMICOLON@30..31 ";"
+              WHITESPACE@31..32 " "
+              RBRACE@32..33 "}"
+          RULE_SET@33..46
+            SELECTOR_LIST@33..36
+              SELECTOR@33..36
+                SIMPLE_SELECTOR@33..36
+                  WHITESPACE@33..34 " "
+                  DOT@34..35 "."
+                  IDENT@35..36 "c"
+            BLOCK@36..46
+              WHITESPACE@36..37 " "
+              LBRACE@37..38 "{"
+              DECLARATION@38..44
+                PROPERTY@38..40
+                  WHITESPACE@38..39 " "
+                  IDENT@39..40 "d"
+                COLON@40..41 ":"
+                VALUE@41..43
+                  VALUE@41..43
+                    WHITESPACE@41..42 " "
+                    IDENT@42..43 "e"
+                SEMICOLON@43..44 ";"
+              WHITESPACE@44..45 " "
+              RBRACE@45..46 "}"
+        errors:
+          10..13: invalid function name
+    "#]],
+    );
+}
+
+#[test]
+fn function_named_and_is_one_error() {
+    check(
+        "@function and($a) { @return $a; }",
+        expect![[r#"
+        SOURCE_FILE@0..33
+          FUNCTION_RULE@0..33
+            AT@0..1 "@"
+            IDENT@1..9 "function"
+            WHITESPACE@9..10 " "
+            IDENT@10..13 "and"
+            PARAM_LIST@13..17
+              LPAREN@13..14 "("
+              PARAM@14..16
+                DOLLAR@14..15 "$"
+                IDENT@15..16 "a"
+              RPAREN@16..17 ")"
+            BLOCK@17..33
+              WHITESPACE@17..18 " "
+              LBRACE@18..19 "{"
+              RETURN_RULE@19..31
+                WHITESPACE@19..20 " "
+                AT@20..21 "@"
+                IDENT@21..27 "return"
+                VARIABLE_REF@27..30
+                  WHITESPACE@27..28 " "
+                  DOLLAR@28..29 "$"
+                  IDENT@29..30 "a"
+                SEMICOLON@30..31 ";"
+              WHITESPACE@31..32 " "
+              RBRACE@32..33 "}"
+        errors:
+          10..13: invalid function name
+    "#]],
+    );
+}
+
+#[test]
+fn function_named_type_is_one_error() {
+    check(
+        "@function type($a) { @return $a; }",
+        expect![[r#"
+        SOURCE_FILE@0..34
+          FUNCTION_RULE@0..34
+            AT@0..1 "@"
+            IDENT@1..9 "function"
+            WHITESPACE@9..10 " "
+            IDENT@10..14 "type"
+            PARAM_LIST@14..18
+              LPAREN@14..15 "("
+              PARAM@15..17
+                DOLLAR@15..16 "$"
+                IDENT@16..17 "a"
+              RPAREN@17..18 ")"
+            BLOCK@18..34
+              WHITESPACE@18..19 " "
+              LBRACE@19..20 "{"
+              RETURN_RULE@20..32
+                WHITESPACE@20..21 " "
+                AT@21..22 "@"
+                IDENT@22..28 "return"
+                VARIABLE_REF@28..31
+                  WHITESPACE@28..29 " "
+                  DOLLAR@29..30 "$"
+                  IDENT@30..31 "a"
+                SEMICOLON@31..32 ";"
+              WHITESPACE@32..33 " "
+              RBRACE@33..34 "}"
+        errors:
+          10..14: this name is reserved for the plain-CSS function
+    "#]],
+    );
+}
+
+#[test]
+fn url_after_function_rule_stays_url_contents() {
+    check(
+        "@function URL($a) { @return $a; } .c { d: URL(a b); }",
+        expect![[r#"
+        SOURCE_FILE@0..53
+          FUNCTION_RULE@0..33
+            AT@0..1 "@"
+            IDENT@1..9 "function"
+            WHITESPACE@9..10 " "
+            IDENT@10..13 "URL"
+            PARAM_LIST@13..17
+              LPAREN@13..14 "("
+              PARAM@14..16
+                DOLLAR@14..15 "$"
+                IDENT@15..16 "a"
+              RPAREN@16..17 ")"
+            BLOCK@17..33
+              WHITESPACE@17..18 " "
+              LBRACE@18..19 "{"
+              RETURN_RULE@19..31
+                WHITESPACE@19..20 " "
+                AT@20..21 "@"
+                IDENT@21..27 "return"
+                VARIABLE_REF@27..30
+                  WHITESPACE@27..28 " "
+                  DOLLAR@28..29 "$"
+                  IDENT@29..30 "a"
+                SEMICOLON@30..31 ";"
+              WHITESPACE@31..32 " "
+              RBRACE@32..33 "}"
+          RULE_SET@33..53
+            SELECTOR_LIST@33..36
+              SELECTOR@33..36
+                SIMPLE_SELECTOR@33..36
+                  WHITESPACE@33..34 " "
+                  DOT@34..35 "."
+                  IDENT@35..36 "c"
+            BLOCK@36..53
+              WHITESPACE@36..37 " "
+              LBRACE@37..38 "{"
+              DECLARATION@38..51
+                PROPERTY@38..40
+                  WHITESPACE@38..39 " "
+                  IDENT@39..40 "d"
+                COLON@40..41 ":"
+                VALUE@41..50
+                  SPECIAL_FUNCTION_CALL@41..50
+                    WHITESPACE@41..42 " "
+                    IDENT@42..45 "URL"
+                    LPAREN@45..46 "("
+                    URL_CONTENTS@46..47 "a"
+                    WHITESPACE@47..48 " "
+                    URL_CONTENTS@48..49 "b"
+                    RPAREN@49..50 ")"
+                SEMICOLON@50..51 ";"
+              WHITESPACE@51..52 " "
+              RBRACE@52..53 "}"
+    "#]],
+    );
+}
+
+#[test]
 fn function_rule() {
     check(
         "@function double($n) { @return $n * 2; }",
@@ -1183,12 +1450,14 @@ fn media_unclosed_paren_is_not_closed_by_a_call_below() {
                             NUMBER@51..52 "1"
                             IDENT@52..54 "px"
                         RPAREN@54..55 ")"
-                      RPAREN@55..56 ")"
+                      ERROR@55..56
+                        RPAREN@55..56 ")"
                   WHITESPACE@56..57 " "
                   RBRACE@57..58 "}"
               WHITESPACE@58..59 "\n"
             errors:
               10..11: expected RPAREN
+              55..56: expected SEMICOLON
         "#]],
     );
 }
@@ -1198,45 +1467,47 @@ fn media_paren_closed_inside_a_block_is_unclosed_at_the_block() {
     check(
         "@media (a {\n .b { c: d) }\n}\n",
         expect![[r#"
-        SOURCE_FILE@0..28
-          MEDIA_RULE@0..27
-            AT@0..1 "@"
-            IDENT@1..6 "media"
-            MEDIA_QUERY@6..9
-              WHITESPACE@6..7 " "
-              LPAREN@7..8 "("
-              IDENT@8..9 "a"
-            BLOCK@9..27
-              WHITESPACE@9..10 " "
-              LBRACE@10..11 "{"
-              RULE_SET@11..25
-                SELECTOR_LIST@11..15
-                  SELECTOR@11..15
-                    SIMPLE_SELECTOR@11..15
-                      WHITESPACE@11..13 "\n "
-                      DOT@13..14 "."
-                      IDENT@14..15 "b"
-                BLOCK@15..25
-                  WHITESPACE@15..16 " "
-                  LBRACE@16..17 "{"
-                  DECLARATION@17..23
-                    PROPERTY@17..19
-                      WHITESPACE@17..18 " "
-                      IDENT@18..19 "c"
-                    COLON@19..20 ":"
-                    VALUE@20..23
-                      VALUE@20..22
-                        WHITESPACE@20..21 " "
-                        IDENT@21..22 "d"
-                      RPAREN@22..23 ")"
-                  WHITESPACE@23..24 " "
-                  RBRACE@24..25 "}"
-              WHITESPACE@25..26 "\n"
-              RBRACE@26..27 "}"
-          WHITESPACE@27..28 "\n"
-        errors:
-          10..11: expected RPAREN
-    "#]],
+            SOURCE_FILE@0..28
+              MEDIA_RULE@0..27
+                AT@0..1 "@"
+                IDENT@1..6 "media"
+                MEDIA_QUERY@6..9
+                  WHITESPACE@6..7 " "
+                  LPAREN@7..8 "("
+                  IDENT@8..9 "a"
+                BLOCK@9..27
+                  WHITESPACE@9..10 " "
+                  LBRACE@10..11 "{"
+                  RULE_SET@11..25
+                    SELECTOR_LIST@11..15
+                      SELECTOR@11..15
+                        SIMPLE_SELECTOR@11..15
+                          WHITESPACE@11..13 "\n "
+                          DOT@13..14 "."
+                          IDENT@14..15 "b"
+                    BLOCK@15..25
+                      WHITESPACE@15..16 " "
+                      LBRACE@16..17 "{"
+                      DECLARATION@17..23
+                        PROPERTY@17..19
+                          WHITESPACE@17..18 " "
+                          IDENT@18..19 "c"
+                        COLON@19..20 ":"
+                        VALUE@20..23
+                          VALUE@20..22
+                            WHITESPACE@20..21 " "
+                            IDENT@21..22 "d"
+                          ERROR@22..23
+                            RPAREN@22..23 ")"
+                      WHITESPACE@23..24 " "
+                      RBRACE@24..25 "}"
+                  WHITESPACE@25..26 "\n"
+                  RBRACE@26..27 "}"
+              WHITESPACE@27..28 "\n"
+            errors:
+              10..11: expected RPAREN
+              22..23: expected SEMICOLON
+        "#]],
     );
 }
 
@@ -4904,6 +5175,195 @@ fn font_face_rule() {
     );
 }
 
+#[test]
+fn extend_optional_after_a_line_break_is_one_error() {
+    check(
+        ".a { @extend .b !\noptional; c: d; }",
+        expect![[r#"
+        SOURCE_FILE@0..35
+          RULE_SET@0..35
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            BLOCK@2..35
+              WHITESPACE@2..3 " "
+              LBRACE@3..4 "{"
+              EXTEND_RULE@4..27
+                WHITESPACE@4..5 " "
+                AT@5..6 "@"
+                IDENT@6..12 "extend"
+                WHITESPACE@12..13 " "
+                DOT@13..14 "."
+                IDENT@14..15 "b"
+                ERROR@15..26
+                  WHITESPACE@15..16 " "
+                  BANG@16..17 "!"
+                  WHITESPACE@17..18 "\n"
+                  IDENT@18..26 "optional"
+                SEMICOLON@26..27 ";"
+              DECLARATION@27..33
+                PROPERTY@27..29
+                  WHITESPACE@27..28 " "
+                  IDENT@28..29 "c"
+                COLON@29..30 ":"
+                VALUE@30..32
+                  VALUE@30..32
+                    WHITESPACE@30..31 " "
+                    IDENT@31..32 "d"
+                SEMICOLON@32..33 ";"
+              WHITESPACE@33..34 " "
+              RBRACE@34..35 "}"
+        errors:
+          17..17: expected `optional`
+    "#]],
+    );
+}
+
+#[test]
+fn extend_optional_after_a_space_is_one_error() {
+    check(
+        ".a { @extend .b ! optional; c: d; }",
+        expect![[r#"
+        SOURCE_FILE@0..35
+          RULE_SET@0..35
+            SELECTOR_LIST@0..2
+              SELECTOR@0..2
+                SIMPLE_SELECTOR@0..2
+                  DOT@0..1 "."
+                  IDENT@1..2 "a"
+            BLOCK@2..35
+              WHITESPACE@2..3 " "
+              LBRACE@3..4 "{"
+              EXTEND_RULE@4..27
+                WHITESPACE@4..5 " "
+                AT@5..6 "@"
+                IDENT@6..12 "extend"
+                WHITESPACE@12..13 " "
+                DOT@13..14 "."
+                IDENT@14..15 "b"
+                ERROR@15..26
+                  WHITESPACE@15..16 " "
+                  BANG@16..17 "!"
+                  WHITESPACE@17..18 " "
+                  IDENT@18..26 "optional"
+                SEMICOLON@26..27 ";"
+              DECLARATION@27..33
+                PROPERTY@27..29
+                  WHITESPACE@27..28 " "
+                  IDENT@28..29 "c"
+                COLON@29..30 ":"
+                VALUE@30..32
+                  VALUE@30..32
+                    WHITESPACE@30..31 " "
+                    IDENT@31..32 "d"
+                SEMICOLON@32..33 ";"
+              WHITESPACE@33..34 " "
+              RBRACE@34..35 "}"
+        errors:
+          17..17: expected `optional`
+    "#]],
+    );
+}
+
+#[test]
+fn for_missing_its_start_is_one_error() {
+    check(
+        "@for $i from { a { b: c; } }",
+        expect![[r#"
+        SOURCE_FILE@0..28
+          FOR_RULE@0..28
+            AT@0..1 "@"
+            IDENT@1..4 "for"
+            WHITESPACE@4..5 " "
+            DOLLAR@5..6 "$"
+            IDENT@6..7 "i"
+            WHITESPACE@7..8 " "
+            IDENT@8..12 "from"
+            BLOCK@12..28
+              WHITESPACE@12..13 " "
+              LBRACE@13..14 "{"
+              RULE_SET@14..26
+                SELECTOR_LIST@14..16
+                  SELECTOR@14..16
+                    SIMPLE_SELECTOR@14..16
+                      WHITESPACE@14..15 " "
+                      IDENT@15..16 "a"
+                BLOCK@16..26
+                  WHITESPACE@16..17 " "
+                  LBRACE@17..18 "{"
+                  DECLARATION@18..24
+                    PROPERTY@18..20
+                      WHITESPACE@18..19 " "
+                      IDENT@19..20 "b"
+                    COLON@20..21 ":"
+                    VALUE@21..23
+                      VALUE@21..23
+                        WHITESPACE@21..22 " "
+                        IDENT@22..23 "c"
+                    SEMICOLON@23..24 ";"
+                  WHITESPACE@24..25 " "
+                  RBRACE@25..26 "}"
+              WHITESPACE@26..27 " "
+              RBRACE@27..28 "}"
+        errors:
+          13..14: expected expression
+    "#]],
+    );
+}
+
+#[test]
+fn for_missing_its_end_is_one_error() {
+    check(
+        "@for $i from 1 to { a { b: c; } }",
+        expect![[r#"
+        SOURCE_FILE@0..33
+          FOR_RULE@0..33
+            AT@0..1 "@"
+            IDENT@1..4 "for"
+            WHITESPACE@4..5 " "
+            DOLLAR@5..6 "$"
+            IDENT@6..7 "i"
+            WHITESPACE@7..8 " "
+            IDENT@8..12 "from"
+            NUMBER_LITERAL@12..14
+              WHITESPACE@12..13 " "
+              NUMBER@13..14 "1"
+            WHITESPACE@14..15 " "
+            IDENT@15..17 "to"
+            BLOCK@17..33
+              WHITESPACE@17..18 " "
+              LBRACE@18..19 "{"
+              RULE_SET@19..31
+                SELECTOR_LIST@19..21
+                  SELECTOR@19..21
+                    SIMPLE_SELECTOR@19..21
+                      WHITESPACE@19..20 " "
+                      IDENT@20..21 "a"
+                BLOCK@21..31
+                  WHITESPACE@21..22 " "
+                  LBRACE@22..23 "{"
+                  DECLARATION@23..29
+                    PROPERTY@23..25
+                      WHITESPACE@23..24 " "
+                      IDENT@24..25 "b"
+                    COLON@25..26 ":"
+                    VALUE@26..28
+                      VALUE@26..28
+                        WHITESPACE@26..27 " "
+                        IDENT@27..28 "c"
+                    SEMICOLON@28..29 ";"
+                  WHITESPACE@29..30 " "
+                  RBRACE@30..31 "}"
+              WHITESPACE@31..32 " "
+              RBRACE@32..33 "}"
+        errors:
+          18..19: expected expression
+    "#]],
+    );
+}
+
 // ── @page ───────────────────────────────────────────────────────────────
 
 #[test]
@@ -4935,6 +5395,221 @@ fn page_rule() {
                   WHITESPACE@27..28 " "
                   RBRACE@28..29 "}"
         "#]],
+    );
+}
+
+#[test]
+fn page_rule_selector_list() {
+    check(
+        "@page toc, index:blank { margin: 1in; }",
+        expect![[r#"
+        SOURCE_FILE@0..39
+          PAGE_RULE@0..39
+            AT@0..1 "@"
+            IDENT@1..5 "page"
+            WHITESPACE@5..6 " "
+            IDENT@6..9 "toc"
+            COMMA@9..10 ","
+            WHITESPACE@10..11 " "
+            IDENT@11..16 "index"
+            COLON@16..17 ":"
+            IDENT@17..22 "blank"
+            BLOCK@22..39
+              WHITESPACE@22..23 " "
+              LBRACE@23..24 "{"
+              DECLARATION@24..37
+                PROPERTY@24..31
+                  WHITESPACE@24..25 " "
+                  IDENT@25..31 "margin"
+                COLON@31..32 ":"
+                VALUE@32..36
+                  DIMENSION@32..36
+                    WHITESPACE@32..33 " "
+                    NUMBER@33..34 "1"
+                    IDENT@34..36 "in"
+                SEMICOLON@36..37 ";"
+              WHITESPACE@37..38 " "
+              RBRACE@38..39 "}"
+    "#]],
+    );
+}
+
+#[test]
+fn page_rule_pseudo_page_list() {
+    check(
+        "@page :left, :right { }",
+        expect![[r#"
+        SOURCE_FILE@0..23
+          PAGE_RULE@0..23
+            AT@0..1 "@"
+            IDENT@1..5 "page"
+            WHITESPACE@5..6 " "
+            COLON@6..7 ":"
+            IDENT@7..11 "left"
+            COMMA@11..12 ","
+            WHITESPACE@12..13 " "
+            COLON@13..14 ":"
+            IDENT@14..19 "right"
+            BLOCK@19..23
+              WHITESPACE@19..20 " "
+              LBRACE@20..21 "{"
+              WHITESPACE@21..22 " "
+              RBRACE@22..23 "}"
+    "#]],
+    );
+}
+
+#[test]
+fn page_rule_chained_pseudo_pages() {
+    check(
+        "@page a:first:blank { }",
+        expect![[r#"
+        SOURCE_FILE@0..23
+          PAGE_RULE@0..23
+            AT@0..1 "@"
+            IDENT@1..5 "page"
+            WHITESPACE@5..6 " "
+            IDENT@6..7 "a"
+            COLON@7..8 ":"
+            IDENT@8..13 "first"
+            COLON@13..14 ":"
+            IDENT@14..19 "blank"
+            BLOCK@19..23
+              WHITESPACE@19..20 " "
+              LBRACE@20..21 "{"
+              WHITESPACE@21..22 " "
+              RBRACE@22..23 "}"
+    "#]],
+    );
+}
+
+#[test]
+fn page_rule_interpolated_name() {
+    check(
+        "@page #{$n}:first, x-y { }",
+        expect![[r##"
+        SOURCE_FILE@0..26
+          PAGE_RULE@0..26
+            AT@0..1 "@"
+            IDENT@1..5 "page"
+            INTERPOLATION@5..11
+              WHITESPACE@5..6 " "
+              HASH_LBRACE@6..8 "#{"
+              VARIABLE_REF@8..10
+                DOLLAR@8..9 "$"
+                IDENT@9..10 "n"
+              RBRACE@10..11 "}"
+            COLON@11..12 ":"
+            IDENT@12..17 "first"
+            COMMA@17..18 ","
+            WHITESPACE@18..19 " "
+            IDENT@19..22 "x-y"
+            BLOCK@22..26
+              WHITESPACE@22..23 " "
+              LBRACE@23..24 "{"
+              WHITESPACE@24..25 " "
+              RBRACE@25..26 "}"
+    "##]],
+    );
+}
+
+#[test]
+fn page_rule_any_prelude_tokens() {
+    check(
+        "@page a + b { }",
+        expect![[r#"
+        SOURCE_FILE@0..15
+          PAGE_RULE@0..15
+            AT@0..1 "@"
+            IDENT@1..5 "page"
+            WHITESPACE@5..6 " "
+            IDENT@6..7 "a"
+            WHITESPACE@7..8 " "
+            PLUS@8..9 "+"
+            WHITESPACE@9..10 " "
+            IDENT@10..11 "b"
+            BLOCK@11..15
+              WHITESPACE@11..12 " "
+              LBRACE@12..13 "{"
+              WHITESPACE@13..14 " "
+              RBRACE@14..15 "}"
+    "#]],
+    );
+}
+
+#[test]
+fn page_rule_statement_form() {
+    check(
+        "@page a; .c { }",
+        expect![[r#"
+        SOURCE_FILE@0..15
+          PAGE_RULE@0..8
+            AT@0..1 "@"
+            IDENT@1..5 "page"
+            WHITESPACE@5..6 " "
+            IDENT@6..7 "a"
+            SEMICOLON@7..8 ";"
+          RULE_SET@8..15
+            SELECTOR_LIST@8..11
+              SELECTOR@8..11
+                SIMPLE_SELECTOR@8..11
+                  WHITESPACE@8..9 " "
+                  DOT@9..10 "."
+                  IDENT@10..11 "c"
+            BLOCK@11..15
+              WHITESPACE@11..12 " "
+              LBRACE@12..13 "{"
+              WHITESPACE@13..14 " "
+              RBRACE@14..15 "}"
+    "#]],
+    );
+}
+
+#[test]
+fn page_rule_unclosed_block_stays_local() {
+    check(
+        "@page a { b: c\n.d { e: f }",
+        expect![[r#"
+        SOURCE_FILE@0..26
+          PAGE_RULE@0..26
+            AT@0..1 "@"
+            IDENT@1..5 "page"
+            WHITESPACE@5..6 " "
+            IDENT@6..7 "a"
+            BLOCK@7..26
+              WHITESPACE@7..8 " "
+              LBRACE@8..9 "{"
+              NESTED_PROPERTY@9..26
+                PROPERTY@9..11
+                  WHITESPACE@9..10 " "
+                  IDENT@10..11 "b"
+                COLON@11..12 ":"
+                VALUE@12..17
+                  VALUE@12..14
+                    WHITESPACE@12..13 " "
+                    IDENT@13..14 "c"
+                  ERROR@14..17
+                    WHITESPACE@14..15 "\n"
+                    DOT@15..16 "."
+                    IDENT@16..17 "d"
+                BLOCK@17..26
+                  WHITESPACE@17..18 " "
+                  LBRACE@18..19 "{"
+                  DECLARATION@19..24
+                    PROPERTY@19..21
+                      WHITESPACE@19..20 " "
+                      IDENT@20..21 "e"
+                    COLON@21..22 ":"
+                    VALUE@22..24
+                      VALUE@22..24
+                        WHITESPACE@22..23 " "
+                        IDENT@23..24 "f"
+                  WHITESPACE@24..25 " "
+                  RBRACE@25..26 "}"
+        errors:
+          15..16: expected digit
+          26..26: expected RBRACE
+    "#]],
     );
 }
 
@@ -7405,5 +8080,338 @@ fn at_root_query_quoted_string() {
                   WHITESPACE@40..41 " "
                   RBRACE@41..42 "}"
         "#]],
+    );
+}
+
+// ── Recovery inside a bracket ───────────────────────────────────────────
+
+#[test]
+fn use_with_namespaced_variable_is_one_error_through_the_paren() {
+    // Dart Sass: `expected "$"`.
+    check(
+        "@use \"other\" with (a.$b: c);\na { b: c }\n",
+        expect![[r#"
+            SOURCE_FILE@0..40
+              USE_RULE@0..28
+                AT@0..1 "@"
+                IDENT@1..4 "use"
+                WHITESPACE@4..5 " "
+                QUOTED_STRING@5..12 "\"other\""
+                WHITESPACE@12..13 " "
+                IDENT@13..17 "with"
+                WHITESPACE@17..18 " "
+                LPAREN@18..19 "("
+                ERROR@19..26
+                  IDENT@19..20 "a"
+                  DOT@20..21 "."
+                  DOLLAR@21..22 "$"
+                  IDENT@22..23 "b"
+                  COLON@23..24 ":"
+                  WHITESPACE@24..25 " "
+                  IDENT@25..26 "c"
+                RPAREN@26..27 ")"
+                SEMICOLON@27..28 ";"
+              RULE_SET@28..39
+                SELECTOR_LIST@28..30
+                  SELECTOR@28..30
+                    SIMPLE_SELECTOR@28..30
+                      WHITESPACE@28..29 "\n"
+                      IDENT@29..30 "a"
+                BLOCK@30..39
+                  WHITESPACE@30..31 " "
+                  LBRACE@31..32 "{"
+                  DECLARATION@32..37
+                    PROPERTY@32..34
+                      WHITESPACE@32..33 " "
+                      IDENT@33..34 "b"
+                    COLON@34..35 ":"
+                    VALUE@35..37
+                      VALUE@35..37
+                        WHITESPACE@35..36 " "
+                        IDENT@36..37 "c"
+                  WHITESPACE@37..38 " "
+                  RBRACE@38..39 "}"
+              WHITESPACE@39..40 "\n"
+            errors:
+              19..20: expected DOLLAR
+        "#]],
+    );
+}
+
+#[test]
+fn use_with_double_comma_is_one_error() {
+    // Dart Sass: `expected ")"`.
+    check(
+        "@use \"other\" with ($a: b,,);\n",
+        expect![[r#"
+        SOURCE_FILE@0..29
+          USE_RULE@0..28
+            AT@0..1 "@"
+            IDENT@1..4 "use"
+            WHITESPACE@4..5 " "
+            QUOTED_STRING@5..12 "\"other\""
+            WHITESPACE@12..13 " "
+            IDENT@13..17 "with"
+            WHITESPACE@17..18 " "
+            LPAREN@18..19 "("
+            DOLLAR@19..20 "$"
+            IDENT@20..21 "a"
+            COLON@21..22 ":"
+            VALUE@22..24
+              WHITESPACE@22..23 " "
+              IDENT@23..24 "b"
+            COMMA@24..25 ","
+            COMMA@25..26 ","
+            RPAREN@26..27 ")"
+            SEMICOLON@27..28 ";"
+          WHITESPACE@28..29 "\n"
+        errors:
+          25..26: expected DOLLAR
+    "#]],
+    );
+}
+
+#[test]
+fn forward_with_namespaced_variable_keeps_the_next_entry() {
+    check(
+        "@forward \"other\" with (a.$b: c !default, $d: e);\n$f: g;\n",
+        expect![[r#"
+            SOURCE_FILE@0..56
+              FORWARD_RULE@0..48
+                AT@0..1 "@"
+                IDENT@1..8 "forward"
+                WHITESPACE@8..9 " "
+                QUOTED_STRING@9..16 "\"other\""
+                WHITESPACE@16..17 " "
+                IDENT@17..21 "with"
+                WHITESPACE@21..22 " "
+                LPAREN@22..23 "("
+                ERROR@23..39
+                  IDENT@23..24 "a"
+                  DOT@24..25 "."
+                  DOLLAR@25..26 "$"
+                  IDENT@26..27 "b"
+                  COLON@27..28 ":"
+                  WHITESPACE@28..29 " "
+                  IDENT@29..30 "c"
+                  WHITESPACE@30..31 " "
+                  BANG@31..32 "!"
+                  IDENT@32..39 "default"
+                COMMA@39..40 ","
+                WHITESPACE@40..41 " "
+                DOLLAR@41..42 "$"
+                IDENT@42..43 "d"
+                COLON@43..44 ":"
+                VALUE@44..46
+                  WHITESPACE@44..45 " "
+                  IDENT@45..46 "e"
+                RPAREN@46..47 ")"
+                SEMICOLON@47..48 ";"
+              VARIABLE_DECL@48..55
+                WHITESPACE@48..49 "\n"
+                DOLLAR@49..50 "$"
+                IDENT@50..51 "f"
+                COLON@51..52 ":"
+                VALUE@52..54
+                  WHITESPACE@52..53 " "
+                  IDENT@53..54 "g"
+                SEMICOLON@54..55 ";"
+              WHITESPACE@55..56 "\n"
+            errors:
+              23..24: expected DOLLAR
+        "#]],
+    );
+}
+
+#[test]
+fn param_without_dollar_is_one_error_and_keeps_the_body() {
+    check(
+        "@mixin m(a.$b, $c) { d: e; }\n",
+        expect![[r#"
+        SOURCE_FILE@0..29
+          MIXIN_RULE@0..28
+            AT@0..1 "@"
+            IDENT@1..6 "mixin"
+            WHITESPACE@6..7 " "
+            IDENT@7..8 "m"
+            PARAM_LIST@8..18
+              LPAREN@8..9 "("
+              PARAM@9..13
+                ERROR@9..13
+                  IDENT@9..10 "a"
+                  DOT@10..11 "."
+                  DOLLAR@11..12 "$"
+                  IDENT@12..13 "b"
+              COMMA@13..14 ","
+              PARAM@14..17
+                WHITESPACE@14..15 " "
+                DOLLAR@15..16 "$"
+                IDENT@16..17 "c"
+              RPAREN@17..18 ")"
+            BLOCK@18..28
+              WHITESPACE@18..19 " "
+              LBRACE@19..20 "{"
+              DECLARATION@20..26
+                PROPERTY@20..22
+                  WHITESPACE@20..21 " "
+                  IDENT@21..22 "d"
+                COLON@22..23 ":"
+                VALUE@23..25
+                  VALUE@23..25
+                    WHITESPACE@23..24 " "
+                    IDENT@24..25 "e"
+                SEMICOLON@25..26 ";"
+              WHITESPACE@26..27 " "
+              RBRACE@27..28 "}"
+          WHITESPACE@28..29 "\n"
+        errors:
+          9..10: expected DOLLAR
+    "#]],
+    );
+}
+
+#[test]
+fn include_using_without_parens_is_one_error_and_keeps_the_block() {
+    // Dart Sass: `expected "("`.
+    check(
+        "@include m using $a { b: $a; }\nc { d: e }\n",
+        expect![[r#"
+            SOURCE_FILE@0..42
+              INCLUDE_RULE@0..30
+                AT@0..1 "@"
+                IDENT@1..8 "include"
+                WHITESPACE@8..9 " "
+                IDENT@9..10 "m"
+                WHITESPACE@10..11 " "
+                IDENT@11..16 "using"
+                ERROR@16..19
+                  WHITESPACE@16..17 " "
+                  DOLLAR@17..18 "$"
+                  IDENT@18..19 "a"
+                BLOCK@19..30
+                  WHITESPACE@19..20 " "
+                  LBRACE@20..21 "{"
+                  DECLARATION@21..28
+                    PROPERTY@21..23
+                      WHITESPACE@21..22 " "
+                      IDENT@22..23 "b"
+                    COLON@23..24 ":"
+                    VALUE@24..27
+                      VARIABLE_REF@24..27
+                        WHITESPACE@24..25 " "
+                        DOLLAR@25..26 "$"
+                        IDENT@26..27 "a"
+                    SEMICOLON@27..28 ";"
+                  WHITESPACE@28..29 " "
+                  RBRACE@29..30 "}"
+              RULE_SET@30..41
+                SELECTOR_LIST@30..32
+                  SELECTOR@30..32
+                    SIMPLE_SELECTOR@30..32
+                      WHITESPACE@30..31 "\n"
+                      IDENT@31..32 "c"
+                BLOCK@32..41
+                  WHITESPACE@32..33 " "
+                  LBRACE@33..34 "{"
+                  DECLARATION@34..39
+                    PROPERTY@34..36
+                      WHITESPACE@34..35 " "
+                      IDENT@35..36 "d"
+                    COLON@36..37 ":"
+                    VALUE@37..39
+                      VALUE@37..39
+                        WHITESPACE@37..38 " "
+                        IDENT@38..39 "e"
+                  WHITESPACE@39..40 " "
+                  RBRACE@40..41 "}"
+              WHITESPACE@41..42 "\n"
+            errors:
+              17..18: expected `(`
+        "#]],
+    );
+}
+
+#[test]
+fn forward_as_without_a_prefix_is_one_error_up_to_the_next_clause() {
+    // Dart Sass: `Expected identifier.`
+    check(
+        "@forward \"a\" as 1-* show b;\n$c: d;\n",
+        expect![[r#"
+        SOURCE_FILE@0..35
+          FORWARD_RULE@0..27
+            AT@0..1 "@"
+            IDENT@1..8 "forward"
+            WHITESPACE@8..9 " "
+            QUOTED_STRING@9..12 "\"a\""
+            WHITESPACE@12..13 " "
+            IDENT@13..15 "as"
+            ERROR@15..19
+              WHITESPACE@15..16 " "
+              NUMBER@16..17 "1"
+              MINUS@17..18 "-"
+              STAR@18..19 "*"
+            WHITESPACE@19..20 " "
+            IDENT@20..24 "show"
+            WHITESPACE@24..25 " "
+            IDENT@25..26 "b"
+            SEMICOLON@26..27 ";"
+          VARIABLE_DECL@27..34
+            WHITESPACE@27..28 "\n"
+            DOLLAR@28..29 "$"
+            IDENT@29..30 "c"
+            COLON@30..31 ":"
+            VALUE@31..33
+              WHITESPACE@31..32 " "
+              IDENT@32..33 "d"
+            SEMICOLON@33..34 ";"
+          WHITESPACE@34..35 "\n"
+        errors:
+          16..17: expected IDENT
+    "#]],
+    );
+}
+
+#[test]
+fn use_as_without_a_namespace_is_one_error() {
+    // Dart Sass: `Expected identifier.`
+    check(
+        "@use \"a\" as 1 with ($b: c);\n$d: e;\n",
+        expect![[r#"
+        SOURCE_FILE@0..35
+          USE_RULE@0..27
+            AT@0..1 "@"
+            IDENT@1..4 "use"
+            WHITESPACE@4..5 " "
+            QUOTED_STRING@5..8 "\"a\""
+            WHITESPACE@8..9 " "
+            IDENT@9..11 "as"
+            ERROR@11..13
+              WHITESPACE@11..12 " "
+              NUMBER@12..13 "1"
+            WHITESPACE@13..14 " "
+            IDENT@14..18 "with"
+            WHITESPACE@18..19 " "
+            LPAREN@19..20 "("
+            DOLLAR@20..21 "$"
+            IDENT@21..22 "b"
+            COLON@22..23 ":"
+            VALUE@23..25
+              WHITESPACE@23..24 " "
+              IDENT@24..25 "c"
+            RPAREN@25..26 ")"
+            SEMICOLON@26..27 ";"
+          VARIABLE_DECL@27..34
+            WHITESPACE@27..28 "\n"
+            DOLLAR@28..29 "$"
+            IDENT@29..30 "d"
+            COLON@30..31 ":"
+            VALUE@31..33
+              WHITESPACE@31..32 " "
+              IDENT@32..33 "e"
+            SEMICOLON@33..34 ";"
+          WHITESPACE@34..35 "\n"
+        errors:
+          12..13: expected IDENT
+    "#]],
     );
 }

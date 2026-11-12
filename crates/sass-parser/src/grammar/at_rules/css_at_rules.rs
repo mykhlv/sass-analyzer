@@ -169,13 +169,14 @@ pub fn page_rule(p: &mut Parser<'_>) {
     p.bump(); // @
     p.bump(); // page
 
-    // Optional pseudo-page selector: `:first`, `:left`, `:right`, `:blank`
-    while p.at(COLON) || p.at(IDENT) {
-        p.bump();
-    }
+    // Dart Sass reads the page selector list as an opaque value: `toc, index:blank`,
+    // `:left, :right`, `#{$name}:first`.
+    super::eat_opaque_condition(p, BLOCK_STOP, false);
 
     if p.at(LBRACE) {
         super::block(p);
+    } else if !p.at(RBRACE) && !p.at_end() {
+        p.expect(SEMICOLON);
     }
     let _ = m.complete(p, PAGE_RULE);
 }

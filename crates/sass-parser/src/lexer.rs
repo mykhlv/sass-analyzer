@@ -60,13 +60,24 @@ impl DocumentPrelude {
     }
 }
 
+/// What the last token leaves the next identifier to name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum After {
+    #[default]
+    Other,
+    /// An `@`: the identifier names an at-rule.
+    At,
+    /// `@function`, with only whitespace and comments after it: the identifier names the
+    /// function, `URL(` included, and opens no URL contents.
+    FunctionKeyword,
+}
+
 pub struct Lexer<'src> {
     input: &'src str,
     pos: usize,
     context_stack: Vec<LexContext>,
     pending_url_context: bool,
-    /// The last token was an `@`, so an identifier now names an at-rule.
-    after_at: bool,
+    after: After,
     document_prelude: Option<DocumentPrelude>,
     /// A string left unclosed has just ended the strings, interpolations and `url(` it
     /// was nested in; see [`Lexer::take_unwound`].
@@ -80,7 +91,7 @@ impl<'src> Lexer<'src> {
             pos: 0,
             context_stack: Vec::new(),
             pending_url_context: false,
-            after_at: false,
+            after: After::Other,
             document_prelude: None,
             unwound: false,
         }
@@ -115,7 +126,7 @@ impl<'src> Lexer<'src> {
 
         let start = self.pos;
         let b = self.bump();
-        let after_at = std::mem::take(&mut self.after_at);
+        let after = std::mem::take(&mut self.after);
 
         let kind = match b {
             // ── Whitespace ─────────────────────────────────────────
@@ -144,12 +155,16 @@ impl<'src> Lexer<'src> {
             // ── Identifiers ────────────────────────────────────────
             b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
                 self.lex_ident();
-                if after_at {
-                    self.document_prelude = DocumentPrelude::of_rule(&self.input[start..self.pos]);
+                if after == After::At {
+                    let name = &self.input[start..self.pos];
+                    self.document_prelude = DocumentPrelude::of_rule(name);
+                    if name == "function" {
+                        self.after = After::FunctionKeyword;
+                    }
                 }
                 if self.is_unicode_range_start(start) {
                     self.lex_unicode_range()
-                } else if self.is_url_start(start) {
+                } else if after != After::FunctionKeyword && self.is_url_start(start) {
                     self.pending_url_context = true;
                     SyntaxKind::IDENT
                 } else {
@@ -158,7 +173,7 @@ impl<'src> Lexer<'src> {
             }
             b'-' if self.is_ident_start_after_hyphen() => {
                 self.lex_ident();
-                if after_at {
+                if after == After::At {
                     self.document_prelude = DocumentPrelude::of_rule(&self.input[start..self.pos]);
                 }
                 SyntaxKind::IDENT
@@ -268,7 +283,7 @@ impl<'src> Lexer<'src> {
             b'~' => SyntaxKind::TILDE,
             b'|' => SyntaxKind::PIPE,
             b'@' => {
-                self.after_at = true;
+                self.after = After::At;
                 SyntaxKind::AT
             }
             b'$' => SyntaxKind::DOLLAR,
@@ -297,6 +312,9 @@ impl<'src> Lexer<'src> {
             _ => SyntaxKind::ERROR,
         };
 
+        if kind.is_trivia() && after == After::FunctionKeyword {
+            self.after = after;
+        }
         (kind, &self.input[start..self.pos])
     }
 

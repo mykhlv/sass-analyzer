@@ -1449,3 +1449,119 @@ fn indented_property_hack_with_a_pseudo_like_value_is_a_selector() {
     "#]],
     );
 }
+
+// ── Skipped tokens holding an operator ──────────────────────────────────
+
+#[test]
+fn skip_to_block_over_a_string_with_a_binary_operator() {
+    check(
+        r##".a ) "#{$b + 1}" {}"##,
+        expect![[r##"
+            SOURCE_FILE@0..19
+              RULE_SET@0..19
+                SELECTOR_LIST@0..2
+                  SELECTOR@0..2
+                    SIMPLE_SELECTOR@0..2
+                      DOT@0..1 "."
+                      IDENT@1..2 "a"
+                ERROR@2..16
+                  WHITESPACE@2..3 " "
+                  RPAREN@3..4 ")"
+                  INTERPOLATED_STRING@4..16
+                    WHITESPACE@4..5 " "
+                    STRING_START@5..6 "\""
+                    INTERPOLATION@6..15
+                      HASH_LBRACE@6..8 "#{"
+                      BINARY_EXPR@8..14
+                        VARIABLE_REF@8..10
+                          DOLLAR@8..9 "$"
+                          IDENT@9..10 "b"
+                        WHITESPACE@10..11 " "
+                        PLUS@11..12 "+"
+                        NUMBER_LITERAL@12..14
+                          WHITESPACE@12..13 " "
+                          NUMBER@13..14 "1"
+                      RBRACE@14..15 "}"
+                    STRING_END@15..16 "\""
+                BLOCK@16..19
+                  WHITESPACE@16..17 " "
+                  LBRACE@17..18 "{"
+                  RBRACE@18..19 "}"
+            errors:
+              3..4: expected `{`
+        "##]],
+    );
+}
+
+#[test]
+fn skip_to_query_block_over_a_string_with_a_binary_operator() {
+    check(
+        r##"@media (a) x "#{$b + 1}" {}"##,
+        expect![[r##"
+            SOURCE_FILE@0..27
+              MEDIA_RULE@0..27
+                AT@0..1 "@"
+                IDENT@1..6 "media"
+                MEDIA_QUERY@6..10
+                  WHITESPACE@6..7 " "
+                  LPAREN@7..8 "("
+                  IDENT@8..9 "a"
+                  RPAREN@9..10 ")"
+                ERROR@10..24
+                  WHITESPACE@10..11 " "
+                  IDENT@11..12 "x"
+                  INTERPOLATED_STRING@12..24
+                    WHITESPACE@12..13 " "
+                    STRING_START@13..14 "\""
+                    INTERPOLATION@14..23
+                      HASH_LBRACE@14..16 "#{"
+                      BINARY_EXPR@16..22
+                        VARIABLE_REF@16..18
+                          DOLLAR@16..17 "$"
+                          IDENT@17..18 "b"
+                        WHITESPACE@18..19 " "
+                        PLUS@19..20 "+"
+                        NUMBER_LITERAL@20..22
+                          WHITESPACE@20..21 " "
+                          NUMBER@21..22 "1"
+                      RBRACE@22..23 "}"
+                    STRING_END@23..24 "\""
+                BLOCK@24..27
+                  WHITESPACE@24..25 " "
+                  LBRACE@25..26 "{"
+                  RBRACE@26..27 "}"
+            errors:
+              11..12: expected `{`
+        "##]],
+    );
+}
+
+#[test]
+fn skip_to_block_over_an_unclosed_string_with_a_dangling_operator() {
+    check(
+        r##":"#{i%"##,
+        expect![[r##"
+            SOURCE_FILE@0..6
+              RULE_SET@0..6
+                SELECTOR_LIST@0..1
+                  SELECTOR@0..1
+                    PSEUDO_SELECTOR@0..1
+                      COLON@0..1 ":"
+                ERROR@1..6
+                  INTERPOLATED_STRING@1..6
+                    STRING_START@1..2 "\""
+                    INTERPOLATION@2..6
+                      HASH_LBRACE@2..4 "#{"
+                      BINARY_EXPR@4..6
+                        VALUE@4..5
+                          IDENT@4..5 "i"
+                        PERCENT@5..6 "%"
+            errors:
+              1..2: expected IDENT
+              1..2: expected `{`
+              6..6: expected expression
+              6..6: expected RBRACE
+              6..6: unterminated interpolated string
+        "##]],
+    );
+}

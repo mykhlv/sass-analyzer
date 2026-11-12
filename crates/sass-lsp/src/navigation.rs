@@ -232,12 +232,21 @@ fn try_goto_import(
         return None;
     }
     let spec = sass_parser::ast::unquote(token.text());
-    let target_uri = module_graph.resolve_import(uri, spec)?;
+    let target_uri = module_graph.resolve_import(uri, spec, import_kind(parent.kind()))?;
     let range = tower_lsp_server::ls_types::Range::default();
     Some(GotoDefinitionResponse::Scalar(Location {
         uri: target_uri,
         range,
     }))
+}
+
+fn import_kind(rule: SyntaxKind) -> sass_parser::imports::ImportKind {
+    use sass_parser::imports::ImportKind;
+    match rule {
+        SyntaxKind::IMPORT_RULE => ImportKind::Import,
+        SyntaxKind::FORWARD_RULE => ImportKind::Forward,
+        _ => ImportKind::Use,
+    }
 }
 
 pub(crate) fn handle_document_link(
@@ -271,7 +280,7 @@ pub(crate) fn handle_document_link(
 
         let spec = sass_parser::ast::unquote(string_token.text());
 
-        let Some(target_uri) = module_graph.resolve_import(&uri, spec) else {
+        let Some(target_uri) = module_graph.resolve_import(&uri, spec, import_kind(kind)) else {
             continue;
         };
 
